@@ -27,8 +27,15 @@ import AssignInchargesModule from './components/cms/AssignInchargesModule';
 import LandingPage from './components/landing/LandingPage';
 import { Sliders } from 'lucide-react';
 import { CommandRole, RoleType, UserSession } from './types';
-import { clearAuthToken, getAuthToken, setAuthToken } from './lib/authStorage';
-import { getMockSessionForRole } from './lib/api';
+import {
+  clearAuthToken,
+  getAuthToken,
+  setAuthToken,
+  getOrCreateDeviceId,
+  getDeviceToken,
+  clearDeviceToken,
+} from './lib/authStorage';
+import { authenticateDeviceSession } from './lib/api';
 import { useCms } from './context/CmsContext';
 
 const ROUTE_BY_ROLE: Record<RoleType, string> = {
@@ -115,10 +122,11 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     }
   }, [isPartyCreated, currentPath, activeSession]);
 
-  // Validate & re-hydrate user session from backend on mount
+  // Validate & re-hydrate user session from backend on mount (including Zomato/Uber style device auto-login)
   useEffect(() => {
     let isMounted = true;
     async function checkCurrentSession() {
+      // 1. Try restoring via existing auth cookie / access token
       try {
         const user = await import('./lib/api').then((m) => m.fetchCurrentUser());
         if (isMounted && user) {
@@ -138,9 +146,36 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
           };
           setActiveSession(restoredSession);
           localStorage.setItem('kdp_active_session', JSON.stringify(restoredSession));
+          return;
         }
       } catch {
-        // Not logged in or expired session
+        // Access token invalid or expired, check device session
+      }
+
+      // 2. Persistent Device Authorization (Zero OTP prompts on authorized devices)
+      const deviceId = getOrCreateDeviceId();
+      const deviceToken = getDeviceToken();
+      const isExplicitlyLoggedOut = localStorage.getItem('kdp_logged_out') === 'true';
+
+      if (deviceId && deviceToken && !isExplicitlyLoggedOut) {
+        try {
+          const result = await authenticateDeviceSession(deviceId, deviceToken);
+          if (isMounted && result?.session) {
+            setAuthToken(result.token);
+            setActiveSession(result.session);
+            localStorage.setItem('kdp_active_session', JSON.stringify(result.session));
+            return;
+          }
+        } catch (deviceErr: any) {
+          // Device revoked or unauthorized by admin: force fresh OTP verification
+          clearDeviceToken();
+          clearAuthToken();
+          if (isMounted) {
+            setActiveSession(null);
+            localStorage.removeItem('kdp_active_session');
+          }
+        }
+      } else {
         if (isMounted && !localStorage.getItem('kdp_active_session')) {
           setActiveSession(null);
         }
@@ -176,14 +211,17 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     return null;
   }, [currentPath]);
 
-  // If user navigates directly to a role URL, ensure they have the matching session ready
+  // Enforce session check on protected role routes:
+  // If user navigates to a role route without a valid session, redirect to login flow (/roles)
   useEffect(() => {
-    if (currentRouteRole && (!activeSession || activeSession.role !== currentRouteRole)) {
-      const mockSession = getMockSessionForRole(currentRouteRole);
-      setActiveSession(mockSession);
-      setAuthToken(`demo-token-${currentRouteRole}`);
+    if (currentRouteRole) {
+      if (!activeSession) {
+        window.location.hash = '/roles';
+      } else if (activeSession.role !== currentRouteRole) {
+        window.location.hash = ROUTE_BY_ROLE[activeSession.role] || '/roles';
+      }
     }
-  }, [currentRouteRole]);
+  }, [currentRouteRole, activeSession]);
 
   const isLandingRoute = currentPath === '/' || currentPath === '' || currentPath === '/landing';
   const isRolesRoute = currentPath === '/app' || currentPath === '/app/' || currentPath === '/roles';
@@ -244,10 +282,11 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
       // ignore network errors on logout
     }
     clearAuthToken();
+    clearDeviceToken();
     localStorage.setItem('kdp_logged_out', 'true');
     localStorage.removeItem('kdp_active_session');
     setActiveSession(null);
-    window.location.hash = isPartyCreated ? '/roles' : '/';
+    window.location.hash = '/roles';
   };
 
   const renderRoleSelection = () => (
@@ -299,10 +338,10 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
           isPartyCreated={isPartyCreated}
           onResetParty={handleResetParty}
           onEnterApp={() => {
-            window.location.hash = isPartyCreated ? '/roles' : '/cms';
+            window.location.hash = '/roles';
           }}
           onOpenLogin={() => {
-            window.location.hash = isPartyCreated ? '/roles' : '/cms';
+            window.location.hash = '/roles';
           }}
           onGetStarted={() => {
             window.location.hash = '/cms';
@@ -349,7 +388,7 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
           isOpen={true}
           mode={isPartyCreated ? 'editor' : 'setup'}
           onClose={() => {
-            window.location.hash = isPartyCreated ? '/roles' : '/';
+            window.location.hash = '/roles';
           }}
           onOpenRoleModules={() => {
             setIsPartyCreated(true);
@@ -360,79 +399,36 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
       );
     }
 
-    // 4. Role Selection Route: Only show roles AFTER application creation!
+    // 4. Role Selection Route: Direct universal gateway to login & role command selection
     if (isRolesRoute || !activeSession) {
-      if (!isPartyCreated) {
-        return (
-          <div className="min-h-[75vh] flex items-center justify-center p-6 bg-slate-50">
-            <div className="max-w-md w-full bg-white rounded-3xl border border-slate-200 p-8 shadow-xl text-center space-y-5">
-              <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center mx-auto shadow-inner">
-                <Sliders className="w-8 h-8" />
-              </div>
-              <div className="space-y-2">
-                <h2 className="text-xl font-black text-slate-900 tracking-tight">Application Not Created Yet</h2>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  Roles and hierarchy-scoped dashboards are generated dynamically from your CMS application configuration.
-                  Please launch CMS Studio to create your election application first.
-                </p>
-              </div>
-              <div className="pt-2 space-y-2.5">
-                <button
-                  onClick={() => {
-                    window.location.hash = '/cms';
-                  }}
-                  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-sm transition-all shadow-md shadow-amber-500/20 active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Sliders className="w-4 h-4" />
-                  <span>Launch CMS Studio</span>
-                </button>
-                <button
-                  onClick={() => {
-                    window.location.hash = '/';
-                  }}
-                  className="w-full py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:text-slate-900 text-xs font-semibold transition-all cursor-pointer"
-                >
-                  Back to Landing Page
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      }
       return renderRoleSelection();
     }
 
     return renderAuthenticatedView();
   };
 
+  const showTopSwitcher = Boolean(activeSession) && !isLandingRoute && !isRolesRoute && currentPath !== '/cms';
+
   return (
     <div className={`${isDashboardActive ? 'h-screen overflow-hidden' : 'min-h-screen'} bg-gray-50 text-gray-900 flex flex-col justify-between selection:bg-yellow-200`}>
       {/* Top Quick Switcher Navigator: hidden on landing, cms, and roles selection page */}
-      {isPartyCreated && !isLandingRoute && !isRolesRoute && currentPath !== '/cms' && (
+      {showTopSwitcher && (
         <RoleQuickSwitcher
           currentRole={activeSession?.role}
           currentPath={currentPath}
-          onSwitchSession={(s) => {
-            setActiveSession(s);
-            setAuthToken(`demo-token-${s.role}`);
-          }}
           onLogout={handleLogout}
         />
       )}
 
-      {!isLandingRoute && !isRolesRoute && currentPath !== '/cms' && (
-        <div className="h-1 w-full shrink-0 transition-colors duration-300" style={{ backgroundColor: config.primaryColor || '#eab308' }} />
-      )}
-
-      <div className={`${isDashboardActive ? 'h-full overflow-hidden' : 'flex-1'} flex flex-col`}>
-        {!activeSession && isPartyCreated && !isLandingRoute && !isRolesRoute && currentPath !== '/cms' && <Header />}
+      <div className={`${isDashboardActive ? 'h-full overflow-hidden' : 'flex-1'} ${showTopSwitcher ? 'pt-14' : ''} flex flex-col`}>
+        {!activeSession && !isLandingRoute && !isRolesRoute && currentPath !== '/cms' && <Header />}
 
         <div className={`flex-1 ${isDashboardActive ? 'p-0 overflow-hidden' : (isLandingRoute || isRolesRoute) ? 'p-0' : 'pb-4 md:pb-6'}`}>
           {renderView()}
         </div>
       </div>
 
-      {!isDashboardActive && isPartyCreated && !isLandingRoute && !isRolesRoute && currentPath !== '/cms' && <Footer />}
+      {!isDashboardActive && !isLandingRoute && !isRolesRoute && currentPath !== '/cms' && <Footer />}
 
       {selectedRole && (
         <OtpLoginModal

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Building,
   Crown,
@@ -8,40 +8,53 @@ import {
   Users,
   Sparkles,
   ChevronDown,
-  ChevronUp,
   LogOut,
+  Shield,
+  Radio,
+  Check,
+  LayoutGrid,
+  Settings,
+  Database,
+  UserCheck,
 } from 'lucide-react';
-import { RoleType, UserSession } from '../types';
-import { getMockSessionForRole } from '../lib/api';
+import { RoleType } from '../types';
 import { useCms } from '../context/CmsContext';
 
 interface RoleQuickSwitcherProps {
   currentRole?: RoleType;
   currentPath: string;
-  onSwitchSession: (session: UserSession) => void;
   onLogout: () => void;
 }
 
-const SWITCHER_ITEMS: {
+interface SwitcherItem {
   role: RoleType | 'ROLES';
+  category: 'apex' | 'field' | 'system';
   label: string;
   shortLabel: string;
+  subtitle: string;
   path: string;
   icon: React.ComponentType<{ className?: string }>;
   color: string;
-}[] = [
-  { role: 'ROLES', label: 'Role Command Center (Selection)', shortLabel: 'Role Selection', path: '/app', icon: Users, color: '#10b981' },
-  { role: 'ROLES', label: 'CMS Platform Admin', shortLabel: 'Platform Admin', path: '/platform-admin', icon: Sparkles, color: '#f59e0b' },
-  { role: 'ROLES', label: 'Assign Data (Import)', shortLabel: 'Assign Data', path: '/assign-data', icon: Layers, color: '#06b6d4' },
-  { role: 'ROLES', label: 'Assign Incharges', shortLabel: 'Assign Incharges', path: '/assign-incharges', icon: Users, color: '#ec4899' },
-  { role: 'STATE_ADMIN', label: 'State Incharge', shortLabel: 'State', path: '/state', icon: Building, color: '#f59e0b' },
-  { role: 'ZONE_INCHARGE', label: 'Zone Coordinator', shortLabel: 'Zone', path: '/zone', icon: Building, color: '#8b5cf6' },
-  { role: 'PARLIAMENT_INCHARGE', label: 'Parliament Incharge (MP)', shortLabel: 'Parliament', path: '/parliament', icon: Crown, color: '#3b82f6' },
-  { role: 'CONSTITUENCY_INCHARGE', label: 'Constituency Incharge (MLA)', shortLabel: 'Constituency', path: '/constituency', icon: Crown, color: '#06b6d4' },
-  { role: 'MANDAL_INCHARGE', label: 'Mandal President', shortLabel: 'Mandal', path: '/mandal', icon: Layers, color: '#10b981' },
-  { role: 'VILLAGE_INCHARGE', label: 'Village Incharge', shortLabel: 'Village', path: '/village', icon: Home, color: '#84cc16' },
-  { role: 'BOOTH_PRESIDENT', label: 'Booth President', shortLabel: 'Booth', path: '/booth', icon: Vote, color: '#eab308' },
-  { role: 'VOTER_100_INCHARGE', label: '100-Voter Incharge', shortLabel: '100-Voter', path: '/100-voter', icon: Users, color: '#f97316' },
+}
+
+const SWITCHER_ITEMS: SwitcherItem[] = [
+  // System & Management
+  { role: 'ROLES', category: 'system', label: 'Role Command Selection', shortLabel: 'Role Center', subtitle: 'Universal Role Gateway', path: '/roles', icon: LayoutGrid, color: '#10b981' },
+  { role: 'ROLES', category: 'system', label: 'CMS Platform Admin', shortLabel: 'Platform Admin', subtitle: 'System Governance', path: '/platform-admin', icon: Settings, color: '#f59e0b' },
+  { role: 'ROLES', category: 'system', label: 'Data Ingestion & Import', shortLabel: 'Assign Data', subtitle: 'Voter & Geographic Rolls', path: '/assign-data', icon: Database, color: '#06b6d4' },
+  { role: 'ROLES', category: 'system', label: 'Cadre & Incharge Deployment', shortLabel: 'Assign Incharges', subtitle: 'Hierarchy Assignment', path: '/assign-incharges', icon: UserCheck, color: '#ec4899' },
+  
+  // Apex Command
+  { role: 'STATE_ADMIN', category: 'apex', label: 'State Incharge (Apex)', shortLabel: 'State', subtitle: 'Statewide War Room', path: '/state', icon: Building, color: '#f59e0b' },
+  { role: 'ZONE_INCHARGE', category: 'apex', label: 'Zone Coordinator', shortLabel: 'Zone', subtitle: 'Multi-Parliament Command', path: '/zone', icon: Building, color: '#8b5cf6' },
+  { role: 'PARLIAMENT_INCHARGE', category: 'apex', label: 'Parliament Incharge (MP)', shortLabel: 'Parliament', subtitle: 'Parliamentary Constituency', path: '/parliament', icon: Crown, color: '#3b82f6' },
+  
+  // Field Command
+  { role: 'CONSTITUENCY_INCHARGE', category: 'field', label: 'Constituency Incharge (MLA)', shortLabel: 'Constituency', subtitle: 'Assembly Command Center', path: '/constituency', icon: Crown, color: '#06b6d4' },
+  { role: 'MANDAL_INCHARGE', category: 'field', label: 'Mandal President', shortLabel: 'Mandal', subtitle: 'Mandal Level Operations', path: '/mandal', icon: Layers, color: '#10b981' },
+  { role: 'VILLAGE_INCHARGE', category: 'field', label: 'Village Incharge', shortLabel: 'Village', subtitle: 'Village Polling Command', path: '/village', icon: Home, color: '#84cc16' },
+  { role: 'BOOTH_PRESIDENT', category: 'field', label: 'Booth President', shortLabel: 'Booth', subtitle: 'Polling Station Defense', path: '/booth', icon: Vote, color: '#eab308' },
+  { role: 'VOTER_100_INCHARGE', category: 'field', label: '100-Voter Incharge', shortLabel: '100-Voter', subtitle: 'Micro-Cluster Outreach', path: '/100-voter', icon: Users, color: '#f97316' },
 ];
 
 const roleLevelMap: Record<string, string> = {
@@ -58,11 +71,33 @@ const roleLevelMap: Record<string, string> = {
 export default function RoleQuickSwitcher({
   currentRole,
   currentPath,
-  onSwitchSession,
   onLogout,
 }: RoleQuickSwitcherProps) {
   const { config } = useCms();
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click or ESC key
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsDropdownOpen(false);
+      }
+    }
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isDropdownOpen]);
 
   const enabledLevels = useMemo(() => {
     if (Array.isArray(config.activeHierarchyLevels) && config.activeHierarchyLevels.length > 0) {
@@ -83,129 +118,269 @@ export default function RoleQuickSwitcher({
   const visibleItems = useMemo(() => {
     return SWITCHER_ITEMS.filter((item) => {
       const level = roleLevelMap[item.role];
-      if (!level) return true; // ROLES
+      if (!level) return true; // System routes
       return enabledLevels.includes(level);
     });
   }, [enabledLevels]);
 
-  const handleSelect = (item: (typeof SWITCHER_ITEMS)[number]) => {
+  const handleSelect = (item: SwitcherItem) => {
+    setIsDropdownOpen(false);
     if (item.path) {
       window.location.hash = item.path;
-      if (item.role !== 'ROLES') {
-        const newSession = getMockSessionForRole(item.role);
-        onSwitchSession(newSession);
-      }
-      return;
     }
   };
 
-  const activeItem =
-    visibleItems.find((i) => {
-      if (currentPath === i.path) return true;
-      if ((currentPath === '/app' || currentPath === '/roles') && i.path === '/app') return true;
-      return i.role === currentRole;
-    }) ||
-    visibleItems[0] ||
-    SWITCHER_ITEMS[0];
+  const activeItem = useMemo(() => {
+    return (
+      visibleItems.find((i) => {
+        if (currentPath === i.path) return true;
+        if ((currentPath === '/app' || currentPath === '/roles') && (i.path === '/app' || i.path === '/roles')) return true;
+        return i.role === currentRole;
+      }) ||
+      visibleItems[0] ||
+      SWITCHER_ITEMS[0]
+    );
+  }, [visibleItems, currentPath, currentRole]);
+
+  const ActiveIcon = activeItem.icon;
+
+  const partyName = config.organisationName || config.headerTitle || 'Political Connect';
 
   return (
-    <div className="w-full bg-slate-950 border-b border-slate-800 text-slate-200 z-50 sticky top-0 text-xs select-none shadow-md">
-      <div className="max-w-7xl mx-auto px-3 py-1.5 flex items-center justify-between gap-2">
-        {/* Left: Active Module Indicator & Toggle */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-amber-400 font-bold transition cursor-pointer"
-            title="Click to jump across any VIAP module"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Module Switcher:</span>
-            <span className="text-white font-extrabold">{activeItem.shortLabel}</span>
-            {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />}
-          </button>
-
-          <span className="text-[11px] text-slate-400 hidden lg:inline">
-            Active Hierarchy: <span className="text-amber-400 font-semibold font-mono">{enabledLevels.length} Levels</span>
-          </span>
-        </div>
-
-        {/* Center/Right: Quick Action Bar */}
-        <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 no-scrollbar">
-          {visibleItems.slice(0, 8).map((item) => {
-            const Icon = item.icon;
-            const isCurrent = (item.role === 'ROLES' && (currentPath === '/app' || currentPath === '/roles')) || item.role === currentRole;
-            return (
-              <button
-                key={`${item.role}-${item.path}`}
-                onClick={() => handleSelect(item)}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${
-                  isCurrent
-                    ? 'bg-amber-400 text-slate-950 shadow-xs scale-102'
-                    : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800'
-                }`}
-              >
-                <Icon className="w-3 h-3" />
-                <span>{item.shortLabel}</span>
-              </button>
-            );
-          })}
-
-          <button
-            onClick={onLogout}
-            className="flex items-center gap-1 px-2 py-1 rounded-md bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-rose-200 border border-rose-500/30 text-[11px] font-bold transition cursor-pointer ml-1"
-            title="Log out or switch account"
-          >
-            <LogOut className="w-3 h-3" />
-            <span className="hidden md:inline">Exit</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Expanded Grid for complete selection */}
-      {isExpanded && (
-        <div className="bg-slate-900/95 backdrop-blur-md border-t border-slate-800 p-4 animate-fade-in shadow-2xl">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-[11px] font-mono uppercase tracking-wider text-slate-400 mb-2.5 flex items-center justify-between">
-              <span>Direct Jump to Active Hierarchy Modules ({visibleItems.length})</span>
-              <span className="text-slate-500">Press ESC or click button above to close</span>
+    <header
+      id="role-quick-switcher"
+      className="fixed top-0 left-0 right-0 h-14 z-50 bg-slate-950/95 backdrop-blur-xl border-b border-slate-800 text-slate-100 select-none shadow-md"
+    >
+      <div className="h-full px-4 sm:px-6 flex items-center justify-between gap-3">
+        {/* ========================================================
+            LEFT: Brand Crest & Telemetry Status
+           ======================================================== */}
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black shadow-md shadow-amber-500/20">
+              <Shield className="w-4 h-4 text-slate-950 fill-slate-950" />
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
-              {visibleItems.map((item) => {
-                const Icon = item.icon;
-                const isCurrent = (item.role === 'ROLES' && (currentPath === '/app' || currentPath === '/roles')) || item.role === currentRole;
-                return (
-                  <button
-                    key={`${item.role}-${item.path}`}
-                    onClick={() => {
-                      handleSelect(item);
-                      setIsExpanded(false);
-                    }}
-                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-left transition cursor-pointer ${
-                      isCurrent
-                        ? 'bg-amber-400 text-slate-950 border-amber-300 font-black shadow-md'
-                        : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/80 text-slate-200'
-                    }`}
-                  >
-                    <div
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                        isCurrent ? 'bg-slate-950 text-amber-400' : 'bg-slate-900 text-slate-300'
-                      }`}
-                    >
-                      <Icon className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-xs font-bold truncate">{item.label}</div>
-                      <div className={`text-[10px] truncate ${isCurrent ? 'text-slate-900 font-semibold' : 'text-slate-400'}`}>
-                        {item.path}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+            <div className="hidden sm:block">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black text-white tracking-tight uppercase truncate max-w-[180px] md:max-w-none">
+                  {partyName}
+                </span>
+                <span className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Live Sync
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400 font-semibold tracking-wide">
+                Unified Political Command
+              </p>
             </div>
           </div>
         </div>
-      )}
-    </div>
+
+        {/* ========================================================
+            CENTER: Station Command Switcher (Executive Popover)
+           ======================================================== */}
+        <div className="relative flex items-center gap-2" ref={dropdownRef}>
+          {/* Main Station Switcher Button */}
+          <button
+            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shadow-xs ${
+              isDropdownOpen
+                ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold shadow-md shadow-amber-400/20'
+                : 'bg-slate-900/90 hover:bg-slate-800 text-slate-200 border-slate-700/80 hover:border-slate-600'
+            }`}
+            title="Click to switch between command stations & modules"
+          >
+            <div className={`w-5 h-5 rounded-md flex items-center justify-center ${isDropdownOpen ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-800 text-amber-400'}`}>
+              <ActiveIcon className="w-3.5 h-3.5" />
+            </div>
+            <span className="text-xs font-bold truncate max-w-[140px] sm:max-w-[200px]">
+              {activeItem.label}
+            </span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-slate-950' : 'text-slate-400'}`} />
+          </button>
+
+          {/* Quick Direct Jump Pills (Gracefully hidden on small screens, NO scrollbar) */}
+          <div className="hidden lg:flex items-center gap-1.5">
+            <button
+              onClick={() => { window.location.hash = '/roles'; }}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition border cursor-pointer ${
+                currentPath === '/roles' || currentPath === '/app'
+                  ? 'bg-amber-400/20 text-amber-300 border-amber-400/40'
+                  : 'bg-slate-900/60 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800'
+              }`}
+            >
+              Role Gateway
+            </button>
+            {currentPath !== '/platform-admin' ? (
+              <button
+                onClick={() => { window.location.hash = '/platform-admin'; }}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold transition border cursor-pointer bg-slate-900/60 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800"
+              >
+                Platform Admin
+              </button>
+            ) : (
+              <button
+                onClick={() => { window.location.hash = '/assign-data'; }}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold transition border cursor-pointer bg-slate-900/60 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800"
+              >
+                Assign Data
+              </button>
+            )}
+          </div>
+
+          {/* ========================================================
+              POP-OVER EXECUTIVE COMMAND PALETTE
+             ======================================================== */}
+          {isDropdownOpen && (
+            <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-80 sm:w-96 max-h-[80vh] overflow-y-auto bg-slate-900/98 backdrop-blur-2xl border border-slate-700/80 rounded-2xl shadow-2xl z-50 p-3 space-y-3 animate-fade-in no-scrollbar">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800 px-1">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3 text-amber-400" />
+                  Select Command Station
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono">
+                  {visibleItems.length} Available
+                </span>
+              </div>
+
+              {/* Tier 1: Apex Leadership */}
+              <div className="space-y-1">
+                <p className="text-[9px] font-extrabold uppercase tracking-widest text-amber-400/80 px-2">
+                  Apex & Regional Command
+                </p>
+                {visibleItems
+                  .filter((i) => i.category === 'apex')
+                  .map((item) => {
+                    const Icon = item.icon;
+                    const isCurrent = item.path === currentPath || item.role === currentRole;
+                    return (
+                      <button
+                        key={item.label}
+                        onClick={() => handleSelect(item)}
+                        className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${
+                          isCurrent
+                            ? 'bg-amber-400/15 text-white border border-amber-400/40 font-bold'
+                            : 'hover:bg-slate-800/80 text-slate-300 hover:text-white border border-transparent'
+                        }`}
+                      >
+                        <div
+                          className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                          style={{ backgroundColor: `${item.color}20`, color: item.color }}
+                        >
+                          <Icon className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-bold truncate flex items-center justify-between">
+                            <span>{item.label}</span>
+                            {isCurrent && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                          </div>
+                          <div className="text-[10px] text-slate-400 truncate">{item.subtitle}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+
+              {/* Tier 2: Field Hierarchy */}
+              <div className="space-y-1 pt-2 border-t border-slate-800/80">
+                <p className="text-[9px] font-extrabold uppercase tracking-widest text-emerald-400/80 px-2">
+                  Field & Polling Stations
+                </p>
+                {visibleItems
+                  .filter((i) => i.category === 'field')
+                  .map((item) => {
+                    const Icon = item.icon;
+                    const isCurrent = item.path === currentPath || item.role === currentRole;
+                    return (
+                      <button
+                        key={item.label}
+                        onClick={() => handleSelect(item)}
+                        className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${
+                          isCurrent
+                            ? 'bg-amber-400/15 text-white border border-amber-400/40 font-bold'
+                            : 'hover:bg-slate-800/80 text-slate-300 hover:text-white border border-transparent'
+                        }`}
+                      >
+                        <div
+                          className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                          style={{ backgroundColor: `${item.color}20`, color: item.color }}
+                        >
+                          <Icon className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-bold truncate flex items-center justify-between">
+                            <span>{item.label}</span>
+                            {isCurrent && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                          </div>
+                          <div className="text-[10px] text-slate-400 truncate">{item.subtitle}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+
+              {/* Tier 3: Management Operations */}
+              <div className="space-y-1 pt-2 border-t border-slate-800/80">
+                <p className="text-[9px] font-extrabold uppercase tracking-widest text-sky-400/80 px-2">
+                  Operations & Setup
+                </p>
+                {visibleItems
+                  .filter((i) => i.category === 'system')
+                  .map((item) => {
+                    const Icon = item.icon;
+                    const isCurrent = item.path === currentPath;
+                    return (
+                      <button
+                        key={item.label}
+                        onClick={() => handleSelect(item)}
+                        className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${
+                          isCurrent
+                            ? 'bg-amber-400/15 text-white border border-amber-400/40 font-bold'
+                            : 'hover:bg-slate-800/80 text-slate-300 hover:text-white border border-transparent'
+                        }`}
+                      >
+                        <div
+                          className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                          style={{ backgroundColor: `${item.color}20`, color: item.color }}
+                        >
+                          <Icon className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-bold truncate flex items-center justify-between">
+                            <span>{item.label}</span>
+                            {isCurrent && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                          </div>
+                          <div className="text-[10px] text-slate-400 truncate">{item.subtitle}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ========================================================
+            RIGHT: Active Hierarchy Pill & Exit Portal
+           ======================================================== */}
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-400">
+            <Radio className="w-3 h-3 text-amber-400" />
+            <span>Hierarchy:</span>
+            <span className="font-mono text-amber-400 font-bold">{enabledLevels.length} Tiers</span>
+          </div>
+
+          <button
+            onClick={onLogout}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-rose-500/15 text-slate-300 hover:text-rose-300 border border-slate-800 hover:border-rose-500/30 text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-98"
+            title="Log out or switch account"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Sign Out</span>
+          </button>
+        </div>
+      </div>
+    </header>
   );
 }

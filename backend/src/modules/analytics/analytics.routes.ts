@@ -8,8 +8,6 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
   fastify.addHook('preHandler', populateHierarchyScope);
 
   fastify.get('/state', AnalyticsController.getStateAnalytics);
-  fastify.get('/live-votes', AnalyticsController.getLiveVotes);
-  fastify.get('/turnout-summary', AnalyticsController.getTurnoutSummary);
   fastify.get('/zone/:id', AnalyticsController.getZoneAnalytics);
   fastify.get('/parliament/:id', AnalyticsController.getParliamentAnalytics);
   fastify.get('/constituency/:id', AnalyticsController.getConstituencyAnalytics);
@@ -18,4 +16,3 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
   fastify.get('/booth/:id', AnalyticsController.getBoothAnalytics);
   fastify.get('/voter-incharge/:id', AnalyticsController.getVoterInchargeAnalytics);
 }
-

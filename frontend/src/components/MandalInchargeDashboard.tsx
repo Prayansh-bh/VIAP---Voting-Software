@@ -14,6 +14,7 @@ import {
 } from '../utils/boothHelpers';
 import { 
   SINGARAYAKONDA_VILLAGES, 
+  MandalVillage,
   getMandalCadreNetwork, 
   generateVotersForMandalVillage, 
   saveMandalVoterRecord 
@@ -581,32 +582,51 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   };
 
   // Metric Computations (Dynamic and fully synchronous)
-  
-  const TOTAL_MANDAL_REGISTERED_VOTERS = 52247;
+  const isDemoMode = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
+  const TOTAL_MANDAL_REGISTERED_VOTERS = isDemoMode ? 52247 : (voters.length > 0 ? voters.length : 0);
   const surveyedVotersCount = voters.length;
   const pendingSurveyCount = Math.max(0, TOTAL_MANDAL_REGISTERED_VOTERS - surveyedVotersCount);
-  const surveyCompletionPct = surveyedVotersCount > 0 ? ((surveyedVotersCount / TOTAL_MANDAL_REGISTERED_VOTERS) * 100).toFixed(1) : '0.0';
+  const surveyCompletionPct = TOTAL_MANDAL_REGISTERED_VOTERS > 0 && surveyedVotersCount > 0 ? ((surveyedVotersCount / TOTAL_MANDAL_REGISTERED_VOTERS) * 100).toFixed(1) : '0.0';
 
   const totalVotersCount = TOTAL_MANDAL_REGISTERED_VOTERS;
 
+  const villagesSource = useMemo(() => {
+    const isDemo = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
+    if (isDemo) return SINGARAYAKONDA_VILLAGES;
+    const distinctNames = Array.from(new Set(voters.map(v => v.village).filter(Boolean)));
+    if (distinctNames.length === 0) return [];
+    return distinctNames.map((name, idx) => ({
+      sNo: `#${String(idx + 1).padStart(2, '0')}`,
+      name: name as string,
+      totalVoters: voters.filter(v => v.village === name).length,
+      totalBooths: 0,
+      localVoters: 0,
+      migratedVoters: 0,
+      pStats: { TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0 },
+      leadingParty: 'Neutral' as const,
+      lead: 0,
+    }));
+  }, [voters]);
+
   const liveMandalStats = useMemo(() => {
+    const isDemo = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
     const snapshot = backendSummary?.snapshot;
-    const fallbackWinning = SINGARAYAKONDA_VILLAGES.filter((v) => {
+    const fallbackWinning = isDemo ? SINGARAYAKONDA_VILLAGES.filter((v) => {
       const info = VILLAGE_PROJECTED_MARGINS[v.name.toUpperCase().trim()] || { status: 'WINNING', margin: 0 };
       return info.status === 'WINNING';
-    }).length;
-    const fallbackTrailing = SINGARAYAKONDA_VILLAGES.length - fallbackWinning;
+    }).length : 0;
+    const fallbackTrailing = isDemo ? (SINGARAYAKONDA_VILLAGES.length - fallbackWinning) : 0;
 
     return {
-      totalVoters: snapshot?.summary.totalVoters ?? TOTAL_MANDAL_REGISTERED_VOTERS,
-      totalVillages: snapshot?.hierarchyCounts.VILLAGE ?? SINGARAYAKONDA_VILLAGES.length,
+      totalVoters: snapshot?.summary.totalVoters ?? (isDemo ? 52247 : voters.length),
+      totalVillages: snapshot?.hierarchyCounts.VILLAGE ?? villagesSource.length,
       totalBooths: snapshot?.hierarchyCounts.BOOTH ?? boothIncharges.length,
       voted: snapshot?.summary.voted ?? 0,
       remaining: snapshot?.summary.remaining ?? 0,
       winning: snapshot?.performance.winningChildren ?? fallbackWinning,
       trailing: snapshot?.performance.trailingChildren ?? fallbackTrailing,
     };
-  }, [backendSummary, boothIncharges.length, SINGARAYAKONDA_VILLAGES]);
+  }, [backendSummary, boothIncharges.length, SINGARAYAKONDA_VILLAGES, villagesSource.length, voters.length]);
 
   // Voters filtered by active (excluding deceased)
   const activeVoters = useMemo(() => voters.filter(v => !v.voterStatus || v.voterStatus === 'Active' || v.voterStatus === 'Shifted'), [voters]);
@@ -687,7 +707,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     });
     
     // Village-wise Breakdown
-    const villageBreakdown = SINGARAYAKONDA_VILLAGES.map(village => {
+    const villageBreakdown = villagesSource.map(village => {
       const vVoters = casteVoters.filter(v => v.village === village.name);
       const vTdp = vVoters.filter(v => v.politicalPreference === 'TDP').length;
       const vYsrcp = vVoters.filter(v => v.politicalPreference === 'YSRCP').length;
@@ -772,8 +792,8 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
 
   // Redesigned Village List computed metrics and helpers
   const totalVotersSum = useMemo(() => {
-    return SINGARAYAKONDA_VILLAGES.reduce((acc, v) => acc + v.totalVoters, 0);
-  }, []);
+    return villagesSource.reduce((acc, v) => acc + v.totalVoters, 0);
+  }, [villagesSource]);
 
   const getVillageInchargeName = useCallback((vName: string) => {
     if (!vName) return "Ch. Venkaiah";
@@ -857,7 +877,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   const villageCounts = useMemo(() => {
     let winning = 0;
     let trailing = 0;
-    SINGARAYAKONDA_VILLAGES.forEach(v => {
+    villagesSource.forEach(v => {
       const vKey = v.name.toUpperCase().trim();
       const info = VILLAGE_PROJECTED_MARGINS[vKey] || { status: 'WINNING', margin: 0 };
       if (info.status === 'WINNING') {
@@ -867,14 +887,14 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       }
     });
     return {
-      all: SINGARAYAKONDA_VILLAGES.length,
+      all: villagesSource.length,
       winning,
       trailing
     };
-  }, []);
+  }, [villagesSource]);
 
   const filteredVillages = useMemo(() => {
-    return SINGARAYAKONDA_VILLAGES.filter(v => {
+    return villagesSource.filter(v => {
       const vKey = v.name.toUpperCase().trim();
       const info = VILLAGE_PROJECTED_MARGINS[vKey] || { status: 'WINNING', margin: 0 };
       const isWinning = info.status === 'WINNING';
@@ -1464,7 +1484,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
               </div>
               <div className="flex items-center gap-1 mt-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-                <span className="text-[8px] text-slate-400 font-black tracking-widest uppercase font-mono">ID: {session.userId}</span>
+                <span className="text-[8px] text-slate-400 font-black tracking-widest uppercase font-mono" title={session.userId}>ID: {session.userId?.slice(-8).toUpperCase() || 'MANDAL'}</span>
               </div>
             </div>
           </div>
@@ -2200,9 +2220,20 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 const leadingP = info.status === 'WINNING' ? 'TDP' : 'YSRCP';
                 const leadingLead = info.margin;
 
-                const selectedVillageSpec = SINGARAYAKONDA_VILLAGES.find(v => v.name.toUpperCase() === selectedVillageName.toUpperCase()) || SINGARAYAKONDA_VILLAGES[0];
-                const villagePendingSurvey = Math.max(0, selectedVillageSpec.totalVoters - villageVoters.length);
-                const villageSurveyPct = selectedVillageSpec.totalVoters > 0 ? ((villageVoters.length / selectedVillageSpec.totalVoters) * 100).toFixed(1) : '0.0';
+                const selectedVillageSpec: MandalVillage = villagesSource.find(v => v.name.toUpperCase() === selectedVillageName.toUpperCase()) || villagesSource[0] || ({
+                  sNo: '#01',
+                  name: selectedVillageName,
+                  totalVoters: villageVoters.length,
+                  totalBooths: vBooths.length,
+                  localVoters: vLocalCount,
+                  migratedVoters: vMigratedCount,
+                  pStats: vStats,
+                  leadingParty: leadingP,
+                  lead: leadingLead,
+                } as MandalVillage);
+                const vSpecTotal = selectedVillageSpec?.totalVoters ?? villageVoters.length;
+                const villagePendingSurvey = Math.max(0, vSpecTotal - villageVoters.length);
+                const villageSurveyPct = vSpecTotal > 0 ? ((villageVoters.length / vSpecTotal) * 100).toFixed(1) : '0.0';
 
                 return (
                   <div className="space-y-6 animate-fade-in" id="village-drilldown-panel">

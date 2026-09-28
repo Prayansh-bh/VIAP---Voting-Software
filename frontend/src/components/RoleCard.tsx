@@ -120,38 +120,50 @@ interface RoleCardProps {
 
 export default function RoleCard({ role, index, onClick }: RoleCardProps) {
   const IconComponent = iconMap[role.iconName] || Flag;
+  const theme = cardThemes[role.id] || {
+    borderClass: 'border-slate-200',
+    hoverBorderClass: 'hover:border-slate-300',
+    bgClass: 'bg-white',
+    iconBgClass: 'bg-slate-100',
+    iconColorClass: 'text-slate-700',
+    subtitleColorClass: 'text-slate-500',
+    btnBgClass: 'bg-slate-900 text-white',
+  };
 
   return (
     <div
       onClick={onClick}
       id={`role-card-${role.id}`}
-      className="relative bg-white border border-slate-200/80 hover:border-slate-300 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between group h-[175px] md:h-[185px]"
+      className="relative bg-white border border-slate-200/90 hover:border-slate-300 hover:shadow-md rounded-2xl p-5 transition-all duration-200 cursor-pointer flex flex-col justify-between group min-h-[180px] hover:-translate-y-0.5"
     >
-      <div>
-        {/* Header: Soft Gray Rounded Icon Container & Green Active Dot */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-600 group-hover:text-slate-900 group-hover:bg-slate-100 transition-colors">
-            <IconComponent className="w-5 h-5 stroke-[2]" />
+      <div className="space-y-3.5">
+        {/* Header: Distinct colored icon badge and active indicator */}
+        <div className="flex items-center justify-between">
+          <div className={`w-11 h-11 rounded-xl ${theme.iconBgClass} border border-slate-100/80 flex items-center justify-center ${theme.iconColorClass} transition-transform duration-200 group-hover:scale-105 shadow-2xs`}>
+            <IconComponent className="w-5 h-5 stroke-[2.2]" />
           </div>
 
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-4 ring-emerald-50" title="Module Active" />
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-emerald-50 border border-emerald-200/60 text-emerald-700 tracking-wide">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            Active
+          </span>
         </div>
 
         {/* Title & Subtitle */}
         <div className="space-y-1">
-          <h3 className="font-bold text-base md:text-[17px] text-slate-900 tracking-tight group-hover:text-slate-950">
+          <h3 className="font-bold text-base text-slate-900 tracking-tight group-hover:text-slate-950 transition-colors">
             {role.name}
           </h3>
-          <p className="text-xs font-medium text-slate-400">
+          <p className="text-xs font-medium text-slate-500 leading-snug">
             {role.subtitle}
           </p>
         </div>
       </div>
 
       {/* Footer subtle hint */}
-      <div className="pt-2 flex items-center justify-between text-[11px] font-semibold text-slate-400 group-hover:text-slate-600 transition-colors">
+      <div className="pt-3 border-t border-slate-100 mt-3 flex items-center justify-between text-xs font-medium text-slate-400 group-hover:text-slate-700 transition-colors">
         <span>Click to access dashboard</span>
-        <span className="opacity-0 group-hover:opacity-100 transition-opacity font-bold text-slate-800">&rarr;</span>
+        <span className="text-slate-300 group-hover:text-slate-900 group-hover:translate-x-0.5 transition-all font-bold">&rarr;</span>
       </div>
     </div>
   );

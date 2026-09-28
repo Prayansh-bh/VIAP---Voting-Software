@@ -1,4 +1,10 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
+
+@theme {
+  --font-sans: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
 
 @layer base {
   :root {
@@ -10,26 +16,43 @@
     --color-inc-blue-light: #E6EEFA;
   }
 
-  body {
-    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  html, body {
+    font-family: var(--font-sans);
+    letter-spacing: -0.012em;
     background-color: #F8FAFC;
     color: #0F172A;
     overflow-x: hidden;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-sans);
+    letter-spacing: -0.022em;
+  }
+
+  button, input, select, textarea {
+    font-family: inherit;
   }
 }
 
 .tricolor-bar {
-  background: linear-gradient(90deg, #FF6600 0%, #FF6600 33%, #FFFFFF 33%, #FFFFFF 66%, #138808 66%, #138808 100%);
-  height: 4px;
-}
-
-.tricolor-bar-sm {
-  background: linear-gradient(90deg, #FF6600 0%, #FF6600 33%, #FFFFFF 33%, #FFFFFF 66%, #138808 66%, #138808 100%);
+  background: linear-gradient(90deg, #FF6600 0%, #f59e0b 50%, #138808 100%);
   height: 3px;
 }
 
+.tricolor-bar-sm {
+  background: linear-gradient(90deg, #FF6600 0%, #f59e0b 50%, #138808 100%);
+  height: 2px;
+}
+
 .tricolor-gradient-bg {
-  background: linear-gradient(135deg, rgba(255, 102, 0, 0.05) 0%, rgba(255, 255, 255, 0.8) 50%, rgba(19, 136, 8, 0.05) 100%);
+  background: linear-gradient(135deg, rgba(255, 102, 0, 0.05) 0%, rgba(245, 158, 11, 0.04) 50%, rgba(19, 136, 8, 0.05) 100%);
 }
 
 .glass-card {
@@ -43,3 +66,63 @@
   backdrop-filter: blur(12px);
   border: 1px solid rgba(51, 65, 85, 0.6);
 }
+
+/* ============================================================
+   CROSS-BROWSER SCROLLBAR CONTROL (ELIMINATES UGLY WINDOWS ARROWS)
+   ============================================================ */
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+}
+.no-scrollbar {
+  -ms-overflow-style: none !important; /* IE and Edge */
+  scrollbar-width: none !important; /* Firefox */
+}
+
+/* Polished global scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.65);
+}
+
+/* ============================================================
+   SEAMLESS DASHBOARD & TOPBAR ARCHITECTURE
+   Prevents top navbar and dashboard sidebars from colliding
+   ============================================================ */
+body:has(#role-quick-switcher) aside.fixed,
+body:has(#role-quick-switcher) aside.sticky,
+body:has(#role-quick-switcher) aside#dashboard-sidebar {
+  top: 56px !important;
+  height: calc(100vh - 56px) !important;
+}
+
+body:has(#role-quick-switcher) main.h-screen,
+body:has(#role-quick-switcher) #main-workspace-section {
+  height: calc(100vh - 56px) !important;
+}
+
+body:has(#role-quick-switcher) #constituency-dashboard-root,
+body:has(#role-quick-switcher) #village-dashboard-container {
+  height: calc(100vh - 56px) !important;
+}
+
+body:has(#role-quick-switcher) #platform-admin-root,
+body:has(#role-quick-switcher) #assign-data-root,
+body:has(#role-quick-switcher) #assign-incharges-root {
+  padding-top: 1.5rem !important;
+}
+
+body:has(#role-quick-switcher) header.sticky {
+  top: 56px !important;
+}
+
+

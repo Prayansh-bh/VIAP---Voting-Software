@@ -500,6 +500,7 @@ model User {
   auditLogs           AuditLog[]
   notifications       Notification[]
   sessions            LoginSession[]
+  devices             UserDevice[]
   otpVerifications    OTPVerification[]
   importJobs          ImportJob[]
   dataImports         DataImport[]         @relation("DataImportUploader")
@@ -1190,6 +1191,27 @@ model LoginSession {
   createdAt       DateTime         @default(now())
 
   @@index([userId, expiresAt])
+}
+
+model UserDevice {
+  id              String           @id @default(uuid()) @db.Uuid
+  userId          String           @db.Uuid
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId        String
+  deviceName      String?
+  ipAddress       String?
+  userAgent       String?
+  isAuthorized    Boolean          @default(true)
+  deviceTokenHash String
+  lastActiveAt    DateTime         @default(now())
+  revokedAt       DateTime?
+  revokedReason   String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([userId, deviceId])
+  @@index([deviceId])
+  @@index([userId, isAuthorized])
 }
 
 model OTPVerification {

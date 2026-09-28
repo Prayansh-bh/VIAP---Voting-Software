@@ -5,7 +5,7 @@ import { prisma } from '../../lib/prisma.js';
 import { successResponse } from '../../common/response.js';
 import { validateBody } from '../../common/validation.js';
 import { authenticate } from '../../middleware/auth.js';
-import { populateHierarchyScope } from '../../middleware/rbac.js';
+import { assertUnitAccess, populateHierarchyScope } from '../../middleware/rbac.js';
 import { logAudit } from '../../middleware/audit.js';
 import { emitHierarchyEvent } from '../../lib/socket.js';
 
@@ -15,28 +15,25 @@ const groundReportSchema = z.object({
   description: z.string().min(3),
   issueCategory: z.string().optional(),
   affectedVotersCount: z.number().optional(),
-  constituencyId: z.string().optional(),
-  mandalId: z.string().optional(),
-  villageId: z.string().optional(),
-  boothId: z.string().optional(),
-  unitId: z.string().optional(),
+  constituencyId: z.string().uuid().optional(),
+  mandalId: z.string().uuid().optional(),
+  villageId: z.string().uuid().optional(),
+  boothId: z.string().uuid().optional(),
+  unitId: z.string().uuid().optional(),
 });
 
 const pollingReportSchema = z.object({
-  mandalName: z.string().optional().default('Kondapi Mandal'),
-  boothLabel: z.string().optional().default('General Polling Booth'),
+  mandalName: z.string().min(1),
+  boothLabel: z.string().min(1),
   reporterName: z.string().optional(),
-  hourlyTurnoutPct: z.number().optional(),
   tdpVotes: z.number().default(0),
   ysrcpVotes: z.number().default(0),
   jspVotes: z.number().default(0),
   bjpVotes: z.number().default(0),
   incVotes: z.number().default(0),
   othersVotes: z.number().default(0),
-  boothId: z.string().optional(),
-  unitId: z.string().optional(),
-  constituencyId: z.string().optional(),
-  notes: z.string().optional(),
+  boothId: z.string().uuid().optional(),
+  unitId: z.string().uuid().optional(),
 });
 
 export async function reportsRoutes(fastify: FastifyInstance) {
@@ -44,52 +41,56 @@ export async function reportsRoutes(fastify: FastifyInstance) {
   fastify.addHook('preHandler', populateHierarchyScope);
 
   // List ground reports
-  fastify.get('/ground', async (req: FastifyRequest<{ Querystring: { unitId?: string; status?: GroundReportStatus } }>, reply: FastifyReply) => {
+  fastify.get('/ground', async (req: FastifyRequest<{ Querystring: { unitId?: string; status?: GroundReportStatus; page?: string; limit?: string } }>, reply: FastifyReply) => {
     const where: Prisma.GroundReportWhereInput = {};
     if (req.query.status) where.status = req.query.status;
+
     if (req.query.unitId) {
+      if (!assertUnitAccess(req, reply, req.query.unitId)) return;
       where.unitId = req.query.unitId;
-    } else if (req.hierarchyScope && !req.hierarchyScope.isGlobalScope && req.hierarchyScope.accessibleUnitIds.size > 0) {
-      where.OR = [
-        { unitId: { in: Array.from(req.hierarchyScope.accessibleUnitIds) } },
-        ...(req.hierarchyScope.accessibleConstituencyIds.size > 0
-          ? [{ constituencyId: { in: Array.from(req.hierarchyScope.accessibleConstituencyIds) } }]
-          : []),
-        { createdById: req.user!.userId },
-      ];
+    } else if (req.hierarchyScope && !req.hierarchyScope.isGlobalScope) {
+      if (req.hierarchyScope.accessibleUnitIds.size > 0) {
+        where.unitId = { in: Array.from(req.hierarchyScope.accessibleUnitIds) };
+      } else {
+        where.unitId = '00000000-0000-0000-0000-000000000000';
+      }
     }
 
-    const items = await prisma.groundReport.findMany({
-      where,
-      include: { createdBy: true, unit: true },
-      orderBy: { createdAt: 'desc' },
-    });
-    return reply.send(successResponse(items));
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    const [items, total] = await Promise.all([
+      prisma.groundReport.findMany({
+        where,
+        include: { createdBy: true, unit: true },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.groundReport.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit) || 1;
+    return reply.send(successResponse(items, undefined, {
+      total,
+      page,
+      limit,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    }));
   });
 
   // Create ground report
   fastify.post('/ground', { preValidation: [validateBody(groundReportSchema)] }, async (req: FastifyRequest<{ Body: z.infer<typeof groundReportSchema> }>, reply: FastifyReply) => {
-    const isUuid = (val?: string | null): boolean =>
-      typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
-
-    const unitId = isUuid(req.body.unitId) ? req.body.unitId : (isUuid(req.user?.unitId) ? req.user?.unitId : null);
-    const boothId = isUuid(req.body.boothId) ? req.body.boothId : null;
-    const constituencyId = isUuid(req.body.constituencyId) ? req.body.constituencyId : null;
-    const mandalId = isUuid(req.body.mandalId) ? req.body.mandalId : null;
-    const villageId = isUuid(req.body.villageId) ? req.body.villageId : null;
+    if (req.body.unitId && !assertUnitAccess(req, reply, req.body.unitId)) {
+      return;
+    }
 
     const report = await prisma.groundReport.create({
       data: {
-        reportType: req.body.reportType,
-        priority: req.body.priority,
-        description: req.body.description,
-        issueCategory: req.body.issueCategory,
-        affectedVotersCount: req.body.affectedVotersCount,
-        constituencyId,
-        mandalId,
-        villageId,
-        boothId,
-        unitId,
+        ...req.body,
         createdById: req.user!.userId,
       },
     });
@@ -115,52 +116,59 @@ export async function reportsRoutes(fastify: FastifyInstance) {
   });
 
   // List polling booth reports
-  fastify.get('/polling', async (req: FastifyRequest<{ Querystring: { unitId?: string } }>, reply: FastifyReply) => {
-    const isUuid = (val?: string | null): boolean =>
-      typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
-
+  fastify.get('/polling', async (req: FastifyRequest<{ Querystring: { unitId?: string; page?: string; limit?: string } }>, reply: FastifyReply) => {
     const where: Prisma.PollingReportWhereInput = {};
-    if (req.query.unitId && isUuid(req.query.unitId)) {
+
+    if (req.query.unitId) {
+      if (!assertUnitAccess(req, reply, req.query.unitId)) return;
       where.unitId = req.query.unitId;
-    } else if (req.hierarchyScope && !req.hierarchyScope.isGlobalScope && req.hierarchyScope.accessibleUnitIds.size > 0) {
-      where.OR = [
-        { unitId: { in: Array.from(req.hierarchyScope.accessibleUnitIds) } },
-        { createdById: req.user!.userId },
-      ];
+    } else if (req.hierarchyScope && !req.hierarchyScope.isGlobalScope) {
+      if (req.hierarchyScope.accessibleUnitIds.size > 0) {
+        where.unitId = { in: Array.from(req.hierarchyScope.accessibleUnitIds) };
+      } else {
+        where.unitId = '00000000-0000-0000-0000-000000000000';
+      }
     }
 
-    const items = await prisma.pollingReport.findMany({
-      where,
-      include: { createdBy: true, unit: true },
-      orderBy: { createdAt: 'desc' },
-    });
-    return reply.send(successResponse(items));
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    const [items, total] = await Promise.all([
+      prisma.pollingReport.findMany({
+        where,
+        include: { createdBy: true, unit: true },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.pollingReport.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit) || 1;
+    return reply.send(successResponse(items, undefined, {
+      total,
+      page,
+      limit,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    }));
   });
 
   // Submit polling booth report
   fastify.post('/polling', { preValidation: [validateBody(pollingReportSchema)] }, async (req: FastifyRequest<{ Body: z.infer<typeof pollingReportSchema> }>, reply: FastifyReply) => {
-    const isUuid = (val?: string | null): boolean =>
-      typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
-
-    const { tdpVotes = 0, ysrcpVotes = 0, jspVotes = 0, bjpVotes = 0, incVotes = 0, othersVotes = 0 } = req.body;
+    if (req.body.unitId && !assertUnitAccess(req, reply, req.body.unitId)) {
+      return;
+    }
+    const { tdpVotes, ysrcpVotes, jspVotes, bjpVotes, incVotes, othersVotes } = req.body;
     const totalVotes = tdpVotes + ysrcpVotes + jspVotes + bjpVotes + incVotes + othersVotes;
-    const boothId = isUuid(req.body.boothId) ? req.body.boothId : null;
-    const unitId = isUuid(req.body.unitId) ? req.body.unitId : (isUuid(req.user?.unitId) ? req.user?.unitId : null);
 
     const report = await prisma.pollingReport.create({
       data: {
-        mandalName: req.body.mandalName || 'Kondapi Mandal',
-        boothLabel: req.body.boothLabel || 'General Polling Booth',
+        ...req.body,
         reporterName: req.body.reporterName || req.user!.userCode,
-        tdpVotes,
-        ysrcpVotes,
-        jspVotes,
-        bjpVotes,
-        incVotes,
-        othersVotes,
         totalVotes,
-        boothId,
-        unitId,
         createdById: req.user!.userId,
       },
     });

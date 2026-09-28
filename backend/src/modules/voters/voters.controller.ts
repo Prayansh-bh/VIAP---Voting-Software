@@ -1,5 +1,5 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
-import { paginatedResponse, successResponse } from '../../common/response.js';
+import { errorResponse, paginatedResponse, successResponse } from '../../common/response.js';
 import { assertUnitAccess, assertVoterFieldPermitted, assertVoterScope } from '../../middleware/rbac.js';
 import { VotersService } from './voters.service.js';
 
@@ -99,23 +99,33 @@ export class VotersController {
   static async bulkImport(req: FastifyRequest, reply: FastifyReply) {
     const body = req.body as {
       constituencyId: string;
-      rows: any[];
+      rows?: any[];
+      data?: any[];
       validateOnly?: boolean;
       importMode?: 'APPEND' | 'REPLACE';
+      mode?: 'APPEND' | 'REPLACE';
       voterGroupSize?: number;
     };
-    if (!body || !Array.isArray(body.rows)) {
-      return reply.status(400).send({ error: { message: 'Invalid payload: constituencyId and rows array required.' } });
+    const rows = Array.isArray(body?.rows) ? body.rows : Array.isArray(body?.data) ? body.data : null;
+    const importMode = (body?.importMode || body?.mode || 'APPEND') as 'APPEND' | 'REPLACE';
+    if (!body || !body.constituencyId || !rows) {
+      return reply.status(400).send(errorResponse('Invalid payload: constituencyId and rows array required.', 'INVALID_PAYLOAD'));
     }
 
-    const { BulkUploadService } = await import('./bulk-upload.service.js');
-    const result = await BulkUploadService.importVotersFromData(body.constituencyId, body.rows, {
-      validateOnly: body.validateOnly,
-      importMode: body.importMode,
-      voterGroupSize: body.voterGroupSize,
-      actorId: req.user?.userId,
-    });
-    return reply.status(200).send(successResponse(result, body.validateOnly ? 'Pre-flight validation report generated successfully' : 'Voter roll data successfully imported and assigned to hierarchy'));
+    try {
+      const { BulkUploadService } = await import('./bulk-upload.service.js');
+      const result = await BulkUploadService.importVotersFromData(body.constituencyId, rows, {
+        validateOnly: body.validateOnly,
+        importMode,
+        voterGroupSize: body.voterGroupSize,
+        actorId: req.user?.userId,
+        scope: req.hierarchyScope,
+      });
+      return reply.status(200).send(successResponse(result, body.validateOnly ? 'Pre-flight validation report generated successfully' : 'Voter roll data successfully imported and assigned to hierarchy'));
+    } catch (err: any) {
+      const statusCode = err.statusCode || 500;
+      return reply.status(statusCode).send(errorResponse(err.message || 'Bulk import failed', err.code || 'IMPORT_FAILED', err.validationReport ? { validationReport: err.validationReport } : undefined));
+    }
   }
 
   static async downloadTemplate(_req: FastifyRequest, reply: FastifyReply) {

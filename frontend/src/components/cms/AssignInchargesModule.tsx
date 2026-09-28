@@ -350,7 +350,7 @@ export default function AssignInchargesModule({
   }, [incharges, levelFilter, searchQuery]);
 
   return (
-    <div className="min-h-screen bg-slate-900/95 text-slate-100 p-3 sm:p-6 font-['Inter',sans-serif] flex justify-center items-start">
+    <div id="assign-incharges-root" className="min-h-screen bg-slate-900/95 text-slate-100 p-3 sm:p-6 font-sans antialiased flex justify-center items-start">
       <div className="w-full max-w-7xl bg-slate-100 rounded-[28px] shadow-2xl border border-slate-300 overflow-hidden text-slate-900">
         {/* Header Ribbon */}
         <div className="bg-[#0F172A] text-white px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800">

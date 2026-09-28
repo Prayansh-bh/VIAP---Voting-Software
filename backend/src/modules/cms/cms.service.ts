@@ -29,7 +29,7 @@ const DEFAULT_HIERARCHY_LABELS: Record<string, string> = {
   MANDAL: 'Mandal President',
   VILLAGE: 'Village Incharge',
   BOOTH: 'Booth President',
-  VOTER_GROUP: '100 Voter Incharge',
+  VOTER_GROUP: '100 Voters Incharge',
 };
 
 const DEFAULT_DASHBOARD_CONFIG = {
@@ -111,6 +111,9 @@ export function normalizeHierarchyLabels(raw: unknown): Record<string, string> {
     if (!value) continue;
     const upper = key.toUpperCase() === 'VOTERGROUP' ? 'VOTER_GROUP' : key.toUpperCase();
     mapped[upper] = value;
+  }
+  if (mapped.VOTER_GROUP === 'Indiramma Incharge (100 Voters)' || mapped.VOTER_GROUP?.includes('Indiramma')) {
+    mapped.VOTER_GROUP = '100 Voters Incharge';
   }
   return mapped;
 }
@@ -245,7 +248,12 @@ export async function loadCmsBundle() {
   }
 
   const parties = await prisma.politicalParty.findMany({
-    where: { isActive: true },
+    where: {
+      isActive: true,
+      NOT: {
+        code: { startsWith: 'TEST_' },
+      },
+    },
     orderBy: { sortOrder: 'asc' },
   });
 

@@ -13,7 +13,7 @@ export class PollsController {
   static async createPoll(req: FastifyRequest, reply: FastifyReply) {
     const body = createPollSchema.parse(req.body);
     const user = (req as any).user;
-    const poll = await PollsService.createPoll(body, user);
+    const poll = await PollsService.createPoll(body, user, req.hierarchyScope);
     return reply.status(201).send(successResponse(poll, 'Poll created successfully'));
   }
 
@@ -26,7 +26,7 @@ export class PollsController {
 
   static async closePoll(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
     const user = (req as any).user;
-    const poll = await PollsService.closePoll(req.params.id, user);
+    const poll = await PollsService.closePoll(req.params.id, user, req.hierarchyScope);
     return reply.status(200).send(successResponse(poll, 'Poll closed successfully'));
   }
 }

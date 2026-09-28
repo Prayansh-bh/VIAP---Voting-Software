@@ -23,6 +23,10 @@ import { auditRoutes } from './modules/audit/audit.routes.js';
 import { pollsRoutes } from './modules/polls/polls.routes.js';
 import { applicationsRoutes } from './modules/applications/applications.routes.js';
 
+import { isOriginAllowed, getTrustedOrigins } from './common/origin.js';
+import { getRedisClient } from './lib/redis.js';
+export { isOriginAllowed, getTrustedOrigins };
+
 export function buildApp(): FastifyInstance {
   const app = fastify({
     logger: {
@@ -35,13 +39,27 @@ export function buildApp(): FastifyInstance {
   // Centralized Error Handler
   app.setErrorHandler(errorHandler);
 
+  // Security Headers Hook (zero external dependencies)
+  app.addHook('onSend', async (_request, reply) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    if (env.NODE_ENV === 'production') {
+      reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+  });
+
   // Plugins
   app.register(sensible);
 
   app.register(cors, {
     origin: (origin, cb) => {
-      // Allow requests with no origin (like mobile apps, curl) or any localhost/local network origin
-      cb(null, true);
+      if (isOriginAllowed(origin)) {
+        cb(null, true);
+      } else {
+        cb(null, false);
+      }
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -53,24 +71,11 @@ export function buildApp(): FastifyInstance {
     secret: env.COOKIE_SECRET,
   });
 
+  const redisClient = getRedisClient();
   app.register(rateLimit, {
     max: 100,
     timeWindow: '1 minute',
-  });
-
-  // Support empty JSON bodies gracefully without throwing FST_ERR_CTP_EMPTY_JSON_BODY
-  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
-    try {
-      if (!body || (typeof body === 'string' && body.trim() === '')) {
-        done(null, {});
-        return;
-      }
-      const json = JSON.parse(body as string);
-      done(null, json);
-    } catch (err: any) {
-      err.statusCode = 400;
-      done(err, undefined);
-    }
+    ...(redisClient ? { redis: redisClient } : {}),
   });
 
   // Health Check Endpoints

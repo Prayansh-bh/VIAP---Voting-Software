@@ -32,7 +32,8 @@ import {
   ChevronRight,
   ShieldAlert,
   Flame,
-  CheckSquare
+  CheckSquare,
+  Award
 } from 'lucide-react';
 import { UserSession } from '../types';
 import { useCms } from '../context/CmsContext';
@@ -199,66 +200,79 @@ export default function StateDashboard({ session, onLogout }: StateDashboardProp
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex font-sans antialiased">
-      {/* Sidebar Navigation matching reference site */}
-      <aside className="w-64 bg-[#0B1528] text-slate-300 flex flex-col shrink-0 sticky top-0 h-screen z-40 border-r border-slate-800">
-        {/* Logo / Header */}
-        <div className="p-5 border-b border-slate-800/80 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-orange-500 via-white to-green-600 p-0.5 shadow-md flex items-center justify-center">
-            <div className="w-full h-full bg-[#0B1528] rounded-full flex items-center justify-center">
-              <span className="text-white font-black text-xs tracking-wider">INC</span>
+    <div className="w-full h-screen overflow-hidden flex flex-col md:flex-row bg-[#F8FAFC] text-slate-900 font-sans antialiased" id="state-dashboard-root">
+      {/* Sidebar Navigation: Fixed Full-Height matching Mandal / Booth benchmark */}
+      <aside className="fixed inset-y-0 left-0 z-40 w-64 h-screen bg-slate-950 text-white flex flex-col justify-between border-r border-slate-900 p-5 shrink-0 select-none md:fixed" id="state-sidebar">
+        <div className="space-y-5">
+          {/* Logo / Header */}
+          <div className="flex items-center gap-3 border-b border-slate-800/80 pb-4">
+            <div className="w-11 h-11 bg-amber-400 rounded-full flex items-center justify-center text-slate-950 font-black text-base shadow-md shrink-0">
+              INC
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-sm font-black tracking-tight text-white truncate">
+                {config.organisationName || 'Telangana Congress'}
+              </h2>
+              <span className="text-[10px] bg-slate-900 text-amber-300 font-extrabold uppercase px-2 py-0.5 rounded tracking-wide border border-amber-400/20">
+                STATE INCHARGE
+              </span>
             </div>
           </div>
-          <div>
-            <div className="text-sm font-black text-white tracking-wide">
-              {config.organisationName || 'INC Connect'}
-            </div>
-            <div className="text-[10px] font-mono uppercase tracking-widest text-blue-400 font-bold">
-              STATE INCHARGE
+
+          {/* Assigned Jurisdiction Card */}
+          <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80 space-y-1">
+            <p className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Assigned Jurisdiction</p>
+            <h4 className="text-xs font-bold text-slate-100 truncate">
+              Telangana State Command
+            </h4>
+            <div className="text-[10px] text-slate-400 flex flex-col gap-0.5 font-mono">
+              <span>Scope: 119 ACs &bull; 17 LS Seats</span>
+              <span>Total Voters: 33,517,327</span>
+              <span>Operator: {session.userName || 'TPCC State Chief'}</span>
             </div>
           </div>
+
+          {/* Navigation Items */}
+          <nav className="space-y-1 text-xs" id="state-sidebar-nav">
+            {[
+              { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+              { id: 'constituency_list', label: 'Constituency List (119)', icon: Users },
+              { id: 'parliament_list', label: 'Parliament List (17)', icon: Building2 },
+              { id: 'zone_list', label: 'Zones List (5)', icon: Layers },
+              { id: 'ground_reports', label: 'Ground Reports', icon: BarChart3 },
+              { id: 'campaign', label: 'Start A Campaign', icon: Megaphone },
+              { id: 'poll', label: 'Raise A Poll', icon: Vote },
+              { id: 'cadre_network', label: 'Cadre Network', icon: Network },
+              { id: 'ai_intel', label: 'AI Intelligence', icon: Bot },
+            ].map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    setActiveTab(item.id as StateTabType);
+                    setSelectedZone(null);
+                  }}
+                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-bold transition-all text-left cursor-pointer ${
+                    isActive
+                      ? 'bg-amber-400 text-slate-950 shadow-md font-black'
+                      : 'text-slate-300 hover:bg-slate-900 hover:text-white'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-slate-950' : 'text-slate-400'}`} />
+                  <span className="truncate">{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
         </div>
 
-        {/* Navigation Items */}
-        <nav className="flex-1 overflow-y-auto p-3 space-y-1 text-xs">
-          {[
-            { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-            { id: 'constituency_list', label: 'Constituency List (119)', icon: Users },
-            { id: 'parliament_list', label: 'Parliament List (17)', icon: Building2 },
-            { id: 'zone_list', label: 'Zones List (5)', icon: Layers },
-            { id: 'ground_reports', label: 'Ground Reports', icon: BarChart3 },
-            { id: 'campaign', label: 'Start A Campaign', icon: Megaphone },
-            { id: 'poll', label: 'Raise A Poll', icon: Vote },
-            { id: 'cadre_network', label: 'Cadre Network', icon: Network },
-            { id: 'ai_intel', label: 'AI Intelligence', icon: Bot },
-          ].map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => {
-                  setActiveTab(item.id as StateTabType);
-                  setSelectedZone(null);
-                }}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-bold transition-all text-left cursor-pointer ${
-                  isActive
-                    ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
-              >
-                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                <span className="truncate">{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-
         {/* Bottom Sign Out */}
-        <div className="p-3 border-t border-slate-800/80">
+        <div className="pt-4 border-t border-slate-900 mt-auto">
           <button
             onClick={onLogout}
-            className="w-full flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-400 hover:text-rose-400 hover:bg-slate-800/60 transition cursor-pointer"
+            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-bold text-red-400 hover:bg-red-950/20 hover:text-red-300 transition-colors cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
             <span>Sign Out</span>
@@ -266,160 +280,226 @@ export default function StateDashboard({ session, onLogout }: StateDashboardProp
         </div>
       </aside>
 
-      {/* Main Workspace */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-        {/* Top Header */}
-        <header className="h-16 border-b border-slate-200 bg-white sticky top-0 z-30 px-6 flex items-center justify-between shadow-xs">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200">
-              TPCC HQ ACCESS
-            </span>
-            <span className="text-sm font-extrabold text-slate-800 hidden sm:inline">
-              Statewide War Room &bull; Telangana 2024
-            </span>
-          </div>
+      {/* Main Workspace with native scroll */}
+      <main className="flex-1 h-screen overflow-y-auto overflow-x-hidden bg-[#F8FAFC] relative md:pl-64" id="main-workspace-section">
+        {/* Tab Content */}
+        <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto w-full pb-28">
+          {/* In-page Header Banner (White Card matching Mandal / Booth standard) */}
+          <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm" id="state-header-bar">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div className="space-y-1">
+                <span className="text-[10px] bg-yellow-400 text-slate-950 px-2 py-0.5 rounded font-black uppercase tracking-widest">
+                  APEX STATE COMMAND
+                </span>
+                <h1 className="text-2xl font-black tracking-tight text-slate-900" id="state-title">
+                  Statewide War Room &bull; Telangana 2024
+                </h1>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 font-semibold">
+                  <span className="text-slate-900">Jurisdiction: <strong className="font-extrabold">Telangana State (119 Segments)</strong></span>
+                  <span className="text-slate-300">|</span>
+                  <span className="text-slate-900">Total Voters: <strong className="font-extrabold text-slate-950">33,517,327</strong></span>
+                  <span className="text-slate-300">|</span>
+                  <span>Parliaments: <strong className="font-extrabold text-slate-950">17 LS Seats</strong></span>
+                </div>
+              </div>
 
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>{session.userName || 'TPCC Chief / State Incharge'}</span>
+              <div className="flex flex-col items-end shrink-0 bg-slate-50 border border-slate-100 p-3 rounded-lg text-right">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  Live State Network Active
+                </div>
+                <p className="text-[10px] text-gray-500 font-semibold uppercase mt-1">
+                  {session.userName || 'TPCC Chief / State Incharge'}
+                </p>
+              </div>
             </div>
           </div>
-        </header>
 
-        {/* Tab Content */}
-        <div className="p-6 max-w-7xl mx-auto w-full space-y-6">
           {/* TAB 1: DASHBOARD */}
           {activeTab === 'dashboard' && (
-            <div className="space-y-6 animate-fade-in">
-              {/* Top 4 White KPI Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
-                  <p className="text-slate-500 text-sm font-medium">Total Voters</p>
-                  <h3 className="text-3xl font-black text-slate-800 mt-1">33,517,327</h3>
-                  <p className="text-green-600 text-xs mt-1.5 font-bold flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    Statewide Coverage 100%
-                  </p>
+            <div className="space-y-6 animate-fade-in" id="state-dashboard-view">
+              {/* ELECTION FORECAST HERO BANNER */}
+              <div className="relative bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 text-white rounded-2xl p-6 md:p-8 shadow-md border border-slate-800" id="state-forecast-banner">
+                <div className="absolute right-0 bottom-0 top-0 w-1/3 opacity-10 pointer-events-none bg-[radial-gradient(circle_at_bottom_right,_var(--tw-gradient-stops))] from-yellow-400 via-transparent to-transparent"></div>
+                
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
+                  <div className="space-y-2">
+                    <span className="px-2 py-0.5 bg-yellow-400/20 text-yellow-400 text-[10px] font-black uppercase tracking-widest rounded border border-yellow-400/20">
+                      STATEWIDE ELECTION FORECAST / PROJECTION
+                    </span>
+                    
+                    <h2 className="text-3xl font-black tracking-tight" id="state-forecast-winner">
+                      <span className="text-yellow-400">INC</span>{' '}
+                      <span className="text-white">PROJECTED CLEAR MAJORITY</span>
+                    </h2>
+                    
+                    <p className="text-lg font-bold text-gray-300">
+                      Leading in <span className="text-yellow-400 text-xl font-extrabold">69 / 119</span> Assembly Seats • Statewide Vote Share <span className="text-emerald-400 font-black">41.2%</span>
+                    </p>
+                    
+                    <p className="text-xs text-gray-400 font-medium">
+                      Based on real-time aggregated telemetries across all 119 ACs &bull; Magic Figure: 60 Seats
+                    </p>
+                  </div>
+                  
+                  {/* Trophy Accent Graphic */}
+                  <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 flex items-center justify-center shrink-0 shadow">
+                    <Award className="w-12 h-12 text-yellow-400" />
+                  </div>
+                </div>
+              </div>
+
+              {/* TOP 4 TINTED KPI CARDS */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="state-top-cards">
+                {/* Card 1: Total Voters */}
+                <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-5 shadow-sm flex flex-col justify-between space-y-3">
+                  <p className="text-xs font-black text-slate-500 uppercase tracking-wider">Total Voters</p>
+                  <h3 className="text-3xl font-black text-slate-950">33,517,327</h3>
+                  <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                    <span>Coverage</span>
+                    <span className="font-extrabold text-emerald-600 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Statewide Coverage 100%
+                    </span>
+                  </div>
                 </div>
 
-                <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
-                  <p className="text-slate-500 text-sm font-medium">Projected Wins (Seats)</p>
-                  <h3 className="text-3xl font-black text-blue-600 mt-1">
-                    69 <span className="text-slate-400 text-lg font-normal">/ 119</span>
+                {/* Card 2: Projected Wins */}
+                <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-5 shadow-sm flex flex-col justify-between space-y-3">
+                  <p className="text-xs font-black text-amber-700 uppercase tracking-wider">Projected Wins (Seats)</p>
+                  <h3 className="text-3xl font-black text-amber-600">
+                    69 <span className="text-amber-800/60 text-lg font-bold">/ 119</span>
                   </h3>
-                  <p className="text-blue-600 text-xs mt-1.5 font-medium">
-                    Magic Figure: <strong className="font-bold">60</strong>
-                  </p>
+                  <div className="pt-2 border-t border-amber-100 flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                    <span>Magic Figure</span>
+                    <span className="font-black text-amber-700">60 Seats</span>
+                  </div>
                 </div>
 
-                <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
-                  <p className="text-slate-500 text-sm font-medium">Vote Share</p>
-                  <h3 className="text-3xl font-black text-blue-600 mt-1">41.2%</h3>
-                  <p className="text-blue-600 text-xs mt-1.5 font-medium">+2.4% vs Last Election</p>
+                {/* Card 3: Vote Share */}
+                <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-5 shadow-sm flex flex-col justify-between space-y-3">
+                  <p className="text-xs font-black text-purple-700 uppercase tracking-wider">Vote Share</p>
+                  <h3 className="text-3xl font-black text-purple-600">41.2%</h3>
+                  <div className="pt-2 border-t border-purple-200/60 flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                    <span>Trend</span>
+                    <span className="font-black text-purple-700">+2.4% vs Last Election</span>
+                  </div>
                 </div>
 
-                <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
-                  <p className="text-slate-500 text-sm font-medium">Fake Votes Identified</p>
-                  <h3 className="text-3xl font-black text-red-600 mt-1 flex items-center gap-2">
+                {/* Card 4: Fake Votes */}
+                <div className="bg-rose-50/50 border-2 border-rose-200 rounded-xl p-5 shadow-sm flex flex-col justify-between space-y-3">
+                  <p className="text-xs font-black text-rose-700 uppercase tracking-wider">Fake Votes Identified</p>
+                  <h3 className="text-3xl font-black text-rose-600 flex items-center gap-2">
                     73,427
-                    <AlertTriangle className="text-red-500 w-6 h-6" />
+                    <AlertTriangle className="text-rose-500 w-5 h-5" />
                   </h3>
-                  <p className="text-slate-500 text-xs mt-1.5">Flagged for EC Complaint</p>
+                  <div className="pt-2 border-t border-rose-200/60 flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                    <span>EC Complaints</span>
+                    <span className="font-black text-rose-700">Flagged Statewide</span>
+                  </div>
                 </div>
               </div>
 
               {/* Row 2: Election Forecast & Party Breakdown */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Election Forecast Card */}
-                <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
-                  <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
-                    <Trophy className="text-yellow-500 w-5 h-5" />
-                    <span>Election Forecast</span>
-                  </h3>
-
-                  <div className="mb-6 space-y-1">
-                    <div className="flex justify-between text-sm font-bold mb-1">
-                      <span className="text-slate-700">Assembly Seats (Magic Figure: 60)</span>
-                      <span className="text-blue-600">69/119</span>
-                    </div>
-                    <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                      <div className="h-full bg-blue-600 rounded-full" style={{ width: '58%' }} />
-                    </div>
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200/80 space-y-5">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <Trophy className="text-amber-500 w-5 h-5" />
+                      <span>Election Forecast Breakdown</span>
+                    </h3>
+                    <span className="text-[11px] font-extrabold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-200">
+                      69/119 Leading
+                    </span>
                   </div>
 
-                  <div className="mb-6 space-y-1">
-                    <div className="flex justify-between text-sm font-bold mb-1">
-                      <span className="text-slate-700">Parliament Seats</span>
-                      <span className="text-green-600">10/17</span>
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex justify-between text-xs font-bold mb-1.5">
+                        <span className="text-slate-700">Assembly Seats (Magic Figure: 60)</span>
+                        <span className="text-blue-600 font-extrabold">69/119</span>
+                      </div>
+                      <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden p-0.5 border border-slate-200/60">
+                        <div className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full transition-all duration-500" style={{ width: '58%' }} />
+                      </div>
                     </div>
-                    <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                      <div className="h-full bg-green-600 rounded-full" style={{ width: '59%' }} />
+
+                    <div>
+                      <div className="flex justify-between text-xs font-bold mb-1.5">
+                        <span className="text-slate-700">Parliament Seats</span>
+                        <span className="text-emerald-600 font-extrabold">10/17</span>
+                      </div>
+                      <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden p-0.5 border border-slate-200/60">
+                        <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-full transition-all duration-500" style={{ width: '59%' }} />
+                      </div>
                     </div>
                   </div>
 
                   <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-4">
-                    <div className="text-center p-4 bg-blue-50/60 rounded-xl border border-blue-100">
-                      <p className="text-xs font-bold text-blue-500 uppercase tracking-wider mb-1">PROJECTED CM</p>
-                      <p className="text-xl font-black text-blue-900">INC Candidate</p>
+                    <div className="text-center p-4 bg-blue-50/70 rounded-xl border border-blue-200/60">
+                      <p className="text-[10px] font-black text-blue-700 uppercase tracking-widest mb-1">PROJECTED CM</p>
+                      <p className="text-lg font-black text-blue-950">INC Candidate</p>
                     </div>
-                    <div className="text-center p-4 bg-green-50/60 rounded-xl border border-green-100">
-                      <p className="text-xs font-bold text-green-500 uppercase tracking-wider mb-1">VOTE SHARE</p>
-                      <p className="text-xl font-black text-green-900">42.5%</p>
+                    <div className="text-center p-4 bg-emerald-50/70 rounded-xl border border-emerald-200/60">
+                      <p className="text-[10px] font-black text-emerald-700 uppercase tracking-widest mb-1">VOTE SHARE</p>
+                      <p className="text-lg font-black text-emerald-950">42.5%</p>
                     </div>
                   </div>
                 </div>
 
                 {/* Party-wise Breakdown Card */}
-                <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
-                  <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
-                    <BarChart3 className="text-slate-500 w-5 h-5" />
-                    <span>Party-wise Breakdown</span>
-                  </h3>
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200/80 space-y-5">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <BarChart3 className="text-slate-600 w-5 h-5" />
+                      <span>Party-wise Breakdown</span>
+                    </h3>
+                    <span className="text-[11px] font-bold text-slate-400">Total: 119 Seats</span>
+                  </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="p-4 rounded-xl bg-blue-50 border border-blue-100 relative overflow-hidden">
-                      <div className="flex justify-between items-center mb-2">
-                        <p className="text-xs font-bold text-blue-600 uppercase">INC (Congress)</p>
-                        <span className="text-[10px] font-bold bg-white/80 text-blue-700 px-1.5 py-0.5 rounded">
+                  <div className="grid grid-cols-2 gap-3.5">
+                    <div className="p-4 rounded-xl bg-blue-50/80 border-2 border-blue-200 relative overflow-hidden">
+                      <div className="flex justify-between items-center mb-1">
+                        <p className="text-xs font-black text-blue-800 uppercase tracking-wide">INC (Congress)</p>
+                        <span className="text-[10px] font-black bg-blue-600 text-white px-2 py-0.5 rounded-full">
                           58%
                         </span>
                       </div>
-                      <p className="text-4xl font-black text-blue-900 mb-1">69</p>
-                      <p className="text-xs text-blue-600 font-bold uppercase">Leading</p>
+                      <p className="text-3xl font-black text-blue-950 mb-0.5">69</p>
+                      <p className="text-[11px] text-blue-700 font-bold uppercase tracking-wider">Leading</p>
                     </div>
 
-                    <div className="p-4 rounded-xl bg-pink-50 border border-pink-100 relative overflow-hidden">
-                      <div className="flex justify-between items-center mb-2">
-                        <p className="text-xs font-bold text-pink-600 uppercase">BRS</p>
-                        <span className="text-[10px] font-bold bg-white/80 text-pink-700 px-1.5 py-0.5 rounded">
+                    <div className="p-4 rounded-xl bg-pink-50/70 border-2 border-pink-200 relative overflow-hidden">
+                      <div className="flex justify-between items-center mb-1">
+                        <p className="text-xs font-black text-pink-800 uppercase tracking-wide">BRS</p>
+                        <span className="text-[10px] font-bold bg-white text-pink-700 border border-pink-200 px-2 py-0.5 rounded-full">
                           29%
                         </span>
                       </div>
-                      <p className="text-4xl font-black text-pink-900 mb-1">35</p>
-                      <p className="text-xs text-pink-600 font-bold uppercase">Opposition</p>
+                      <p className="text-3xl font-black text-pink-950 mb-0.5">35</p>
+                      <p className="text-[11px] text-pink-700 font-bold uppercase tracking-wider">Opposition</p>
                     </div>
 
-                    <div className="p-4 rounded-xl bg-orange-50 border border-orange-100 relative overflow-hidden">
-                      <div className="flex justify-between items-center mb-2">
-                        <p className="text-xs font-bold text-orange-600 uppercase">BJP</p>
-                        <span className="text-[10px] font-bold bg-white/80 text-orange-700 px-1.5 py-0.5 rounded">
+                    <div className="p-4 rounded-xl bg-orange-50/70 border-2 border-orange-200 relative overflow-hidden">
+                      <div className="flex justify-between items-center mb-1">
+                        <p className="text-xs font-black text-orange-800 uppercase tracking-wide">BJP</p>
+                        <span className="text-[10px] font-bold bg-white text-orange-700 border border-orange-200 px-2 py-0.5 rounded-full">
                           7%
                         </span>
                       </div>
-                      <p className="text-4xl font-black text-orange-900 mb-1">8</p>
-                      <p className="text-xs text-orange-600 font-bold uppercase">Trailing</p>
+                      <p className="text-3xl font-black text-orange-950 mb-0.5">8</p>
+                      <p className="text-[11px] text-orange-700 font-bold uppercase tracking-wider">Trailing</p>
                     </div>
 
-                    <div className="p-4 rounded-xl bg-green-50 border border-green-100 relative overflow-hidden">
-                      <div className="flex justify-between items-center mb-2">
-                        <p className="text-xs font-bold text-green-600 uppercase">MIM</p>
-                        <span className="text-[10px] font-bold bg-white/80 text-green-700 px-1.5 py-0.5 rounded">
+                    <div className="p-4 rounded-xl bg-emerald-50/70 border-2 border-emerald-200 relative overflow-hidden">
+                      <div className="flex justify-between items-center mb-1">
+                        <p className="text-xs font-black text-emerald-800 uppercase tracking-wide">MIM</p>
+                        <span className="text-[10px] font-bold bg-white text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
                           6%
                         </span>
                       </div>
-                      <p className="text-4xl font-black text-green-900 mb-1">7</p>
-                      <p className="text-xs text-green-600 font-bold uppercase">Stable</p>
+                      <p className="text-3xl font-black text-emerald-950 mb-0.5">7</p>
+                      <p className="text-[11px] text-emerald-700 font-bold uppercase tracking-wider">Stable</p>
                     </div>
                   </div>
                 </div>

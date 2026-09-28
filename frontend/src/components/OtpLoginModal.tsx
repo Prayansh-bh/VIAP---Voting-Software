@@ -1,7 +1,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, KeyRound, LoaderCircle, RefreshCw, ShieldCheck, Smartphone, Sparkles, UserCheck, X, Zap } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  KeyRound,
+  LoaderCircle,
+  RefreshCw,
+  ShieldCheck,
+  Smartphone,
+  Sparkles,
+  X,
+  ArrowRight,
+  Zap,
+  Users,
+  Building,
+  Crown,
+} from 'lucide-react';
 import { CommandRole, UserSession } from '../types';
-import { getMockSessionForRole, requestOtp, verifyOtp } from '../lib/api';
+import { requestOtp, verifyOtp, loginAsDemoRole } from '../lib/api';
 
 interface OtpLoginModalProps {
   role: CommandRole;
@@ -9,33 +24,100 @@ interface OtpLoginModalProps {
   onSuccess: (session: UserSession, token: string) => void;
 }
 
-export const ROLE_DEMO_CREDENTIALS: Record<string, { mobile: string; name: string; title: string }> = {
-  SUPER_ADMIN: { mobile: '9848099999', name: 'Super Administrator', title: 'System Governance & Telemetry' },
-  STATE_ADMIN: { mobile: '9848088888', name: 'State Incharge', title: 'Statewide War Room & Apex Command' },
-  ZONE_INCHARGE: { mobile: '9848099999', name: 'Zone Coordinator', title: 'Multi-Parliament Zone Command' },
-  PARLIAMENT_INCHARGE: { mobile: '9848088888', name: 'Parliament Incharge', title: 'Parliament MP War Room' },
-  CONSTITUENCY_INCHARGE: { mobile: '9848012345', name: 'Constituency Incharge', title: 'Assembly Constituency Command' },
-  MANDAL_INCHARGE: { mobile: '9848077777', name: 'Mandal President', title: 'Mandal Level Leadership' },
-  VILLAGE_INCHARGE: { mobile: '9848010001', name: 'Village Incharge', title: 'Village Level Leadership' },
-  BOOTH_PRESIDENT: { mobile: '9848010002', name: 'Booth President', title: 'Polling Booth Command' },
-  POLLING_AGENT: { mobile: '9848010002', name: 'Polling Agent', title: 'Polling Station Agent' },
-  VOTER_100_INCHARGE: { mobile: '9848010003', name: '100 Voter Incharge', title: '100-Voter Cluster Outreach' },
-  VIEWER: { mobile: '9848012345', name: 'Observer / Viewer', title: 'Read-Only View' },
-};
+export const ROLE_DEMO_PROFILES: Array<{
+  roleId: string;
+  name: string;
+  title: string;
+  mobile: string;
+  badge: string;
+}> = [
+  {
+    roleId: 'CONSTITUENCY_INCHARGE',
+    name: 'Constituency Incharge',
+    title: 'Assembly Constituency Command (MLA)',
+    mobile: '9848012345',
+    badge: 'MLA Seat',
+  },
+  {
+    roleId: 'STATE_ADMIN',
+    name: 'State Incharge',
+    title: 'Statewide War Room & Apex Command',
+    mobile: '9848088888',
+    badge: 'Apex',
+  },
+  {
+    roleId: 'PARLIAMENT_INCHARGE',
+    name: 'Parliament Incharge',
+    title: 'Parliament MP War Room',
+    mobile: '9848088887',
+    badge: 'MP Seat',
+  },
+  {
+    roleId: 'ZONE_INCHARGE',
+    name: 'Zone Coordinator',
+    title: 'Multi-Parliament Zone Command',
+    mobile: '9848099998',
+    badge: 'Regional',
+  },
+  {
+    roleId: 'SUPER_ADMIN',
+    name: 'Super Administrator',
+    title: 'System Governance & Telemetry',
+    mobile: '9848099999',
+    badge: 'System',
+  },
+  {
+    roleId: 'MANDAL_INCHARGE',
+    name: 'Mandal President',
+    title: 'Mandal Level Leadership',
+    mobile: '9848077777',
+    badge: 'Mandal',
+  },
+  {
+    roleId: 'BOOTH_PRESIDENT',
+    name: 'Booth President',
+    title: 'Polling Station Defense',
+    mobile: '9848010002',
+    badge: 'Booth',
+  },
+  {
+    roleId: 'VOTER_100_INCHARGE',
+    name: '100 Voter Incharge',
+    title: '100-Voter Cluster Outreach',
+    mobile: '9848010003',
+    badge: 'Cluster',
+  },
+];
+
+export const ROLE_DEMO_MOBILE_DIRECTORY: Record<string, { mobile: string; name: string; title: string }> =
+  Object.fromEntries(
+    ROLE_DEMO_PROFILES.map((p) => [p.roleId, { mobile: p.mobile, name: p.name, title: p.title }])
+  );
 
 export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModalProps) {
-  const roleDemo = ROLE_DEMO_CREDENTIALS[role.id] || { mobile: '9848012345', name: role.name, title: role.subtitle };
-  const [mobileNumber, setMobileNumber] = useState(roleDemo.mobile);
+  const currentDemo = ROLE_DEMO_PROFILES.find((p) => p.roleId === role.id) || {
+    roleId: role.id,
+    name: role.name,
+    title: role.subtitle,
+    mobile: '9848012345',
+    badge: 'Incharge',
+  };
+
+  const [activeTab, setActiveTab] = useState<'demo' | 'otp'>('demo');
+
+  // OTP Flow State
+  const [mobileNumber, setMobileNumber] = useState(currentDemo.mobile);
   const [otpCode, setOtpCode] = useState('');
   const [requestId, setRequestId] = useState<string | null>(null);
-  const [devOtp, setDevOtp] = useState<string | undefined>();
+
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submittingRoleId, setSubmittingRoleId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [cooldown, setCooldown] = useState(0);
 
-  const mode = useMemo(() => (requestId ? 'verify' : 'request'), [requestId]);
+  const otpMode = useMemo(() => (requestId ? 'verify' : 'request'), [requestId]);
 
-  // Cooldown countdown timer
+  // Countdown timer for resend cooldown
   useEffect(() => {
     if (cooldown <= 0) return;
     const timer = setInterval(() => {
@@ -44,18 +126,24 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
     return () => clearInterval(timer);
   }, [cooldown]);
 
-  const handleDirectDemoLogin = () => {
+  // 1-Click Instant Demo Authentication
+  const handleInstantDemoLogin = async (targetRole: string) => {
+    setError('');
     setIsSubmitting(true);
+    setSubmittingRoleId(targetRole);
+
     try {
-      const demoSession = getMockSessionForRole(role.id, mobileNumber || roleDemo.mobile);
-      onSuccess(demoSession, `demo-token-${Date.now()}`);
-    } catch {
-      setError('Unable to initialize demo session.');
+      const result = await loginAsDemoRole(targetRole);
+      onSuccess(result.session, result.token);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to authenticate demo account. Please retry.');
     } finally {
       setIsSubmitting(false);
+      setSubmittingRoleId(null);
     }
   };
 
+  // Request real OTP via MSG91
   const handleRequestOtp = async (event?: React.FormEvent, customMobile?: string) => {
     if (event) event.preventDefault();
     if (cooldown > 0) return;
@@ -72,21 +160,15 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
     try {
       const response = await requestOtp(numToUse, role.id);
       setRequestId(response.requestId);
-      setDevOtp(response.devOtp || '123456');
       setCooldown(response.cooldownSeconds || 30);
-      setOtpCode(response.devOtp || '123456');
     } catch (requestError: any) {
-      console.warn('[Auth] requestOtp fallback triggered:', requestError);
-      const demoReqId = `demo-req-${role.id}-${numToUse}-${Date.now()}`;
-      setRequestId(demoReqId);
-      setDevOtp('123456');
-      setOtpCode('123456');
-      setCooldown(30);
+      setError(requestError?.message || 'Failed to dispatch OTP. Please check mobile number.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // Verify OTP and authorize device
   const handleVerifyOtp = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!requestId || otpCode.length < 6) {
@@ -101,30 +183,23 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
       const result = await verifyOtp(requestId, otpCode);
       onSuccess(result.session, result.token);
     } catch (verifyError: any) {
-      console.warn('[Auth] verifyOtp fallback triggered:', verifyError);
-      const demoSession = getMockSessionForRole(role.id, mobileNumber || roleDemo.mobile);
-      onSuccess(demoSession, `demo-token-${Date.now()}`);
+      setError(verifyError?.message || 'Invalid or expired OTP code.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleQuickDemoFill = (mobile: string) => {
-    setMobileNumber(mobile);
-    setError('');
-  };
-
   return (
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in">
-      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden">
+    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 animate-fade-in font-sans">
+      <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="bg-slate-50 border-b border-slate-100 px-5 py-4 flex items-center justify-between">
+        <div className="bg-slate-50 border-b border-slate-100 px-5 py-4 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-300 text-amber-700 flex items-center justify-center font-bold">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-300 text-amber-700 flex items-center justify-center font-bold shadow-xs">
               <KeyRound className="w-5 h-5 text-amber-600" />
             </div>
             <div>
-              <h3 className="text-sm font-black text-slate-900 leading-tight">Secure Command Authentication</h3>
+              <h3 className="text-sm font-black text-slate-900 leading-tight">Command Station Login</h3>
               <p className="text-[11px] text-amber-700 font-bold mt-0.5">{role.name}</p>
             </div>
           </div>
@@ -137,186 +212,274 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
           </button>
         </div>
 
-        <div className="p-6 space-y-4">
-          <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 font-medium leading-relaxed flex items-start gap-2">
-            <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-            <span>
-              Log in to the <strong>Kondapi 2026 Command Center</strong> using your registered phone number or test directly using the preloaded demo credentials below.
-            </span>
+        {/* Tab Selector */}
+        <div className="px-5 pt-4 pb-1 shrink-0">
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('demo');
+                setError('');
+              }}
+              className={`flex-1 py-2 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeTab === 'demo'
+                  ? 'bg-white text-slate-950 shadow-sm border border-slate-200/50'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+              <span>Demo Accounts (Instant)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('otp');
+                setError('');
+              }}
+              className={`flex-1 py-2 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeTab === 'otp'
+                  ? 'bg-white text-slate-950 shadow-sm border border-slate-200/50'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <Smartphone className="w-3.5 h-3.5 text-amber-600" />
+              <span>Mobile OTP (MSG91)</span>
+            </button>
           </div>
+        </div>
 
+        {/* Scrollable Body */}
+        <div className="p-5 space-y-4 overflow-y-auto">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-xs font-semibold flex items-center gap-2 animate-shake">
+            <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl text-xs font-semibold flex items-center gap-2 animate-shake">
               <AlertTriangle className="w-4 h-4 shrink-0 text-red-500" />
               <span>{error}</span>
             </div>
           )}
 
-          {mode === 'request' ? (
-            <form onSubmit={handleRequestOtp} className="space-y-4">
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs font-bold text-slate-700">Registered Mobile Number</label>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoFill(roleDemo.mobile)}
-                    className="text-[11px] font-bold text-amber-700 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-0.5 rounded cursor-pointer transition-colors flex items-center gap-1"
-                  >
-                    <Sparkles className="w-3 h-3 text-amber-500" />
-                    Use Demo: {roleDemo.mobile}
-                  </button>
-                </div>
+          {/* ========================================================== */}
+          {/* TAB 1: DEMO ACCOUNTS (INSTANT 1-CLICK ACCESS) */}
+          {/* ========================================================== */}
+          {activeTab === 'demo' && (
+            <div className="space-y-4">
+              {/* Featured 1-Click Action for current role */}
+              <div className="bg-gradient-to-br from-amber-500 via-amber-600 to-amber-700 rounded-2xl p-4 text-white shadow-md relative overflow-hidden">
+                <div className="relative z-10 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-black/20 text-amber-100">
+                      <Sparkles className="w-3 h-3 text-amber-300" />
+                      1-Click Instant Demo
+                    </span>
+                    <span className="text-[11px] font-mono font-bold text-amber-100 bg-white/10 px-2 py-0.5 rounded">
+                      +91 {currentDemo.mobile}
+                    </span>
+                  </div>
 
-                <div className="relative">
-                  <Smartphone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="tel"
-                    value={mobileNumber}
-                    onChange={(event) => setMobileNumber(event.target.value.replace(/\D/g, '').slice(0, 10))}
-                    placeholder="Enter 10-digit mobile number"
-                    className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 font-bold focus:bg-white focus:border-amber-400 focus:ring-2 focus:ring-amber-200 focus:outline-none transition-all font-mono tracking-wider"
-                    required
-                    autoFocus
-                  />
-                </div>
-              </div>
+                  <div>
+                    <h4 className="text-base font-black leading-tight text-white">{currentDemo.name}</h4>
+                    <p className="text-[11px] text-amber-100 font-medium">{currentDemo.title}</p>
+                  </div>
 
-              {/* Quick Demo Credentials Row */}
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Quick Demo Numbers</span>
-                  <span className="text-[10px] font-semibold text-slate-400">1-Tap to Fill</span>
-                </div>
-                <div className="grid grid-cols-2 gap-1.5 text-[11px]">
                   <button
                     type="button"
-                    onClick={() => handleQuickDemoFill('9848012345')}
-                    className={`p-1.5 rounded-lg border text-left cursor-pointer transition-all ${
-                      mobileNumber === '9848012345' ? 'bg-amber-50 border-amber-300 text-amber-900 font-bold' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                    }`}
+                    onClick={() => handleInstantDemoLogin(currentDemo.roleId)}
+                    disabled={isSubmitting}
+                    className="w-full py-2.5 bg-white hover:bg-amber-50 text-slate-950 font-black rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98 disabled:opacity-50"
                   >
-                    <span className="block text-[10px] text-slate-500">MLA / Constituency</span>
-                    <span className="font-mono font-bold">9848012345</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoFill('9848077777')}
-                    className={`p-1.5 rounded-lg border text-left cursor-pointer transition-all ${
-                      mobileNumber === '9848077777' ? 'bg-amber-50 border-amber-300 text-amber-900 font-bold' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className="block text-[10px] text-slate-500">Mandal Incharge</span>
-                    <span className="font-mono font-bold">9848077777</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoFill('9848010002')}
-                    className={`p-1.5 rounded-lg border text-left cursor-pointer transition-all ${
-                      mobileNumber === '9848010002' ? 'bg-amber-50 border-amber-300 text-amber-900 font-bold' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className="block text-[10px] text-slate-500">Booth President</span>
-                    <span className="font-mono font-bold">9848010002</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoFill('9848099999')}
-                    className={`p-1.5 rounded-lg border text-left cursor-pointer transition-all ${
-                      mobileNumber === '9848099999' ? 'bg-amber-50 border-amber-300 text-amber-900 font-bold' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className="block text-[10px] text-slate-500">Super Admin</span>
-                    <span className="font-mono font-bold">9848099999</span>
+                    {isSubmitting && submittingRoleId === currentDemo.roleId ? (
+                      <LoaderCircle className="w-4 h-4 animate-spin text-slate-950" />
+                    ) : (
+                      <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-600" />
+                    )}
+                    <span>Sign In Instantly as {currentDemo.name}</span>
+                    <ArrowRight className="w-3.5 h-3.5 text-slate-700" />
                   </button>
                 </div>
               </div>
 
+              {/* All Demo Accounts Directory */}
               <div className="space-y-2">
-                <button
-                  type="submit"
-                  disabled={isSubmitting || mobileNumber.length < 10}
-                  className="w-full py-3 bg-amber-400 hover:bg-amber-500 disabled:bg-slate-200 disabled:text-slate-400 text-slate-950 font-black rounded-xl text-sm shadow-md hover:shadow transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed active:scale-[0.99]"
-                >
-                  {isSubmitting ? <LoaderCircle className="w-4 h-4 animate-spin" /> : null}
-                  Request Verification Code
-                </button>
+                <div className="flex items-center justify-between px-0.5">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">
+                    All Demo Accounts Directory
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-400">1-Tap to Login Any Role</span>
+                </div>
 
-                <button
-                  type="button"
-                  onClick={handleDirectDemoLogin}
-                  disabled={isSubmitting}
-                  className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-600 hover:to-yellow-500 text-slate-950 font-black rounded-xl text-xs shadow-sm hover:shadow transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.99]"
-                >
-                  <Zap className="w-4 h-4 fill-current text-slate-950" />
-                  ⚡ Instant 1-Click Demo Login (Direct Access)
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {ROLE_DEMO_PROFILES.map((item) => {
+                    const isCurrent = item.roleId === role.id;
+                    const isItemSubmitting = isSubmitting && submittingRoleId === item.roleId;
+
+                    return (
+                      <div
+                        key={item.roleId}
+                        className={`p-2.5 rounded-xl border transition-all flex flex-col justify-between gap-2 ${
+                          isCurrent
+                            ? 'bg-amber-50/70 border-amber-300 shadow-2xs'
+                            : 'bg-slate-50/70 hover:bg-slate-100 border-slate-200/80'
+                        }`}
+                      >
+                        <div className="space-y-0.5">
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="text-xs font-bold text-slate-900 truncate">{item.name}</span>
+                            <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-slate-200/80 text-slate-700">
+                              {item.badge}
+                            </span>
+                          </div>
+                          <div className="font-mono text-[10px] text-slate-500 flex items-center gap-1 font-semibold">
+                            <span>+91 {item.mobile}</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleInstantDemoLogin(item.roleId)}
+                          disabled={isSubmitting}
+                          className={`w-full py-1.5 rounded-lg text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer active:scale-98 ${
+                            isCurrent
+                              ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-2xs'
+                              : 'bg-white hover:bg-slate-900 hover:text-white text-slate-800 border border-slate-200 shadow-2xs'
+                          }`}
+                        >
+                          {isItemSubmitting ? (
+                            <LoaderCircle className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
+                          )}
+                          <span>Sign In</span>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </form>
-          ) : (
-            <form onSubmit={handleVerifyOtp} className="space-y-4">
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-800 font-semibold flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-emerald-600" />
-                <div>
-                  OTP dispatched to <span className="font-mono font-bold">+91 {mobileNumber}</span>.
-                  {devOtp ? (
-                    <div className="mt-1 text-emerald-800 bg-emerald-100/90 px-2 py-0.5 rounded font-mono text-[11px] inline-block font-bold border border-emerald-300">
-                      ⚡ Development OTP: {devOtp} (Auto-filled)
+
+              {/* Security Hint */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-[11px] text-slate-600 font-medium flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Demo sessions register this device automatically for persistent zero-OTP access.</span>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================== */}
+          {/* TAB 2: LIVE MOBILE NUMBER + MSG91 OTP */}
+          {/* ========================================================== */}
+          {activeTab === 'otp' && (
+            <div className="space-y-4">
+              <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 font-medium leading-relaxed flex items-start gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <span className="font-bold text-amber-950 block">Live MSG91 SMS / WhatsApp Verification</span>
+                  <span>Enter any registered mobile number to receive a 6-digit OTP and remember this device.</span>
+                </div>
+              </div>
+
+              {otpMode === 'request' ? (
+                <form onSubmit={handleRequestOtp} className="space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700">Registered Mobile Number</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileNumber(currentDemo.mobile);
+                          setError('');
+                        }}
+                        className="text-[11px] font-bold text-amber-700 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-0.5 rounded cursor-pointer transition-colors flex items-center gap-1"
+                      >
+                        <Sparkles className="w-3 h-3 text-amber-500" />
+                        Fill Demo: {currentDemo.mobile}
+                      </button>
                     </div>
-                  ) : null}
-                </div>
-              </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs font-bold text-slate-700">Enter 6-Digit OTP</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 font-mono">
+                        +91
+                      </span>
+                      <input
+                        type="tel"
+                        value={mobileNumber}
+                        onChange={(event) => setMobileNumber(event.target.value.replace(/\D/g, '').slice(0, 10))}
+                        placeholder="Enter 10-digit mobile number"
+                        className="w-full pl-12 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 font-bold focus:bg-white focus:border-amber-400 focus:outline-none transition-all font-mono tracking-wider"
+                        required
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+
                   <button
-                    type="button"
-                    disabled={cooldown > 0 || isSubmitting}
-                    onClick={() => handleRequestOtp()}
-                    className="text-[11px] font-bold text-amber-700 hover:text-amber-800 disabled:text-slate-400 flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+                    type="submit"
+                    disabled={isSubmitting || mobileNumber.length < 10}
+                    className="w-full py-3 bg-amber-400 hover:bg-amber-300 disabled:bg-slate-200 disabled:text-slate-400 text-slate-950 font-black rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed active:scale-98"
                   >
-                    <RefreshCw className={`w-3 h-3 ${isSubmitting ? 'animate-spin' : ''}`} />
-                    {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend Code'}
+                    {isSubmitting ? <LoaderCircle className="w-4 h-4 animate-spin" /> : null}
+                    <span>Request Verification Code</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
                   </button>
-                </div>
-                <input
-                  type="text"
-                  value={otpCode}
-                  onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="------"
-                  className="w-full text-center tracking-[0.4em] font-mono py-3 bg-slate-50 border border-slate-200 rounded-xl text-xl text-slate-900 font-black focus:bg-white focus:border-amber-400 focus:ring-2 focus:ring-amber-200 focus:outline-none transition-all shadow-inner"
-                  required
-                  autoFocus
-                />
-              </div>
+                </form>
+              ) : (
+                <form onSubmit={handleVerifyOtp} className="space-y-4">
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-800 font-semibold flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-emerald-600" />
+                    <div>
+                      OTP dispatched to <span className="font-mono font-bold">+91 {mobileNumber}</span>.
+                    </div>
+                  </div>
 
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRequestId(null);
-                    setOtpCode('');
-                    setDevOtp(undefined);
-                    setError('');
-                  }}
-                  className="flex-1 py-2.5 bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 font-bold rounded-xl text-xs transition-colors cursor-pointer"
-                >
-                  Change Number
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting || otpCode.length < 6}
-                  className="flex-1 py-2.5 bg-amber-400 hover:bg-amber-500 disabled:bg-slate-200 disabled:text-slate-400 text-slate-950 font-black rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed active:scale-[0.99]"
-                >
-                  {isSubmitting ? <LoaderCircle className="w-4 h-4 animate-spin" /> : null}
-                  Verify & Enter
-                </button>
-              </div>
-            </form>
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700">Enter 6-Digit OTP</label>
+                      <button
+                        type="button"
+                        disabled={cooldown > 0 || isSubmitting}
+                        onClick={() => handleRequestOtp()}
+                        className="text-[11px] font-bold text-amber-700 hover:text-amber-800 disabled:text-slate-400 flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isSubmitting ? 'animate-spin' : ''}`} />
+                        {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend Code'}
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={otpCode}
+                      onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="------"
+                      className="w-full text-center tracking-[0.4em] font-mono py-3 bg-slate-50 border border-slate-200 rounded-xl text-2xl text-slate-900 font-black focus:bg-white focus:border-amber-400 focus:outline-none transition-all shadow-inner"
+                      required
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRequestId(null);
+                        setOtpCode('');
+                        setError('');
+                      }}
+                      className="flex-1 py-2.5 bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                    >
+                      Change Number
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSubmitting || otpCode.length < 6}
+                      className="flex-1 py-2.5 bg-amber-400 hover:bg-amber-300 disabled:bg-slate-200 disabled:text-slate-400 text-slate-950 font-black rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed active:scale-98"
+                    >
+                      {isSubmitting ? <LoaderCircle className="w-4 h-4 animate-spin" /> : null}
+                      Verify & Remember Device
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           )}
         </div>
       </div>
     </div>
   );
 }
-

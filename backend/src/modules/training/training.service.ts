@@ -103,25 +103,8 @@ export class TrainingService {
   }
 
   static async updateProgress(videoId: string, userId: string, dto: any) {
-    const isUuid = (val?: string | null): boolean =>
-      typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
-
-    let targetVideoId = videoId;
-    if (!isUuid(targetVideoId)) {
-      const found = await prisma.trainingVideo.findFirst();
-      if (found) targetVideoId = found.id;
-      else throw new Error('Video not found');
-    }
-
-    let targetUserId = userId;
-    if (!isUuid(targetUserId)) {
-      const found = await prisma.user.findFirst();
-      if (found) targetUserId = found.id;
-      else throw new Error('User not found');
-    }
-
     const progress = await prisma.trainingProgress.upsert({
-      where: { userId_videoId: { userId: targetUserId, videoId: targetVideoId } },
+      where: { userId_videoId: { userId, videoId } },
       update: {
         status: dto.status,
         quizScore: dto.quizScore,
@@ -130,8 +113,8 @@ export class TrainingService {
         completedAt: dto.status === TrainingStatus.COMPLETED ? new Date() : undefined,
       },
       create: {
-        userId: targetUserId,
-        videoId: targetVideoId,
+        userId,
+        videoId,
         status: dto.status,
         quizScore: dto.quizScore,
         notes: dto.notes,
@@ -141,56 +124,6 @@ export class TrainingService {
     });
 
     return progress;
-  }
-
-  static async getProgress(userId?: string, unitId?: string) {
-    const isUuid = (val?: string | null): boolean =>
-      typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
-
-    const where: Prisma.TrainingProgressWhereInput = {};
-    if (userId && isUuid(userId)) where.userId = userId;
-    if (unitId && isUuid(unitId)) where.user = { unitId };
-
-    return prisma.trainingProgress.findMany({
-      where,
-      include: {
-        video: { select: { id: true, title: true, category: true, duration: true } },
-        user: { select: { id: true, userCode: true, name: true, role: true } },
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
-  }
-
-  static async ensureAssigned(userId: string, videoId: string, assignedById?: string) {
-    const isUuid = (val?: string | null): boolean =>
-      typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
-
-    let targetVideoId = videoId;
-    if (!isUuid(targetVideoId)) {
-      const found = await prisma.trainingVideo.findFirst();
-      if (found) targetVideoId = found.id;
-    }
-
-    let targetUserId = userId;
-    if (!isUuid(targetUserId)) {
-      const found = await prisma.user.findFirst();
-      if (found) targetUserId = found.id;
-    }
-
-    return prisma.trainingProgress.upsert({
-      where: { userId_videoId: { userId: targetUserId, videoId: targetVideoId } },
-      update: {},
-      create: {
-        userId: targetUserId,
-        videoId: targetVideoId,
-        status: TrainingStatus.ASSIGNED,
-        assignedById: isUuid(assignedById) ? assignedById : undefined,
-      },
-      include: {
-        video: { select: { id: true, title: true } },
-        user: { select: { id: true, userCode: true, name: true } },
-      },
-    });
   }
 
   static async getTrainingAnalytics(accessibleUnitIds?: Set<string>) {
@@ -224,4 +157,3 @@ export class TrainingService {
     };
   }
 }
-

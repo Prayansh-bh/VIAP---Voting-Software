@@ -432,7 +432,7 @@ export default function PlatformAdminPortal() {
   const [filterStatus, setFilterStatus] = useState<'All' | 'Active' | 'Inactive'>('All');
   const [previewMobile, setPreviewMobile] = useState(false);
 
-  const { updateConfig } = useCms();
+  const { config, updateConfig } = useCms();
 
   useEffect(() => {
     async function loadBackendApps() {
@@ -515,69 +515,76 @@ export default function PlatformAdminPortal() {
   const defaultApp = apps.find((a) => a.isDefault);
 
   return (
-    <div className="min-h-screen bg-slate-900/90 p-3 sm:p-6 font-['Inter',sans-serif] flex justify-center items-start">
+    <div id="platform-admin-root" className="min-h-screen bg-slate-900/90 p-3 sm:p-6 font-sans antialiased flex justify-center items-start">
       <div className="w-full max-w-7xl bg-slate-100 rounded-[28px] shadow-2xl border border-slate-300 overflow-hidden">
         {/* Dark Blue Header */}
         <div className="bg-[#0F172A] text-white px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800">
           <div className="flex items-center gap-3">
             <button
-              onClick={() => (window.location.hash = '/')}
-              className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-200 transition-colors shadow-xs"
+              onClick={() => {
+                if (typeof window !== 'undefined' && window.history.length > 1) {
+                  window.history.back();
+                } else {
+                  window.location.hash = '/roles';
+                }
+              }}
+              className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-200 transition-colors shadow-xs cursor-pointer"
+              title="Return"
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
             <div>
-              <div className="flex items-center gap-2">
-                <Settings className="w-5 h-5 text-[#F59E0B]" />
-                <h1 className="font-black text-lg md:text-xl tracking-tight text-white">
-                  Kondapi Platform Administration
+              <div className="flex items-center gap-2.5">
+                <Settings className="w-5 h-5 text-amber-400" />
+                <h1 className="font-bold text-lg md:text-xl tracking-tight text-white">
+                  {config.organisationName || 'Kondapi'} Platform Administration
                 </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-[#F59E0B] text-slate-950 shadow-xs">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-400 text-slate-950 shadow-xs">
                   MULTI-TENANT ENGINE
                 </span>
               </div>
-              <p className="text-xs text-slate-400 font-semibold mt-0.5">
+              <p className="text-xs text-slate-400 font-normal mt-0.5">
                 Configure, deploy, and isolate branded constituency applications from the master template
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setView('list')}
-              className={`px-4 py-2 rounded-xl text-xs md:text-sm font-black transition-all ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs md:text-sm transition-all cursor-pointer ${
                 view === 'list'
-                  ? 'bg-[#F59E0B] text-slate-950 shadow-md'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  ? 'bg-amber-400 text-slate-950 shadow-md font-bold'
+                  : 'bg-slate-800/90 text-slate-300 hover:bg-slate-700 hover:text-white font-medium'
               }`}
             >
               Manage Applications
             </button>
             <button
               onClick={() => setView('create')}
-              className={`px-4 py-2 rounded-xl text-xs md:text-sm font-black transition-all ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs md:text-sm transition-all cursor-pointer ${
                 view === 'create'
-                  ? 'bg-[#F59E0B] text-slate-950 shadow-md'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  ? 'bg-amber-400 text-slate-950 shadow-md font-bold'
+                  : 'bg-slate-800/90 text-slate-300 hover:bg-slate-700 hover:text-white font-medium'
               }`}
             >
               Create New App
             </button>
             <button
               onClick={() => setView('assign-data')}
-              className={`px-4 py-2 rounded-xl text-xs md:text-sm font-black transition-all ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs md:text-sm transition-all cursor-pointer ${
                 view === 'assign-data'
-                  ? 'bg-[#F59E0B] text-slate-950 shadow-md'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  ? 'bg-amber-400 text-slate-950 shadow-md font-bold'
+                  : 'bg-slate-800/90 text-slate-300 hover:bg-slate-700 hover:text-white font-medium'
               }`}
             >
               Assign Data
             </button>
             <button
               onClick={() => setView('assign-incharges')}
-              className={`px-4 py-2 rounded-xl text-xs md:text-sm font-black transition-all ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs md:text-sm transition-all cursor-pointer ${
                 view === 'assign-incharges'
-                  ? 'bg-[#F59E0B] text-slate-950 shadow-md'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  ? 'bg-amber-400 text-slate-950 shadow-md font-bold'
+                  : 'bg-slate-800/90 text-slate-300 hover:bg-slate-700 hover:text-white font-medium'
               }`}
             >
               Assign Incharges

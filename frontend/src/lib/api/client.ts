@@ -62,23 +62,5 @@ export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}
   }
 
   const json = await res.json();
-  if (json.data !== undefined) {
-    if (json.meta !== undefined && typeof json.data === 'object' && json.data !== null) {
-      try {
-        Object.defineProperty(json.data, '_meta', {
-          value: json.meta,
-          enumerable: false,
-          configurable: true,
-          writable: true,
-        });
-        if (!('meta' in json.data)) {
-          (json.data as any).meta = json.meta;
-        }
-      } catch {
-        // ignore
-      }
-    }
-    return json.data;
-  }
-  return json;
+  return json.data !== undefined ? json.data : json;
 }

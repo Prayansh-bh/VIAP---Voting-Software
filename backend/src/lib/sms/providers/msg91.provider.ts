@@ -4,6 +4,7 @@ export interface Msg91Config {
   authKey: string;
   templateId?: string;
   senderId?: string;
+  timeoutMs?: number;
 }
 
 export class Msg91SmsProvider implements SmsProvider {
@@ -15,7 +16,21 @@ export class Msg91SmsProvider implements SmsProvider {
   }
 
   async sendOtp(mobileNumber: string, otpCode: string, options?: SmsOptions): Promise<SmsSendResult> {
+    const cleanMobile = mobileNumber.replace(/\D/g, '').slice(-10);
     if (!this.config.authKey) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`\n══════════════════════════════════════════════════════════════`);
+        console.log(`📱 [MSG91 DEV SIMULATION] OTP Dispatched to +91 ${cleanMobile}`);
+        console.log(`🔑 Verification Code: ${otpCode}`);
+        console.log(`⚡ (Set MSG91_AUTH_KEY in backend/.env to dispatch real SMS / WhatsApp)`);
+        console.log(`══════════════════════════════════════════════════════════════\n`);
+        return {
+          success: true,
+          messageId: `dev-sim-${Date.now()}`,
+          provider: this.name,
+          timestamp: new Date(),
+        };
+      }
       return {
         success: false,
         provider: this.name,
@@ -26,18 +41,30 @@ export class Msg91SmsProvider implements SmsProvider {
 
     try {
       const templateId = options?.templateId || this.config.templateId;
-      const formattedMobile = mobileNumber.startsWith('91') ? mobileNumber : `91${mobileNumber}`;
-      
-      const url = `https://control.msg91.com/api/v5/otp?template_id=${templateId || ''}&mobile=${formattedMobile}&otp=${otpCode}&authkey=${this.config.authKey}`;
+      const formattedMobile = `91${cleanMobile}`;
+      const timeoutMs = this.config.timeoutMs || 5000;
 
-      const response = await fetch(url, {
+      // Official MSG91 API v5: template_id and mobile in query params, authkey in header, OTP in JSON body
+      const url = new URL('https://control.msg91.com/api/v5/otp');
+      if (templateId) {
+        url.searchParams.set('template_id', templateId);
+      }
+      url.searchParams.set('mobile', formattedMobile);
+
+      const response = await fetch(url.toString(), {
         method: 'POST',
         headers: {
+          authkey: this.config.authKey,
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          OTP: otpCode,
+          otp: otpCode,
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
-      const data: any = await response.json();
+      const data: any = await response.json().catch(() => ({}));
       if (!response.ok || data.type === 'error') {
         return {
           success: false,
@@ -54,10 +81,11 @@ export class Msg91SmsProvider implements SmsProvider {
         timestamp: new Date(),
       };
     } catch (err: any) {
+      const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
       return {
         success: false,
         provider: this.name,
-        error: err?.message || 'MSG91 network request error',
+        error: isTimeout ? 'MSG91 request timed out' : (err?.message || 'MSG91 network request error'),
         timestamp: new Date(),
       };
     }
@@ -74,8 +102,10 @@ export class Msg91SmsProvider implements SmsProvider {
     }
 
     try {
-      const formattedMobile = mobileNumber.startsWith('91') ? mobileNumber : `91${mobileNumber}`;
+      const cleanMobile = mobileNumber.replace(/\D/g, '').slice(-10);
+      const formattedMobile = `91${cleanMobile}`;
       const sender = options?.senderId || this.config.senderId || 'KNDTDP';
+      const timeoutMs = this.config.timeoutMs || 5000;
 
       const response = await fetch('https://control.msg91.com/api/v5/flow/', {
         method: 'POST',
@@ -94,9 +124,10 @@ export class Msg91SmsProvider implements SmsProvider {
             },
           ],
         }),
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
-      const data: any = await response.json();
+      const data: any = await response.json().catch(() => ({}));
       if (!response.ok || data.type === 'error') {
         return {
           success: false,
@@ -113,10 +144,11 @@ export class Msg91SmsProvider implements SmsProvider {
         timestamp: new Date(),
       };
     } catch (err: any) {
+      const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
       return {
         success: false,
         provider: this.name,
-        error: err?.message || 'MSG91 network request error',
+        error: isTimeout ? 'MSG91 request timed out' : (err?.message || 'MSG91 network request error'),
         timestamp: new Date(),
       };
     }

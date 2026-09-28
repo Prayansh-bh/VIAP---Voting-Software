@@ -1,0 +1,10 @@
+# robots.txt for Telangana Congress Connect
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /superadmin/
+Disallow: /auth/
+
+# Host & Sitemap
+Sitemap: https://connect.kondapi.app/sitemap.xml

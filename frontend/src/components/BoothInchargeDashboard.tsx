@@ -834,7 +834,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
             <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Assigned Jurisdiction</p>
             <h4 className="text-xs font-bold text-slate-100">{session.userName}</h4>
             <div className="text-[10px] text-slate-400 flex flex-col gap-0.5 font-mono">
-              <span>ID: {session.userId}</span>
+              <span title={session.userId}>ID: {session.userId?.slice(-8).toUpperCase() || 'BOOTH'}</span>
               <span>Booth: {session.assignedBooth?.split(' ')[1] || '145'}</span>
               <span>Village: {session.assignedVillage || 'Kondapi Village'}</span>
               <span>Total Teams: {INCHARGES.length} Incharges</span>

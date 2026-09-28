@@ -1,7 +1,6 @@
 import React, { useMemo } from 'react';
 import { CommandRole, RoleType } from '../types';
 import RoleCard from './RoleCard';
-import { ShieldCheck, Info, UserCheck, Layers, Sparkles, Sliders } from 'lucide-react';
 import { useCms } from '../context/CmsContext';
 
 interface RoleSelectionProps {
@@ -107,7 +106,7 @@ export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, 
       {
         id: 'VOTER_100_INCHARGE',
         levelKey: 'VOTER_GROUP',
-        name: t('VOTER_GROUP', '100 Voter Incharge'),
+        name: t('VOTER_GROUP', '100 Voters Incharge'),
         subtitle: 'Voter Family Cluster Committee',
         description: '100-voter cluster door-to-door outreach.',
         path: '/100-voter',
@@ -134,52 +133,48 @@ export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, 
   }, [config]);
 
   return (
-    <div className="w-full max-w-6xl mx-auto px-4 md:px-6 py-4 space-y-6 animate-fade-in" id="role-selection-section">
-      {/* Current Workspace & Switch to CMS Studio Banner */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-white rounded-2xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-2.5">
+    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 space-y-7 animate-fade-in" id="role-selection-section">
+      {/* Current Workspace Banner */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 bg-white rounded-2xl border border-slate-200/90 shadow-xs">
+        <div className="flex items-center gap-3">
           <div
-            className="w-8 h-8 rounded-xl flex items-center justify-center text-white font-black text-xs shadow-xs"
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-black text-xs shadow-xs"
             style={{ backgroundColor: config.primaryColor || '#f59e0b' }}
           >
             {(config.activePartyCode || 'APP').slice(0, 3)}
           </div>
           <div>
-            <div className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+            <div className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
               <span>Active Workspace: {config.organisationName || 'Kondapi Connect'}</span>
-              <span className="px-2 py-0.2 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800">
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800">
                 LIVE
               </span>
             </div>
-            <p className="text-[10px] text-slate-500 font-medium">
+            <p className="text-[11px] text-slate-500 font-medium">
               {scopeLabel} • {config.stateName || 'Andhra Pradesh'}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 self-end sm:self-auto">
-          <button
-            onClick={() => {
-              window.location.hash = '/cms';
-            }}
-            className="px-3 py-1.5 rounded-xl border border-slate-200 hover:border-slate-300 text-slate-700 hover:text-slate-900 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer bg-slate-50 hover:bg-slate-100"
-          >
-            <Sliders className="w-3.5 h-3.5 text-slate-700" />
-            <span>CMS Studio</span>
-          </button>
+
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 font-medium text-[11px] text-slate-600">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="font-semibold text-slate-800">{activeRoles.length} Active Modules</span>
+          </div>
         </div>
       </div>
 
       {/* Title block */}
       <div
-        className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-2 gap-4"
+        className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-1 gap-2"
         id="role-selection-bar"
       >
         <div>
-          <h2 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
             Select Command Role
           </h2>
-          <p className="text-xs text-slate-500 font-medium">
-            {activeRoles.length} role module{activeRoles.length === 1 ? '' : 's'} active for your organization
+          <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">
+            Choose your assigned command module to access role-specific intelligence, field operations, and reporting.
           </p>
         </div>
       </div>
@@ -192,7 +187,7 @@ export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, 
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="roles-cards-grid">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5" id="roles-cards-grid">
           {activeRoles.map((role, idx) => (
             <RoleCard
               key={role.id}

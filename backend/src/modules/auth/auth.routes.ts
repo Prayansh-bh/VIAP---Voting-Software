@@ -1,17 +1,54 @@
 import { FastifyInstance } from 'fastify';
 import { validateBody } from '../../common/validation.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requestOtpSchema, verifyOtpSchema, refreshTokenSchema } from './auth.schema.js';
+import {
+  requestOtpSchema,
+  verifyOtpSchema,
+  refreshTokenSchema,
+  deviceSessionSchema,
+  revokeDeviceSchema,
+  demoLoginSchema,
+} from './auth.schema.js';
 import { AuthController } from './auth.controller.js';
 
 export async function authRoutes(fastify: FastifyInstance) {
-  // Rate limited OTP generation
+  // Fast 1-Click Demo Authentication (Role-based instant test access)
+  fastify.post(
+    '/demo-login',
+    {
+      config: {
+        rateLimit: {
+          max: process.env.NODE_ENV === 'test' ? 100 : 60,
+          timeWindow: '1 minute',
+        },
+      },
+      preValidation: [validateBody(demoLoginSchema)],
+    },
+    AuthController.demoLogin,
+  );
+
+  // Silent device-based auto-login (Zomato/Uber/Ola persistent device session)
+  fastify.post(
+    '/device-session',
+    {
+      config: {
+        rateLimit: {
+          max: process.env.NODE_ENV === 'test' ? 100 : 60,
+          timeWindow: '1 minute',
+        },
+      },
+      preValidation: [validateBody(deviceSessionSchema)],
+    },
+    AuthController.deviceSession,
+  );
+
+  // Rate limited OTP generation (WhatsApp / SMS via MSG91)
   fastify.post(
     '/request-otp',
     {
       config: {
         rateLimit: {
-          max: process.env.NODE_ENV === 'production' ? 10 : 100,
+          max: process.env.NODE_ENV === 'test' ? 100 : 10,
           timeWindow: '1 minute',
         },
       },
@@ -20,13 +57,13 @@ export async function authRoutes(fastify: FastifyInstance) {
     AuthController.requestOtp,
   );
 
-  // Verify OTP
+  // Verify OTP and authorize device
   fastify.post(
     '/verify-otp',
     {
       config: {
         rateLimit: {
-          max: process.env.NODE_ENV === 'production' ? 20 : 100,
+          max: process.env.NODE_ENV === 'test' ? 100 : 20,
           timeWindow: '1 minute',
         },
       },
@@ -45,7 +82,13 @@ export async function authRoutes(fastify: FastifyInstance) {
   );
 
   // Logout
-  fastify.post('/logout', AuthController.logout);
+  fastify.post(
+    '/logout',
+    {
+      preHandler: [authenticate],
+    },
+    AuthController.logout,
+  );
 
   // Authenticated user profile
   fastify.get(
@@ -54,5 +97,23 @@ export async function authRoutes(fastify: FastifyInstance) {
       preHandler: [authenticate],
     },
     AuthController.me,
+  );
+
+  // List user's authorized devices
+  fastify.get(
+    '/devices',
+    {
+      preHandler: [authenticate],
+    },
+    AuthController.getDevices,
+  );
+
+  // Revoke device authorization
+  fastify.post(
+    '/devices/:deviceId/revoke',
+    {
+      preHandler: [authenticate],
+    },
+    AuthController.revokeDevice,
   );
 }

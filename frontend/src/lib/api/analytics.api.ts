@@ -224,37 +224,15 @@ export async function fetchHierarchySummaryByUser(userId: string): Promise<Hiera
   return fetchHierarchySummary(userId);
 }
 
-export async function fetchLiveVoteEvents(unitId: string): Promise<LiveVoteEventItem[]> {
-  try {
-    const query = unitId ? `?unitId=${encodeURIComponent(unitId)}` : '';
-    const items = await apiFetch<LiveVoteEventItem[]>(`/api/analytics/live-votes${query}`);
-    return Array.isArray(items) ? items : [];
-  } catch {
-    return [];
-  }
+export async function fetchLiveVoteEvents(_unitId: string): Promise<LiveVoteEventItem[]> {
+  return [];
 }
 
-export async function fetchLiveVoteEventsByUser(userId: string, limit: number = 30): Promise<LiveVoteEventItem[]> {
-  try {
-    const query = userId ? `?userId=${encodeURIComponent(userId)}&limit=${limit}` : `?limit=${limit}`;
-    const items = await apiFetch<LiveVoteEventItem[]>(`/api/analytics/live-votes${query}`);
-    return Array.isArray(items) ? items : [];
-  } catch {
-    return [];
-  }
+export async function fetchLiveVoteEventsByUser(_userId: string, _limit?: number): Promise<LiveVoteEventItem[]> {
+  return [];
 }
 
-export async function fetchLiveTurnoutSummaryByUser(userId: string): Promise<any> {
-  try {
-    const query = userId ? `?userId=${encodeURIComponent(userId)}` : '';
-    const res = await apiFetch<any>(`/api/analytics/turnout-summary${query}`);
-    if (res && (res.totalAssigned !== undefined || res.totalVotesPolled !== undefined)) {
-      return res;
-    }
-  } catch {
-    // continue to fallback
-  }
-
+export async function fetchLiveTurnoutSummaryByUser(_userId: string): Promise<any> {
   try {
     const state = await fetchStateAnalytics();
     const tdp = state.partyPreference?.TDP ?? 0;

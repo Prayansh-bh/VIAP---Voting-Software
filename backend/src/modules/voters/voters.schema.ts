@@ -69,16 +69,14 @@ export const flagFakeVoterSchema = z.object({
 });
 
 export const updateMigrationSchema = z.object({
-  status: z.nativeEnum(VoterLocationStatus).optional(),
-  locationStatus: z.string().optional(),
-  destinationCity: z.string().optional(),
-  migrationCity: z.string().optional(),
+  status: z.nativeEnum(VoterLocationStatus),
+  destinationCity: z.string().min(2),
   destinationState: z.string().optional(),
   destinationCountry: z.string().default('India'),
   contactInCity: z.string().optional(),
   travelRequired: z.boolean().default(false),
   transportArranged: z.boolean().default(false),
-  returnPlannedDate: z.string().optional(),
+  returnPlannedDate: z.string().datetime().optional(),
   notes: z.string().optional(),
 });
 

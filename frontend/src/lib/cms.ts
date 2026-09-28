@@ -9,6 +9,9 @@ export interface ConstituencyItem {
   name: string;
   code?: string;
   totalVoters?: number;
+  candidateName?: string;
+  mlaName?: string;
+  parliamentName?: string;
   _count?: { mandals?: number; voters?: number };
 }
 
@@ -316,7 +319,7 @@ export const DEFAULT_CONFIG: CmsConfig = {
     MANDAL: 'Mandal President',
     VILLAGE: 'Village Incharge',
     BOOTH: 'Booth President',
-    VOTER_GROUP: 'Indiramma Incharge (100 Voters)',
+    VOTER_GROUP: '100 Voters Incharge',
   },
   featureToggles: {
     voterManagement: true,
@@ -413,6 +416,10 @@ export async function fetchCmsConfig(): Promise<{ config: CmsConfig; parties: Cm
       analyticsConfig: rawConfig.analyticsConfig || DEFAULT_CONFIG.analyticsConfig,
       aiEnabled: rawConfig.aiEnabled ?? true,
     };
+
+    if (config.hierarchyLabels?.VOTER_GROUP && (config.hierarchyLabels.VOTER_GROUP === 'Indiramma Incharge (100 Voters)' || config.hierarchyLabels.VOTER_GROUP.includes('Indiramma'))) {
+      config.hierarchyLabels.VOTER_GROUP = '100 Voters Incharge';
+    }
 
     const activeParty = parties.find((p) => p.code === config.activePartyCode) || parties[0];
     if (activeParty) {

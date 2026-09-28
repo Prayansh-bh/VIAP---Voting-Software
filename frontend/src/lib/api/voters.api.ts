@@ -139,38 +139,50 @@ export async function fetchVoters(params: VoterQueryParams = {}): Promise<Pagina
 
   try {
     const json = await apiFetch<any>(endpoint);
+    const rawList = Array.isArray(json?.data) ? json.data : (Array.isArray(json?.items) ? json.items : (Array.isArray(json) ? json : []));
+
+    // When the API succeeds (even with 0 voters), return the genuine database state
     if (json !== undefined && json !== null) {
-      const rawList = Array.isArray(json)
-        ? json
-        : (Array.isArray(json?.items) ? json.items : (Array.isArray(json?.data) ? json.data : []));
-      const meta = (json as any)?._meta || (json as any)?.meta || {};
-      const total = meta.total !== undefined ? Number(meta.total) : rawList.length;
-      const page = meta.page !== undefined ? Number(meta.page) : (params.page || 1);
-      const limit = meta.limit !== undefined ? Number(meta.limit) : (params.limit || 50);
-      const totalPages = meta.totalPages !== undefined ? Number(meta.totalPages) : Math.max(1, Math.ceil(total / limit));
+      const total = typeof json?.meta?.total === 'number' ? json.meta.total : rawList.length;
+      const limit = typeof json?.meta?.limit === 'number' ? json.meta.limit : (params.limit || 50);
+      const totalPages = typeof json?.meta?.totalPages === 'number' ? json.meta.totalPages : (total > 0 ? Math.ceil(total / limit) : 0);
 
       return {
         items: rawList.map(normalizeVoter),
         total,
-        page,
+        page: json?.meta?.page || params.page || 1,
         limit,
         totalPages,
-        hasNextPage: meta.hasNextPage !== undefined ? Boolean(meta.hasNextPage) : page < totalPages,
-        hasPrevPage: meta.hasPrevPage !== undefined ? Boolean(meta.hasPrevPage) : page > 1,
+        hasNextPage: Boolean(json?.meta?.hasNextPage),
+        hasPrevPage: Boolean(json?.meta?.hasPrevPage),
       };
     }
   } catch (err) {
-    console.warn('[Voters API] Falling back to demo voter dataset:', err);
+    console.warn('[Voters API] Error fetching voters from API:', err);
   }
 
-  const mockList = generateMockVoters(50, params.boothId);
+  // Only fall back to synthetic mock voters if explicitly in offline demo mode
+  const isExplicitDemo = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
+  if (isExplicitDemo) {
+    const mockList = generateMockVoters(50, params.boothId);
+    return {
+      items: mockList,
+      total: 1247,
+      page: params.page || 1,
+      limit: params.limit || 50,
+      totalPages: 25,
+      hasNextPage: true,
+      hasPrevPage: false,
+    };
+  }
+
   return {
-    items: mockList,
-    total: 1247,
+    items: [],
+    total: 0,
     page: params.page || 1,
     limit: params.limit || 50,
-    totalPages: 25,
-    hasNextPage: true,
+    totalPages: 0,
+    hasNextPage: false,
     hasPrevPage: false,
   };
 }
@@ -178,9 +190,7 @@ export async function fetchVoters(params: VoterQueryParams = {}): Promise<Pagina
 export async function fetchVotersForIncharge(userId: string): Promise<Voter[]> {
   try {
     const res = await fetchVoters({ assignedInchargeId: userId, limit: 100 });
-    if (res.items.length > 0) return res.items;
-    const all = await fetchVoters({ limit: 100 });
-    return all.items;
+    return res.items;
   } catch {
     return [];
   }

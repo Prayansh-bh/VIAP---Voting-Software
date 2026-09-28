@@ -1,6 +1,8 @@
 import { FastifyInstance } from 'fastify';
+import { RoleType } from '@prisma/client';
 import { validateBody } from '../../common/validation.js';
-import { optionalAuthenticate } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { populateHierarchyScope, requireRoles } from '../../middleware/rbac.js';
 import { ApplicationsController } from './applications.controller.js';
 import {
   assignInchargeSchema,
@@ -9,23 +11,29 @@ import {
   validateDataSchema,
 } from './applications.schema.js';
 
+const ADMIN_DATA_ROLES = [
+  RoleType.SUPER_ADMIN,
+  RoleType.HIGH_COMMAND,
+  RoleType.STATE_ADMIN,
+  RoleType.CONSTITUENCY_INCHARGE,
+];
+
 export async function applicationsRoutes(fastify: FastifyInstance) {
   // 1. Applications List & Configuration
-  fastify.get('/', { preHandler: [optionalAuthenticate] }, ApplicationsController.getApplications);
-  fastify.get('/:applicationId/configuration', { preHandler: [optionalAuthenticate] }, ApplicationsController.getConfiguration);
+  fastify.get('/', { preHandler: [authenticate] }, ApplicationsController.getApplications);
+  fastify.get('/:applicationId/configuration', { preHandler: [authenticate] }, ApplicationsController.getConfiguration);
 
   // 2. Hierarchy & Structure Endpoints
-  fastify.get('/:applicationId/hierarchy', { preHandler: [optionalAuthenticate] }, ApplicationsController.getHierarchy);
-  fastify.get('/:applicationId/hierarchy/:level', { preHandler: [optionalAuthenticate] }, ApplicationsController.getHierarchyNodes);
-  fastify.get('/:applicationId/constituencies', { preHandler: [optionalAuthenticate] }, ApplicationsController.getConstituencies);
-  fastify.get('/:applicationId/constituencies/:id', { preHandler: [optionalAuthenticate] }, ApplicationsController.getConstituencyDetail);
+  fastify.get('/:applicationId/hierarchy', { preHandler: [authenticate] }, ApplicationsController.getHierarchy);
+  fastify.get('/:applicationId/hierarchy/:level', { preHandler: [authenticate] }, ApplicationsController.getHierarchyNodes);
+  fastify.get('/:applicationId/constituencies', { preHandler: [authenticate] }, ApplicationsController.getConstituencies);
+  fastify.get('/:applicationId/constituencies/:id', { preHandler: [authenticate] }, ApplicationsController.getConstituencyDetail);
 
   // 3. Data Ingestion: Mapping, Validation & Import
   fastify.post(
     '/:applicationId/data/mapping',
     {
-      preHandler: [optionalAuthenticate],
-      preValidation: [validateBody(mappingSchema)],
+      preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), validateBody(mappingSchema)],
     },
     ApplicationsController.suggestColumnMapping,
   );
@@ -33,8 +41,7 @@ export async function applicationsRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/:applicationId/data/validate',
     {
-      preHandler: [optionalAuthenticate],
-      preValidation: [validateBody(validateDataSchema)],
+      preHandler: [authenticate, populateHierarchyScope, requireRoles(...ADMIN_DATA_ROLES), validateBody(validateDataSchema)],
     },
     ApplicationsController.validateData,
   );
@@ -42,8 +49,7 @@ export async function applicationsRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/:applicationId/data/import',
     {
-      preHandler: [optionalAuthenticate],
-      preValidation: [validateBody(importDataSchema)],
+      preHandler: [authenticate, populateHierarchyScope, requireRoles(...ADMIN_DATA_ROLES), validateBody(importDataSchema)],
     },
     ApplicationsController.importData,
   );
@@ -51,103 +57,91 @@ export async function applicationsRoutes(fastify: FastifyInstance) {
   // 4. Data Import History & Error Reports
   fastify.get(
     '/:applicationId/data/imports',
-    { preHandler: [optionalAuthenticate] },
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
     ApplicationsController.getDataImports,
   );
 
   fastify.get(
     '/:applicationId/data/imports/:importId',
-    { preHandler: [optionalAuthenticate] },
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
     ApplicationsController.getDataImportById,
   );
 
   fastify.get(
     '/:applicationId/data/imports/:importId/errors',
-    { preHandler: [optionalAuthenticate] },
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
     ApplicationsController.getDataImportErrors,
   );
 
   fastify.get(
     '/:applicationId/data/imports/:importId/error-report',
-    { preHandler: [optionalAuthenticate] },
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
     ApplicationsController.downloadErrorReport,
   );
 
   // Backward-compatible history & error routes
   fastify.get(
     '/:applicationId/data/history',
-    { preHandler: [optionalAuthenticate] },
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
     ApplicationsController.getDataImports,
   );
 
   fastify.get(
     '/data/errors/:jobId',
-    { preHandler: [optionalAuthenticate] },
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
     ApplicationsController.getDataImportErrors,
   );
 
   fastify.get(
     '/data/error-report/:jobId',
-    { preHandler: [optionalAuthenticate] },
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
     ApplicationsController.downloadErrorReport,
   );
 
   // 5. Incharges Endpoints
   fastify.get(
     '/:applicationId/incharges',
-    { preHandler: [optionalAuthenticate] },
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
     ApplicationsController.getIncharges,
   );
 
   fastify.post(
     '/:applicationId/incharges',
     {
-      preHandler: [optionalAuthenticate],
-      preValidation: [validateBody(assignInchargeSchema)],
+      preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope, validateBody(assignInchargeSchema)],
     },
     ApplicationsController.assignIncharge,
   );
 
   fastify.delete(
     '/:applicationId/incharges/:id',
-    { preHandler: [optionalAuthenticate] },
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
     ApplicationsController.deleteIncharge,
   );
-
-  const resolveScope = async (req: any, _reply: any) => {
-    if (req.user?.userId) {
-      try {
-        const { computeUserHierarchyScope } = await import('../../middleware/rbac.js');
-        req.hierarchyScope = await computeUserHierarchyScope(req.user.userId);
-      } catch {
-        // ignore
-      }
-    }
-  };
 
   // 6. Voters, Booths & Groups (Field APIs & Scoped access)
   fastify.get(
     '/:applicationId/voters',
-    { preHandler: [optionalAuthenticate, resolveScope] },
+    { preHandler: [authenticate, populateHierarchyScope] },
     ApplicationsController.getVoters,
   );
 
   fastify.get(
     '/:applicationId/booths',
-    { preHandler: [optionalAuthenticate, resolveScope] },
+    { preHandler: [authenticate, populateHierarchyScope] },
     ApplicationsController.getBooths,
   );
 
   fastify.get(
     '/:applicationId/100-voter-groups',
-    { preHandler: [optionalAuthenticate, resolveScope] },
+    { preHandler: [authenticate, populateHierarchyScope] },
     ApplicationsController.getVoterGroups,
   );
 
   // 7. Reports & Summary KPIs
   fastify.get(
     '/:applicationId/reports/summary',
-    { preHandler: [optionalAuthenticate, resolveScope] },
+    { preHandler: [authenticate, populateHierarchyScope] },
     ApplicationsController.getSummary,
   );
 }

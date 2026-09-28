@@ -9,7 +9,9 @@ import {
 } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { logAudit } from '../../middleware/audit.js';
-import { UserHierarchyScope } from '../../common/types.js';
+import { AuthenticatedUserPayload, UserHierarchyScope } from '../../common/types.js';
+import { assertRoleHierarchy } from '../../middleware/rbac.js';
+import { getConstituencyLockKey } from '../../common/lock.js';
 
 export interface RawImportRow {
   rowNumber?: number;
@@ -353,8 +355,11 @@ export class ApplicationsService {
       MANDAL: 'Mandal',
       VILLAGE: 'Village',
       BOOTH: 'Booth',
-      VOTER_GROUP: '100-Voter Incharge',
+      VOTER_GROUP: '100 Voters Incharge',
     };
+    if (hierarchyLabels.VOTER_GROUP === 'Indiramma Incharge (100 Voters)' || hierarchyLabels.VOTER_GROUP?.includes('Indiramma')) {
+      hierarchyLabels.VOTER_GROUP = '100 Voters Incharge';
+    }
 
     const stateName = config.stateName || 'Andhra Pradesh';
     const state = await prisma.state.findFirst({
@@ -990,6 +995,7 @@ export class ApplicationsService {
       fileSize?: number;
     },
     actorId?: string,
+    scope?: UserHierarchyScope,
   ) {
     const config = await this.resolveApplication(appId);
     const mode = options.importMode || 'APPEND';
@@ -1008,7 +1014,9 @@ export class ApplicationsService {
     }
 
     if (!creatorId) {
-      throw new Error('Valid user identity is required to perform data import.');
+      const err: any = new Error('Valid user identity is required to perform data import.');
+      err.statusCode = 401;
+      throw err;
     }
 
     // Helper to get row value using mapping or fallback
@@ -1056,16 +1064,48 @@ export class ApplicationsService {
       }
     };
 
-    // 1. Resolve Target Constituency strictly
+    // 1. Resolve Target Constituency strictly & deterministically
     let constituency: any = null;
     if (options.targetConstituencyId) {
-      constituency = await prisma.constituency.findUnique({
-        where: { id: options.targetConstituencyId },
-        include: { parliament: { include: { zone: { include: { state: true } } } } },
-      });
+      const targetId = options.targetConstituencyId.trim();
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId)) {
+        try {
+          constituency = await prisma.constituency.findUnique({
+            where: { id: targetId },
+            include: { parliament: { include: { zone: { include: { state: true } } } } },
+          });
+        } catch {}
+      }
+      if (!constituency) {
+        constituency = await prisma.constituency.findUnique({
+          where: { code: targetId },
+          include: { parliament: { include: { zone: { include: { state: true } } } } },
+        });
+      }
+      if (!constituency) {
+        const cleanName = targetId.replace(/\s*\(AC.*?\)\s*/gi, '').trim();
+        const matches = await prisma.constituency.findMany({
+          where: { name: { equals: cleanName, mode: 'insensitive' } },
+          include: { parliament: { include: { zone: { include: { state: true } } } } },
+        });
+        if (matches.length === 1) {
+          constituency = matches[0];
+        } else if (matches.length > 1) {
+          const err: any = new Error(`Ambiguous target constituency '${options.targetConstituencyId}'. Multiple matches found.`);
+          err.statusCode = 400;
+          throw err;
+        }
+      }
+      // Fail closed: explicit targetConstituencyId provided but not found
+      if (!constituency) {
+        const err: any = new Error(`Target constituency '${options.targetConstituencyId}' not found.`);
+        err.statusCode = 404;
+        throw err;
+      }
     }
 
     if (!constituency) {
+      // Resolve app's configured default constituency only when no target was specified
       constituency = await prisma.constituency.findFirst({
         where: {
           OR: [
@@ -1078,40 +1118,114 @@ export class ApplicationsService {
     }
 
     if (!constituency) {
-      constituency = await prisma.constituency.findFirst({
-        include: { parliament: { include: { zone: { include: { state: true } } } } },
-      });
+      const err: any = new Error(`No valid constituency configured for application '${appId}'.`);
+      err.statusCode = 404;
+      throw err;
     }
 
-    if (!constituency) {
-      let state = await prisma.state.findFirst();
-      if (!state) {
-        state = await prisma.state.create({
-          data: { name: config.stateName || 'Andhra Pradesh', code: 'AP', totalVoters: 40000000 },
-        });
+    // 2. Enforce Hierarchy Scope Authorization (P1-A reuse)
+    if (scope && !scope.isGlobalScope) {
+      if (!scope.accessibleConstituencyIds.has(constituency.id)) {
+        const err: any = new Error(`Access denied: You do not have authority over constituency '${constituency.name}'.`);
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_SCOPE';
+        throw err;
       }
-      let zone = await prisma.zone.findFirst();
-      if (!zone) {
-        zone = await prisma.zone.create({ data: { stateId: state.id, name: 'Central Zone', code: 'CZ' } });
-      }
-      let par = await prisma.parliament.findFirst();
-      if (!par) {
-        par = await prisma.parliament.create({
-          data: { zoneId: zone.id, name: config.parliamentName || 'Main Parliament', code: 'PC-MAIN' },
-        });
-      }
-      constituency = await prisma.constituency.create({
-        data: {
-          parliamentId: par.id,
-          name: config.organisationName || 'Main Constituency',
-          code: 'AC-MAIN',
-          totalVoters: 228000,
-        },
-        include: { parliament: { include: { zone: { include: { state: true } } } } },
-      });
     }
 
-    // 2. Create DataImport record
+    // 3. Concurrency Protection (Prevent simultaneous active imports on same constituency)
+    const activeImport = await prisma.dataImport.findFirst({
+      where: {
+        targetConstituencyId: constituency.id,
+        status: 'PROCESSING',
+      },
+    });
+    if (activeImport) {
+      const err: any = new Error(
+        `An import is already actively processing for constituency '${constituency.name}'. Simultaneous imports are forbidden to protect data integrity.`
+      );
+      err.statusCode = 409;
+      err.code = 'CONCURRENT_IMPORT_CONFLICT';
+      throw err;
+    }
+
+    // 4. Pre-Flight Validation for REPLACE Mode (ZERO deletion before complete validation)
+    const preflightErrors: Array<{ rowNumber: number; field: string; value?: string; errorMessage: string }> = [];
+    const seenEpicsInFile = new Set<string>();
+
+    if (mode === 'REPLACE' && level === 'VOTER') {
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const rowNum = i + 1;
+        const epic = getRowValue(row, 'epicNumber').toUpperCase();
+        const rawName = getRowValue(row, 'fullName');
+        const rawAgeStr = getRowValue(row, 'age');
+        const ageNum = parseInt(rawAgeStr || '0', 10);
+        const rawGender = getRowValue(row, 'gender').toUpperCase();
+
+        if (!epic) {
+          preflightErrors.push({ rowNumber: rowNum, field: 'epicNumber', errorMessage: 'EPIC / Voter ID number is missing' });
+        } else if (seenEpicsInFile.has(epic)) {
+          preflightErrors.push({ rowNumber: rowNum, field: 'epicNumber', value: epic, errorMessage: `Duplicate EPIC '${epic}' inside uploaded file` });
+        } else {
+          seenEpicsInFile.add(epic);
+        }
+
+        if (!rawName) {
+          preflightErrors.push({ rowNumber: rowNum, field: 'fullName', errorMessage: 'Voter full name is missing' });
+        }
+
+        if (rawAgeStr && (isNaN(ageNum) || ageNum < 18 || ageNum > 125)) {
+          preflightErrors.push({ rowNumber: rowNum, field: 'age', value: rawAgeStr, errorMessage: `Invalid voter age '${rawAgeStr}'. Must be between 18 and 125` });
+        }
+
+        if (rawGender && !rawGender.startsWith('M') && !rawGender.startsWith('F') && !rawGender.startsWith('O')) {
+          preflightErrors.push({ rowNumber: rowNum, field: 'gender', value: rawGender, errorMessage: `Invalid gender '${rawGender}'. Must be MALE, FEMALE, or OTHER` });
+        }
+      }
+
+      if (preflightErrors.length > 0) {
+        // Record failed DataImport audit log
+        const failedDataImport = await prisma.dataImport.create({
+          data: {
+            applicationId: config.id,
+            uploadedById: creatorId,
+            fileName,
+            fileSize,
+            targetHierarchyId: constituency.parliamentId,
+            targetConstituencyId: constituency.id,
+            mode,
+            status: 'FAILED',
+            totalRecords: rows.length,
+            failedRecords: preflightErrors.length,
+            startedAt: new Date(),
+            completedAt: new Date(),
+          },
+        });
+
+        for (const errItem of preflightErrors.slice(0, 100)) {
+          await prisma.dataImportError.create({
+            data: {
+              importId: failedDataImport.id,
+              rowNumber: errItem.rowNumber,
+              field: errItem.field,
+              value: errItem.value ? String(errItem.value).slice(0, 255) : null,
+              errorMessage: errItem.errorMessage.slice(0, 500),
+              severity: 'ERROR',
+            },
+          }).catch(() => {});
+        }
+
+        const err: any = new Error(
+          `Pre-flight validation failed with ${preflightErrors.length} error(s). Aborting REPLACE import to protect data integrity.`
+        );
+        err.statusCode = 400;
+        err.data = { errors: preflightErrors.slice(0, 50) };
+        throw err;
+      }
+    }
+
+    // 5. Create active DataImport & ImportJob records
     const dataImport = await prisma.dataImport.create({
       data: {
         applicationId: config.id,
@@ -1133,7 +1247,6 @@ export class ApplicationsService {
       },
     });
 
-    // Also persist ImportJob for backward compatibility
     const job = await prisma.importJob.create({
       data: {
         fileName,
@@ -1167,26 +1280,7 @@ export class ApplicationsService {
     }
 
     try {
-      // 3. If REPLACE mode, strictly wipe existing voters in target constituency ONLY
-      if (mode === 'REPLACE' && level === 'VOTER') {
-        const deletedCount = await prisma.voter.deleteMany({
-          where: { constituencyId: constituency.id },
-        });
-
-        await logAudit({
-          action: AuditAction.DELETE,
-          entityType: 'ConstituencyVotersReplace',
-          entityId: constituency.id,
-          userId: creatorId,
-          changes: {
-            replacedConstituencyId: constituency.id,
-            constituencyName: constituency.name,
-            deletedVotersCount: deletedCount.count,
-          } as unknown as Prisma.InputJsonValue,
-        });
-      }
-
-      // Hierarchy caches scoped to target constituency
+      // 6. Pre-load hierarchy caches scoped to target constituency
       const existingMandals = await prisma.mandal.findMany({ where: { constituencyId: constituency.id } });
       const mandalMap = new Map<string, string>(existingMandals.map((m) => [m.name.trim().toLowerCase(), m.id]));
 
@@ -1239,7 +1333,28 @@ export class ApplicationsService {
         return RelationType.FATHER;
       };
 
-      // Ingest in sequential chunks
+      // 7. Resolve and create hierarchy nodes deterministically
+      interface PreparedItem {
+        rowNum: number;
+        epic: string;
+        rawName: string;
+        mandalId: string;
+        villageId: string;
+        boothId: string;
+        groupId: string;
+        age: number;
+        gender: Gender;
+        relation: RelationType;
+        relativeName: string;
+        houseNo: string;
+        mobile: string | null;
+        caste: string | null;
+        profession: string | null;
+        politicalPref: string;
+      }
+
+      const preparedItems: PreparedItem[] = [];
+
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const rowNum = i + 1;
@@ -1265,106 +1380,85 @@ export class ApplicationsService {
           const boothRaw = getRowValue(row, 'boothNumber') || '101';
           const groupRaw = getRowValue(row, 'voterGroup') || `Group ${Math.floor(i / groupSize) + 1}`;
 
-          // 1. Ensure Mandal within selected Constituency
+          // Ensure Mandal
           let mandalId = mandalMap.get(mandalName.toLowerCase());
           if (!mandalId) {
-            let m = await prisma.mandal.findFirst({
-              where: {
+            const mandalCode = `MDL-${constituency.id.slice(0, 8)}-${mandalName.replace(/\W/g, '').toUpperCase().slice(0, 8)}`;
+            const m = await prisma.mandal.upsert({
+              where: { code: mandalCode },
+              update: { name: mandalName },
+              create: {
                 constituencyId: constituency.id,
-                name: { equals: mandalName, mode: 'insensitive' },
+                name: mandalName,
+                code: mandalCode,
+                totalVoters: 25000,
               },
             });
-            if (!m) {
-              m = await prisma.mandal.create({
-                data: {
-                  constituencyId: constituency.id,
-                  name: mandalName,
-                  code: `MND-${mandalName.slice(0, 4).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
-                  totalVoters: 25000,
-                },
-              });
-            }
             mandalId = m.id;
             mandalMap.set(mandalName.toLowerCase(), mandalId);
           }
 
-          // 2. Ensure Village within Mandal
+          // Ensure Village
           const vKey = `${mandalId}:${villageName.toLowerCase()}`;
           let villageId = villageMap.get(vKey);
           if (!villageId) {
-            let v = await prisma.village.findFirst({
-              where: {
+            const villageCode = `VIL-${mandalId.slice(0, 8)}-${villageName.replace(/\W/g, '').toUpperCase().slice(0, 8)}`;
+            const v = await prisma.village.upsert({
+              where: { code: villageCode },
+              update: { name: villageName },
+              create: {
                 mandalId,
-                name: { equals: villageName, mode: 'insensitive' },
+                name: villageName,
+                code: villageCode,
+                totalVoters: 3000,
               },
             });
-            if (!v) {
-              v = await prisma.village.create({
-                data: {
-                  mandalId,
-                  name: villageName,
-                  code: `VLG-${villageName.slice(0, 4).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
-                  totalVoters: 3000,
-                },
-              });
-            }
             villageId = v.id;
             villageMap.set(vKey, villageId);
           }
 
-          // 3. Automatic Booth Mapping (Find or Create)
+          // Ensure Booth
           const bKey = `${villageId}:${boothRaw.toLowerCase()}`;
           let boothId = boothMap.get(bKey);
           if (!boothId) {
-            let b = await prisma.booth.findFirst({
-              where: {
+            const boothCode = `BTH-${villageId.slice(0, 8)}-${boothRaw.replace(/\W/g, '').toUpperCase().slice(0, 8)}`;
+            const b = await prisma.booth.upsert({
+              where: { code: boothCode },
+              update: { boothNumber: boothRaw },
+              create: {
                 villageId,
                 boothNumber: boothRaw,
+                code: boothCode,
+                name: `Polling Station No. ${boothRaw}`,
+                pollingStation: `${villageName} Polling Station ${boothRaw}`,
+                totalVoters: 1000,
               },
             });
-            if (!b) {
-              b = await prisma.booth.create({
-                data: {
-                  villageId,
-                  boothNumber: boothRaw,
-                  code: `BTH-${boothRaw}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
-                  name: `Polling Station No. ${boothRaw}`,
-                  pollingStation: `${villageName} Polling Station ${boothRaw}`,
-                  totalVoters: 1000,
-                },
-              });
-              boothsCreated++;
-            }
+            boothsCreated++;
             boothId = b.id;
             boothMap.set(bKey, boothId);
           }
 
-          // 4. Automatic 100-Voter Group Mapping (Find or Create)
+          // Ensure Voter Group
           const gKey = `${boothId}:${groupRaw.toLowerCase()}`;
           let groupId = groupMap.get(gKey);
           if (!groupId) {
-            let g = await prisma.voterGroup.findFirst({
-              where: {
+            const groupCode = `VG-${boothId.slice(0, 8)}-${groupRaw.replace(/\W/g, '').toUpperCase().slice(0, 8)}`;
+            const g = await prisma.voterGroup.upsert({
+              where: { code: groupCode },
+              update: { name: groupRaw },
+              create: {
                 boothId,
-                name: { equals: groupRaw, mode: 'insensitive' },
+                name: groupRaw,
+                code: groupCode,
+                totalVoters: 100,
               },
             });
-            if (!g) {
-              g = await prisma.voterGroup.create({
-                data: {
-                  boothId,
-                  name: groupRaw,
-                  code: `VG-${boothRaw}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
-                  totalVoters: 100,
-                },
-              });
-              voterGroupsCreated++;
-            }
+            voterGroupsCreated++;
             groupId = g.id;
             groupMap.set(gKey, groupId);
           }
 
-          // 5. Upsert Voter record
           const ageNum = parseInt(getRowValue(row, 'age') || '30', 10);
           const gender = parseGender(getRowValue(row, 'gender'));
           const relation = parseRelation(getRowValue(row, 'relationType'));
@@ -1375,68 +1469,221 @@ export class ApplicationsService {
           const profession = getRowValue(row, 'profession') || null;
           const politicalPref = getRowValue(row, 'politicalPreference') || 'NEUTRAL';
 
-          const existingVoter = await prisma.voter.findUnique({
-            where: { epicNumber: epic },
+          preparedItems.push({
+            rowNum,
+            epic,
+            rawName,
+            mandalId,
+            villageId,
+            boothId,
+            groupId,
+            age: isNaN(ageNum) ? 30 : ageNum,
+            gender,
+            relation,
+            relativeName,
+            houseNo,
+            mobile,
+            caste,
+            profession,
+            politicalPref,
           });
-
-          if (existingVoter) {
-            await prisma.voter.update({
-              where: { epicNumber: epic },
-              data: {
-                name: rawName,
-                fatherHusbandName: relativeName,
-                relationType: relation,
-                age: isNaN(ageNum) ? 30 : ageNum,
-                gender,
-                mobileNumber: mobile,
-                houseNumber: houseNo,
-                caste,
-                profession,
-                politicalPreference: politicalPref,
-                constituencyId: constituency.id,
-                mandalId,
-                villageId,
-                boothId,
-                voterGroupId: groupId,
-                updatedById: creatorId,
-              },
-            });
-            updatedCount++;
-          } else {
-            await prisma.voter.create({
-              data: {
-                serialNumber: i + 1,
-                epicNumber: epic,
-                name: rawName,
-                fatherHusbandName: relativeName,
-                relationType: relation,
-                houseNumber: houseNo,
-                age: isNaN(ageNum) ? 30 : ageNum,
-                gender,
-                mobileNumber: mobile,
-                caste,
-                profession,
-                politicalPreference: politicalPref,
-                constituencyId: constituency.id,
-                mandalId,
-                villageId,
-                boothId,
-                voterGroupId: groupId,
-                updatedById: creatorId,
-              },
-            });
-            successCount++;
-          }
         } catch (err: any) {
           errorCount++;
           errorRecords.push({
             rowNumber: rowNum,
             field: 'voter',
             value: epic,
-            errorMessage: err.message || 'Error creating voter record',
+            errorMessage: err.message || 'Error resolving hierarchy for voter',
             severity: 'ERROR',
           });
         }
+      }
+
+      // 8. Execution: REPLACE Mode (Atomic Transaction) vs APPEND Mode
+      if (mode === 'REPLACE' && level === 'VOTER') {
+        const voterPayloads: Prisma.VoterCreateManyInput[] = preparedItems.map((item, idx) => ({
+          serialNumber: idx + 1,
+          epicNumber: item.epic,
+          name: item.rawName,
+          fatherHusbandName: item.relativeName,
+          relationType: item.relation,
+          houseNumber: item.houseNo,
+          age: item.age,
+          gender: item.gender,
+          mobileNumber: item.mobile,
+          caste: item.caste,
+          profession: item.profession,
+          politicalPreference: item.politicalPref,
+          constituencyId: constituency.id,
+          mandalId: item.mandalId,
+          villageId: item.villageId,
+          boothId: item.boothId,
+          voterGroupId: item.groupId,
+          updatedById: creatorId,
+        }));
+
+        await prisma.$transaction(
+          async (tx) => {
+            const lockKey = getConstituencyLockKey(constituency.id);
+            const lockRes = await tx.$queryRaw<{ pg_try_advisory_xact_lock: boolean }[]>`
+              SELECT pg_try_advisory_xact_lock(${lockKey}::bigint) as pg_try_advisory_xact_lock
+            `;
+            if (!lockRes[0]?.pg_try_advisory_xact_lock) {
+              const err: any = new Error(
+                `An import is already actively processing for constituency '${constituency.name}'. Simultaneous imports are forbidden to protect data integrity.`
+              );
+              err.statusCode = 409;
+              err.code = 'CONCURRENT_IMPORT_CONFLICT';
+              throw err;
+            }
+
+            // Delete existing voters in this constituency ONLY
+            const deletedCount = await tx.voter.deleteMany({
+              where: { constituencyId: constituency.id },
+            });
+
+            // Insert replacement voters in chunks of 1,000 (no skipDuplicates in REPLACE mode)
+            for (let i = 0; i < voterPayloads.length; i += 1000) {
+              const chunk = voterPayloads.slice(i, i + 1000);
+              await tx.voter.createMany({
+                data: chunk,
+              });
+            }
+
+            await logAudit({
+              action: AuditAction.DELETE,
+              entityType: 'ConstituencyVotersReplace',
+              entityId: constituency.id,
+              userId: creatorId,
+              changes: {
+                replacedConstituencyId: constituency.id,
+                constituencyName: constituency.name,
+                deletedVotersCount: deletedCount.count,
+              } as unknown as Prisma.InputJsonValue,
+            });
+          },
+          { timeout: 60000 }
+        );
+
+        successCount = voterPayloads.length;
+      } else {
+        // APPEND Mode: Bulk pre-fetch existing voters to avoid N+1 findUnique queries
+        const allEpics = preparedItems.map((p) => p.epic);
+        const existingVotersMap = new Map<string, { id: string; constituencyId: string | null }>();
+
+        const chunkSize = 2000;
+        for (let i = 0; i < allEpics.length; i += chunkSize) {
+          const slice = allEpics.slice(i, i + chunkSize);
+          const found = await prisma.voter.findMany({
+            where: { epicNumber: { in: slice } },
+            select: { id: true, epicNumber: true, constituencyId: true },
+          });
+          found.forEach((v) => existingVotersMap.set(v.epicNumber, v));
+        }
+
+        // Preflight cross-constituency conflict check: prevent unauthorized voter reassignment
+        const crossConstituencyConflicts = Array.from(existingVotersMap.values()).filter(
+          (v) => v.constituencyId !== constituency.id
+        );
+        if (crossConstituencyConflicts.length > 0) {
+          const err: any = new Error(
+            `Cross-constituency conflict: ${crossConstituencyConflicts.length} voter(s) already belong to a different constituency. Cross-constituency voter reassignment is strictly forbidden.`
+          );
+          err.statusCode = 409;
+          err.code = 'EPIC_CROSS_CONSTITUENCY_CONFLICT';
+          throw err;
+        }
+
+        const newVotersList: Prisma.VoterCreateManyInput[] = [];
+
+        await prisma.$transaction(
+          async (tx) => {
+            const lockKey = getConstituencyLockKey(constituency.id);
+            const lockRes = await tx.$queryRaw<{ pg_try_advisory_xact_lock: boolean }[]>`
+              SELECT pg_try_advisory_xact_lock(${lockKey}::bigint) as pg_try_advisory_xact_lock
+            `;
+            if (!lockRes[0]?.pg_try_advisory_xact_lock) {
+              const err: any = new Error(
+                `An import is already actively processing for constituency '${constituency.name}'. Simultaneous imports are forbidden to protect data integrity.`
+              );
+              err.statusCode = 409;
+              err.code = 'CONCURRENT_IMPORT_CONFLICT';
+              throw err;
+            }
+
+            for (const item of preparedItems) {
+              try {
+                if (existingVotersMap.has(item.epic)) {
+                  const ev = existingVotersMap.get(item.epic)!;
+                  await tx.voter.update({
+                    where: { id: ev.id },
+                    data: {
+                      name: item.rawName,
+                      fatherHusbandName: item.relativeName,
+                      relationType: item.relation,
+                      age: item.age,
+                      gender: item.gender,
+                      mobileNumber: item.mobile,
+                      houseNumber: item.houseNo,
+                      caste: item.caste,
+                      profession: item.profession,
+                      politicalPreference: item.politicalPref,
+                      constituencyId: constituency.id,
+                      mandalId: item.mandalId,
+                      villageId: item.villageId,
+                      boothId: item.boothId,
+                      voterGroupId: item.groupId,
+                      updatedById: creatorId,
+                    },
+                  });
+                  updatedCount++;
+                } else {
+                  newVotersList.push({
+                    serialNumber: item.rowNum,
+                    epicNumber: item.epic,
+                    name: item.rawName,
+                    fatherHusbandName: item.relativeName,
+                    relationType: item.relation,
+                    houseNumber: item.houseNo,
+                    age: item.age,
+                    gender: item.gender,
+                    mobileNumber: item.mobile,
+                    caste: item.caste,
+                    profession: item.profession,
+                    politicalPreference: item.politicalPref,
+                    constituencyId: constituency.id,
+                    mandalId: item.mandalId,
+                    villageId: item.villageId,
+                    boothId: item.boothId,
+                    voterGroupId: item.groupId,
+                    updatedById: creatorId,
+                  });
+                }
+              } catch (err: any) {
+                errorCount++;
+                errorRecords.push({
+                  rowNumber: item.rowNum,
+                  field: 'voter',
+                  value: item.epic,
+                  errorMessage: err.message || 'Error updating voter record',
+                  severity: 'ERROR',
+                });
+              }
+            }
+
+            if (newVotersList.length > 0) {
+              for (let i = 0; i < newVotersList.length; i += 1000) {
+                const chunk = newVotersList.slice(i, i + 1000);
+                await tx.voter.createMany({
+                  data: chunk,
+                  skipDuplicates: true,
+                });
+              }
+              successCount += newVotersList.length;
+            }
+          },
+          { timeout: 60000 }
+        );
       }
 
       // Update total voters on Constituency
@@ -1448,7 +1695,7 @@ export class ApplicationsService {
         data: { totalVoters: totalVotersInAC },
       });
 
-      // 6. Record individual DataImportErrors in database
+      // 9. Record individual DataImportErrors in database
       if (errorRecords.length > 0) {
         const errorChunks = errorRecords.slice(0, 1000);
         for (const err of errorChunks) {
@@ -1473,7 +1720,7 @@ export class ApplicationsService {
           ? 'PARTIAL_SUCCESS'
           : 'FAILED';
 
-      // 7. Update DataImport & ImportJob records
+      // 10. Update DataImport & ImportJob records
       await prisma.dataImport.update({
         where: { id: dataImport.id },
         data: {
@@ -1500,7 +1747,7 @@ export class ApplicationsService {
         },
       });
 
-      // 8. Log Audit Record
+      // 11. Log Audit Record
       await logAudit({
         action: AuditAction.BULK_IMPORT,
         entityType: 'DataImport',
@@ -1547,7 +1794,7 @@ export class ApplicationsService {
           status: 'FAILED',
           completedAt: new Date(),
         },
-      });
+      }).catch(() => {});
       await prisma.importJob.update({
         where: { id: job.id },
         data: {
@@ -1555,7 +1802,7 @@ export class ApplicationsService {
           completedAt: new Date(),
           errors: [{ error: err.message || 'Fatal error during import execution' }] as unknown as Prisma.InputJsonValue,
         },
-      });
+      }).catch(() => {});
       throw err;
     }
   }
@@ -1573,6 +1820,7 @@ export class ApplicationsService {
       page?: number;
       limit?: number;
     },
+    scope?: UserHierarchyScope,
   ) {
     const config = await this.resolveApplication(appId);
     const page = Math.max(1, query?.page || 1);
@@ -1587,8 +1835,20 @@ export class ApplicationsService {
       where.status = query.status;
     }
 
+    if (scope && !scope.isGlobalScope) {
+      if (scope.accessibleConstituencyIds.size > 0) {
+        where.targetConstituencyId = { in: Array.from(scope.accessibleConstituencyIds) };
+      } else {
+        where.uploadedById = scope.userId;
+      }
+    }
+
     if (query?.constituencyId && query.constituencyId !== 'ALL') {
-      where.targetConstituencyId = query.constituencyId;
+      if (scope && !scope.isGlobalScope && !scope.accessibleConstituencyIds.has(query.constituencyId)) {
+        where.targetConstituencyId = '00000000-0000-0000-0000-000000000000';
+      } else {
+        where.targetConstituencyId = query.constituencyId;
+      }
     }
 
     if (query?.startDate || query?.endDate) {
@@ -1666,7 +1926,7 @@ export class ApplicationsService {
   /**
    * Return single import details by ID
    */
-  static async getDataImportById(importId: string) {
+  static async getDataImportById(importId: string, appId?: string, scope?: UserHierarchyScope, actorId?: string) {
     const item = await prisma.dataImport.findUnique({
       where: { id: importId },
       include: {
@@ -1682,7 +1942,25 @@ export class ApplicationsService {
     });
 
     if (!item) {
-      throw new Error(`DataImport with id '${importId}' not found.`);
+      const err: any = new Error(`DataImport with id '${importId}' not found.`);
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (appId && item.applicationId !== appId) {
+      const err: any = new Error('Access denied: Import does not belong to requested application.');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    if (scope && !scope.isGlobalScope) {
+      const hasConstituencyAccess = item.targetConstituencyId && scope.accessibleConstituencyIds.has(item.targetConstituencyId);
+      const isUploader = item.uploadedById === (actorId || scope.userId);
+      if (!hasConstituencyAccess && !isUploader) {
+        const err: any = new Error('Access denied: Import record is outside your authorized hierarchy scope.');
+        err.statusCode = 403;
+        throw err;
+      }
     }
 
     return {
@@ -1697,9 +1975,13 @@ export class ApplicationsService {
   /**
    * Return errors for an import record
    */
-  static async getDataImportErrors(importId: string) {
+  static async getDataImportErrors(importId: string, appId?: string, scope?: UserHierarchyScope, actorId?: string) {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(importId);
     if (!isUuid) return [];
+
+    if (scope && !scope.isGlobalScope) {
+      await this.getDataImportById(importId, appId, scope, actorId);
+    }
 
     const errors = await prisma.dataImportError.findMany({
       where: { importId },
@@ -1725,8 +2007,8 @@ export class ApplicationsService {
   /**
    * Generate CSV error report string
    */
-  static async downloadErrorReport(importId: string): Promise<string> {
-    const errors = await this.getDataImportErrors(importId);
+  static async downloadErrorReport(importId: string, appId?: string, scope?: UserHierarchyScope, actorId?: string): Promise<string> {
+    const errors = await this.getDataImportErrors(importId, appId, scope, actorId);
     let csv = 'Row Number,Field,Value,Error Message,Severity\n';
     for (const err of errors) {
       const rowNum = (err as any).rowNumber || (err as any).row || '';
@@ -1742,37 +2024,51 @@ export class ApplicationsService {
   /**
    * Return recent import jobs for backward compatibility
    */
-  static async getImportHistory(appId: string) {
-    const result = await this.getDataImports(appId, { limit: 20 });
+  static async getImportHistory(appId: string, scope?: UserHierarchyScope) {
+    const result = await this.getDataImports(appId, { limit: 20 }, scope);
     return result.items;
   }
 
   /**
    * Get detailed error report for an import job
    */
-  static async getImportJobErrors(jobId: string) {
-    return this.getDataImportErrors(jobId);
+  static async getImportJobErrors(jobId: string, appId?: string, scope?: UserHierarchyScope, actorId?: string) {
+    return this.getDataImportErrors(jobId, appId, scope, actorId);
   }
 
   /**
    * Query assigned incharges with jurisdiction metadata
    */
-  static async getIncharges(appId: string, level?: string, jurisdictionId?: string) {
+  static async getIncharges(appId: string, level?: string, jurisdictionId?: string, scope?: UserHierarchyScope) {
     const config = await this.resolveApplication(appId);
     const upperLevel = level?.toUpperCase();
 
+    const where: any = {
+      isActive: true,
+      ...(upperLevel
+        ? {
+            roleType: {
+              in: this.getRolesForLevel(upperLevel),
+            },
+          }
+        : {}),
+      ...(jurisdictionId ? this.getJurisdictionWhere(upperLevel, jurisdictionId) : {}),
+    };
+
+    if (scope && !scope.isGlobalScope) {
+      if (scope.accessibleConstituencyIds.size > 0) {
+        where.OR = [
+          { constituencyId: { in: Array.from(scope.accessibleConstituencyIds) } },
+          ...(scope.accessibleMandalIds.size > 0 ? [{ mandalId: { in: Array.from(scope.accessibleMandalIds) } }] : []),
+          ...(scope.accessibleVillageIds.size > 0 ? [{ villageId: { in: Array.from(scope.accessibleVillageIds) } }] : []),
+          ...(scope.accessibleBoothIds.size > 0 ? [{ boothId: { in: Array.from(scope.accessibleBoothIds) } }] : []),
+          ...(scope.accessibleVoterGroupIds.size > 0 ? [{ voterGroupId: { in: Array.from(scope.accessibleVoterGroupIds) } }] : []),
+        ];
+      }
+    }
+
     const assignments = await prisma.userHierarchyAssignment.findMany({
-      where: {
-        isActive: true,
-        ...(upperLevel
-          ? {
-              roleType: {
-                in: this.getRolesForLevel(upperLevel),
-              },
-            }
-          : {}),
-        ...(jurisdictionId ? this.getJurisdictionWhere(upperLevel, jurisdictionId) : {}),
-      },
+      where,
       include: {
         user: true,
         state: true,
@@ -1841,8 +2137,60 @@ export class ApplicationsService {
   /**
    * Assign a user to a specific jurisdiction
    */
-  static async assignIncharge(appId: string, body: any, actorId?: string) {
+  static async assignIncharge(appId: string, body: any, actor?: AuthenticatedUserPayload, scope?: UserHierarchyScope) {
     await this.resolveApplication(appId);
+
+    // 1. Vertical rank check on requested role
+    if (actor && !assertRoleHierarchy(actor.role, body.role as RoleType)) {
+      const err: any = new Error(`Access denied: Cannot assign or elevate role (${body.role}) beyond your authority level (${actor.role}).`);
+      err.statusCode = 403;
+      err.code = 'VERTICAL_PRIVILEGE_VIOLATION';
+      throw err;
+    }
+
+    // 2. Unit / geographical scope check
+    const unitLevel = body.unitLevel.toUpperCase();
+    const unitId = body.unitId;
+
+    if (scope && !scope.isGlobalScope) {
+      let isUnitAccessible = false;
+      switch (unitLevel) {
+        case 'STATE':
+          isUnitAccessible = scope.accessibleStateIds.has(unitId);
+          break;
+        case 'ZONE':
+          isUnitAccessible = scope.accessibleZoneIds.has(unitId);
+          break;
+        case 'PARLIAMENT':
+          isUnitAccessible = scope.accessibleParliamentIds.has(unitId);
+          break;
+        case 'CONSTITUENCY':
+          isUnitAccessible = scope.accessibleConstituencyIds.has(unitId);
+          break;
+        case 'MANDAL':
+          isUnitAccessible = scope.accessibleMandalIds.has(unitId);
+          break;
+        case 'VILLAGE':
+          isUnitAccessible = scope.accessibleVillageIds.has(unitId);
+          break;
+        case 'BOOTH':
+          isUnitAccessible = scope.accessibleBoothIds.has(unitId);
+          break;
+        case 'VOTER_GROUP':
+          isUnitAccessible = scope.accessibleVoterGroupIds.has(unitId);
+          break;
+        default:
+          isUnitAccessible = scope.accessibleUnitIds.has(unitId);
+      }
+
+      if (!isUnitAccessible) {
+        const err: any = new Error(`Access denied: Target jurisdiction ${unitId} is outside your authorized hierarchy scope.`);
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_SCOPE';
+        throw err;
+      }
+    }
+
     let userId = body.userId;
 
     if (!userId) {
@@ -1853,7 +2201,14 @@ export class ApplicationsService {
         where: { mobileNumber: body.mobileNumber },
       });
 
-      if (!existingUser) {
+      if (existingUser) {
+        if (actor && !assertRoleHierarchy(actor.role, existingUser.role)) {
+          const err: any = new Error(`Access denied: Target user with rank (${existingUser.role}) cannot be modified by (${actor.role}).`);
+          err.statusCode = 403;
+          err.code = 'VERTICAL_PRIVILEGE_VIOLATION';
+          throw err;
+        }
+      } else {
         const userCode = `INC-${body.mobileNumber.slice(-4)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
         existingUser = await prisma.user.create({
           data: {
@@ -1866,10 +2221,15 @@ export class ApplicationsService {
         });
       }
       userId = existingUser.id;
+    } else {
+      const existingUser = await prisma.user.findUnique({ where: { id: userId } });
+      if (existingUser && actor && !assertRoleHierarchy(actor.role, existingUser.role)) {
+        const err: any = new Error(`Access denied: Target user with rank (${existingUser.role}) cannot be modified by (${actor.role}).`);
+        err.statusCode = 403;
+        err.code = 'VERTICAL_PRIVILEGE_VIOLATION';
+        throw err;
+      }
     }
-
-    const unitLevel = body.unitLevel.toUpperCase();
-    const unitId = body.unitId;
 
     const assignmentData: any = {
       userId,
@@ -1921,7 +2281,7 @@ export class ApplicationsService {
       action: AuditAction.CREATE,
       entityType: 'UserHierarchyAssignment',
       entityId: assignment.id,
-      userId: actorId || userId,
+      userId: actor?.userId || userId,
       changes: assignmentData,
     });
 
@@ -1931,14 +2291,46 @@ export class ApplicationsService {
   /**
    * Delete or deactivate incharge jurisdiction assignment
    */
-  static async deleteIncharge(appId: string, assignmentId: string, actorId?: string) {
+  static async deleteIncharge(appId: string, assignmentId: string, actor?: AuthenticatedUserPayload, scope?: UserHierarchyScope) {
     await this.resolveApplication(appId);
     const existing = await prisma.userHierarchyAssignment.findUnique({
       where: { id: assignmentId },
+      include: { user: true },
     });
 
     if (!existing) {
-      throw new Error(`Assignment with ID '${assignmentId}' not found.`);
+      const err: any = new Error(`Assignment with ID '${assignmentId}' not found.`);
+      err.statusCode = 404;
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+
+    // 1. Vertical rank check: Cannot delete assignment equal to or higher than caller
+    if (actor && !scope?.isGlobalScope && !assertRoleHierarchy(actor.role, existing.roleType)) {
+      const err: any = new Error(`Access denied: Cannot delete an incharge assignment with rank (${existing.roleType}) equal to or higher than yours (${actor.role}).`);
+      err.statusCode = 403;
+      err.code = 'VERTICAL_PRIVILEGE_VIOLATION';
+      throw err;
+    }
+
+    // 2. Horizontal hierarchy scope check: assignment's unit must be within actor's scope
+    if (scope && !scope.isGlobalScope) {
+      let isWithinScope = false;
+      if (existing.constituencyId && scope.accessibleConstituencyIds.has(existing.constituencyId)) isWithinScope = true;
+      else if (existing.mandalId && scope.accessibleMandalIds.has(existing.mandalId)) isWithinScope = true;
+      else if (existing.villageId && scope.accessibleVillageIds.has(existing.villageId)) isWithinScope = true;
+      else if (existing.boothId && scope.accessibleBoothIds.has(existing.boothId)) isWithinScope = true;
+      else if (existing.voterGroupId && scope.accessibleVoterGroupIds.has(existing.voterGroupId)) isWithinScope = true;
+      else if (existing.stateId && scope.accessibleStateIds.has(existing.stateId)) isWithinScope = true;
+      else if (existing.zoneId && scope.accessibleZoneIds.has(existing.zoneId)) isWithinScope = true;
+      else if (existing.parliamentId && scope.accessibleParliamentIds.has(existing.parliamentId)) isWithinScope = true;
+
+      if (!isWithinScope) {
+        const err: any = new Error('Access denied: Assignment is outside your authorized hierarchy scope.');
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_SCOPE';
+        throw err;
+      }
     }
 
     await prisma.userHierarchyAssignment.delete({
@@ -1956,7 +2348,7 @@ export class ApplicationsService {
       action: AuditAction.DELETE,
       entityType: 'UserHierarchyAssignment',
       entityId: assignmentId,
-      userId: actorId || existing.userId,
+      userId: actor?.userId || existing.userId,
       changes: { deactivatedAssignmentId: assignmentId },
     });
 
@@ -1974,17 +2366,65 @@ export class ApplicationsService {
 
     const where: any = {};
 
-    if (userScope) {
+    if (userScope && !userScope.isGlobalScope) {
       if (userScope.voterGroupId) where.voterGroupId = userScope.voterGroupId;
       else if (userScope.boothId) where.boothId = userScope.boothId;
       else if (userScope.villageId) where.villageId = userScope.villageId;
       else if (userScope.mandalId) where.mandalId = userScope.mandalId;
       else if (userScope.constituencyId) where.constituencyId = userScope.constituencyId;
+      else if (userScope.accessibleConstituencyIds.size > 0) {
+        where.constituencyId = { in: Array.from(userScope.accessibleConstituencyIds) };
+      }
     }
 
-    if (query?.boothId) where.boothId = query.boothId;
-    if (query?.mandalId) where.mandalId = query.mandalId;
-    if (query?.villageId) where.villageId = query.villageId;
+    // Query parameters may narrow an already-authorized scope, but NEVER widen it
+    if (query?.boothId) {
+      if (userScope && !userScope.isGlobalScope) {
+        if (!userScope.accessibleBoothIds.has(query.boothId)) {
+          where.boothId = '00000000-0000-0000-0000-000000000000';
+        } else {
+          where.boothId = query.boothId;
+        }
+      } else {
+        where.boothId = query.boothId;
+      }
+    }
+
+    if (query?.villageId) {
+      if (userScope && !userScope.isGlobalScope) {
+        if (!userScope.accessibleVillageIds.has(query.villageId)) {
+          where.villageId = '00000000-0000-0000-0000-000000000000';
+        } else {
+          where.villageId = query.villageId;
+        }
+      } else {
+        where.villageId = query.villageId;
+      }
+    }
+
+    if (query?.mandalId) {
+      if (userScope && !userScope.isGlobalScope) {
+        if (!userScope.accessibleMandalIds.has(query.mandalId)) {
+          where.mandalId = '00000000-0000-0000-0000-000000000000';
+        } else {
+          where.mandalId = query.mandalId;
+        }
+      } else {
+        where.mandalId = query.mandalId;
+      }
+    }
+
+    if (query?.constituencyId) {
+      if (userScope && !userScope.isGlobalScope) {
+        if (!userScope.accessibleConstituencyIds.has(query.constituencyId)) {
+          where.constituencyId = '00000000-0000-0000-0000-000000000000';
+        } else {
+          where.constituencyId = query.constituencyId;
+        }
+      } else {
+        where.constituencyId = query.constituencyId;
+      }
+    }
     if (query?.search) {
       where.OR = [
         { name: { contains: query.search, mode: 'insensitive' } },
@@ -2120,7 +2560,7 @@ export class ApplicationsService {
       VILLAGE_INCHARGE: 'Village Incharge',
       BOOTH_PRESIDENT: 'Booth President',
       BOOTH_INCHARGE: 'Booth Incharge',
-      VOTER_100_INCHARGE: '100 Voter Incharge',
+      VOTER_100_INCHARGE: '100 Voters Incharge',
       POLLING_AGENT: 'Polling Agent',
       VOLUNTEER: 'Volunteer',
       VIEWER: 'Viewer',
@@ -2128,7 +2568,11 @@ export class ApplicationsService {
 
     const level = this.getLevelForRole(role);
     if (labels && labels[level]) {
-      return labels[level];
+      const val = labels[level];
+      if (val === 'Indiramma Incharge (100 Voters)' || val?.includes('Indiramma')) {
+        return '100 Voters Incharge';
+      }
+      return val;
     }
 
     return defaultLabels[role] || role;

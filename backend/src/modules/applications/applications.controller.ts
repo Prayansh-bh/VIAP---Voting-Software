@@ -1,5 +1,5 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
-import { successResponse } from '../../common/response.js';
+import { errorResponse, successResponse } from '../../common/response.js';
 import { ApplicationsService } from './applications.service.js';
 
 export class ApplicationsController {
@@ -76,21 +76,28 @@ export class ApplicationsController {
       fileSize?: number;
     };
     const actorId = req.user?.userId;
-    const result = await ApplicationsService.importData(
-      applicationId,
-      body.level || 'VOTER',
-      body.rows,
-      {
-        targetConstituencyId: body.targetConstituencyId,
-        columnMapping: body.columnMapping,
-        importMode: body.importMode,
-        voterGroupSize: body.voterGroupSize,
-        fileName: body.fileName,
-        fileSize: body.fileSize,
-      },
-      actorId,
-    );
-    return reply.status(201).send(successResponse(result, 'Data successfully imported and committed to hierarchy'));
+
+    try {
+      const result = await ApplicationsService.importData(
+        applicationId,
+        body.level || 'VOTER',
+        body.rows,
+        {
+          targetConstituencyId: body.targetConstituencyId,
+          columnMapping: body.columnMapping,
+          importMode: body.importMode,
+          voterGroupSize: body.voterGroupSize,
+          fileName: body.fileName,
+          fileSize: body.fileSize,
+        },
+        actorId,
+        req.hierarchyScope,
+      );
+      return reply.status(201).send(successResponse(result, 'Data successfully imported and committed to hierarchy'));
+    } catch (err: any) {
+      const statusCode = err.statusCode || 500;
+      return reply.status(statusCode).send(errorResponse(err.message || 'Import failed', err.code || 'IMPORT_FAILED', err.data));
+    }
   }
 
   static async getDataImports(req: FastifyRequest, reply: FastifyReply) {
@@ -110,33 +117,33 @@ export class ApplicationsController {
       endDate: query?.endDate,
       page: query?.page ? parseInt(query.page, 10) : 1,
       limit: query?.limit ? parseInt(query.limit, 10) : 20,
-    });
+    }, req.hierarchyScope);
     return reply.send(successResponse(data));
   }
 
   static async getDataImportById(req: FastifyRequest, reply: FastifyReply) {
-    const { importId } = req.params as { importId: string };
-    const data = await ApplicationsService.getDataImportById(importId);
+    const { applicationId, importId } = req.params as { applicationId?: string; importId: string };
+    const data = await ApplicationsService.getDataImportById(importId, applicationId, req.hierarchyScope, req.user?.userId);
     return reply.send(successResponse(data));
   }
 
   static async getDataImportErrors(req: FastifyRequest, reply: FastifyReply) {
-    const { importId, jobId } = req.params as { importId?: string; jobId?: string };
+    const { applicationId, importId, jobId } = req.params as { applicationId?: string; importId?: string; jobId?: string };
     const id = importId || jobId;
     if (!id) {
       return reply.status(400).send({ success: false, error: { message: 'Import ID is required' } });
     }
-    const data = await ApplicationsService.getDataImportErrors(id);
+    const data = await ApplicationsService.getDataImportErrors(id, applicationId, req.hierarchyScope, req.user?.userId);
     return reply.send(successResponse(data));
   }
 
   static async downloadErrorReport(req: FastifyRequest, reply: FastifyReply) {
-    const { importId, jobId } = req.params as { importId?: string; jobId?: string };
+    const { applicationId, importId, jobId } = req.params as { applicationId?: string; importId?: string; jobId?: string };
     const id = importId || jobId;
     if (!id) {
       return reply.status(400).send({ success: false, error: { message: 'Import ID is required' } });
     }
-    const csv = await ApplicationsService.downloadErrorReport(id);
+    const csv = await ApplicationsService.downloadErrorReport(id, applicationId, req.hierarchyScope, req.user?.userId);
     reply.header('Content-Type', 'text/csv');
     reply.header('Content-Disposition', `attachment; filename="import_errors_${id}.csv"`);
     return reply.send(csv);
@@ -144,35 +151,37 @@ export class ApplicationsController {
 
   static async getImportHistory(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId } = req.params as { applicationId: string };
-    const data = await ApplicationsService.getImportHistory(applicationId);
+    const data = await ApplicationsService.getImportHistory(applicationId, req.hierarchyScope);
     return reply.send(successResponse(data));
   }
 
   static async getImportJobErrors(req: FastifyRequest, reply: FastifyReply) {
     const { jobId } = req.params as { jobId: string };
-    const data = await ApplicationsService.getImportJobErrors(jobId);
+    const data = await ApplicationsService.getImportJobErrors(jobId, undefined, req.hierarchyScope, req.user?.userId);
     return reply.send(successResponse(data));
   }
 
   static async getIncharges(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId } = req.params as { applicationId: string };
     const query = req.query as { level?: string; jurisdictionId?: string };
-    const data = await ApplicationsService.getIncharges(applicationId, query?.level, query?.jurisdictionId);
+    const data = await ApplicationsService.getIncharges(applicationId, query?.level, query?.jurisdictionId, req.hierarchyScope);
     return reply.send(successResponse(data));
   }
 
   static async assignIncharge(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId } = req.params as { applicationId: string };
     const body = req.body as any;
-    const actorId = req.user?.userId;
-    const data = await ApplicationsService.assignIncharge(applicationId, body, actorId);
+    const actor = req.user;
+    const scope = req.hierarchyScope;
+    const data = await ApplicationsService.assignIncharge(applicationId, body, actor, scope);
     return reply.status(201).send(successResponse(data, 'Incharge successfully assigned to jurisdiction'));
   }
 
   static async deleteIncharge(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId, id } = req.params as { applicationId: string; id: string };
-    const actorId = req.user?.userId;
-    const data = await ApplicationsService.deleteIncharge(applicationId, id, actorId);
+    const actor = req.user;
+    const scope = req.hierarchyScope;
+    const data = await ApplicationsService.deleteIncharge(applicationId, id, actor, scope);
     return reply.send(successResponse(data, 'Incharge assignment successfully revoked'));
   }
 

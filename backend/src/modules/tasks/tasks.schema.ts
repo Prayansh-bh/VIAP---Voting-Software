@@ -18,23 +18,13 @@ export const createTaskSchema = z.object({
   assignedUserIds: z.array(z.string().uuid()).optional(),
 });
 
-const normalizeTaskStatus = (val: unknown) => {
-  if (typeof val === 'string') {
-    const s = val.trim().toUpperCase().replace(/\s+/g, '_');
-    if (s === 'IN_PROGRESS' || s === 'COMPLETED' || s === 'PENDING' || s === 'CANCELLED') {
-      return s;
-    }
-  }
-  return val;
-};
-
 export const updateTaskSchema = z.object({
   title: z.string().min(3).optional(),
   description: z.string().optional(),
   instructions: z.string().optional(),
   priority: z.nativeEnum(TaskPriority).optional(),
   dueDate: z.string().datetime().optional(),
-  status: z.preprocess(normalizeTaskStatus, z.nativeEnum(TaskStatus)).optional(),
+  status: z.nativeEnum(TaskStatus).optional(),
 });
 
 export const assignTaskSchema = z.object({
@@ -42,7 +32,6 @@ export const assignTaskSchema = z.object({
 });
 
 export const updateTaskStatusSchema = z.object({
-  status: z.preprocess(normalizeTaskStatus, z.nativeEnum(TaskStatus)),
+  status: z.nativeEnum(TaskStatus),
   comments: z.string().optional(),
 });
-

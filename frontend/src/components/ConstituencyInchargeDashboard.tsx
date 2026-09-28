@@ -51,7 +51,8 @@ import {
   ChevronDown,
   Activity,
   Globe,
-  Plus
+  Plus,
+  Crown
 } from 'lucide-react';
 import MandalInchargeDashboard from './MandalInchargeDashboard';
 import AIStrategicIntelligenceCenter from './AIStrategicIntelligenceCenter';
@@ -305,19 +306,21 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
     if (mandalRollups && mandalRollups.length > 0) {
       return mandalRollups;
     }
-    return DEFAULT_KONDAPI_MANDALS;
+    const isDemo = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
+    return isDemo ? DEFAULT_KONDAPI_MANDALS : [];
   }, [mandalRollups, DEFAULT_KONDAPI_MANDALS]);
 
   // Rolled Up Constituency Stats
   const constituencyStats = useMemo(() => {
+    const isDemo = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
     const snapshot = backendSummary?.snapshot;
     if (snapshot) {
       const prefs = (snapshot as HierarchySummaryPayload['snapshot'] & { politicalPreference?: Record<string, number> }).politicalPreference;
       return {
-        voters: snapshot.summary?.totalVoters ?? 228000,
+        voters: snapshot.summary?.totalVoters ?? (isDemo ? 228000 : 0),
         mandals: snapshot.hierarchyCounts?.MANDAL ?? mandalsData.length,
-        villages: snapshot.hierarchyCounts?.VILLAGE ?? (villageRollups.length || 114),
-        booths: snapshot.hierarchyCounts?.BOOTH ?? 283,
+        villages: snapshot.hierarchyCounts?.VILLAGE ?? (villageRollups.length || (isDemo ? 114 : 0)),
+        booths: snapshot.hierarchyCounts?.BOOTH ?? (isDemo ? 283 : 0),
         tdp: prefs?.TDP ?? mandalsData.reduce((sum, m) => sum + (m.tdp || 0), 0),
         ysrcp: prefs?.YSRCP ?? mandalsData.reduce((sum, m) => sum + (m.ysrcp || 0), 0),
         neutral: prefs?.NEUTRAL ?? mandalsData.reduce((sum, m) => sum + (m.neutral || 0), 0),
@@ -326,8 +329,8 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
     let voters = 0;
     let mandals = mandalsData.length;
-    let villages = 114;
-    let booths = 283;
+    let villages = villageRollups.length || (isDemo ? 114 : 0);
+    let booths = mandalsData.reduce((sum, m) => sum + (m.booths || 0), 0) || (isDemo ? 283 : 0);
     let tdp = 0;
     let ysrcp = 0;
     let neutral = 0;
@@ -339,18 +342,19 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
       neutral += m.neutral || 0;
     });
 
-    return { voters: voters || 228000, mandals: mandals || 6, villages, booths, tdp: tdp || 118000, ysrcp: ysrcp || 97400, neutral: neutral || 12600 };
+    return { voters: voters || (isDemo ? 228000 : 0), mandals: mandals || (isDemo ? 6 : 0), villages, booths, tdp: tdp || (isDemo ? 118000 : 0), ysrcp: ysrcp || (isDemo ? 97400 : 0), neutral: neutral || (isDemo ? 12600 : 0) };
   }, [backendSummary, mandalsData, villageRollups.length]);
 
   const liveConstituencyStats = useMemo(() => {
+    const isDemo = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
     const snapshot = backendSummary?.snapshot;
     return {
-      totalVoters: snapshot?.summary?.totalVoters ?? constituencyStats?.voters ?? 228000,
-      totalMandals: snapshot?.hierarchyCounts?.MANDAL ?? constituencyStats?.mandals ?? 6,
-      totalVillages: snapshot?.hierarchyCounts?.VILLAGE ?? constituencyStats?.villages ?? 114,
-      totalBooths: snapshot?.hierarchyCounts?.BOOTH ?? constituencyStats?.booths ?? 283,
-      voted: snapshot?.summary?.voted ?? 159600,
-      remaining: snapshot?.summary?.remaining ?? 68400,
+      totalVoters: snapshot?.summary?.totalVoters ?? constituencyStats?.voters ?? (isDemo ? 228000 : 0),
+      totalMandals: snapshot?.hierarchyCounts?.MANDAL ?? constituencyStats?.mandals ?? (isDemo ? 6 : 0),
+      totalVillages: snapshot?.hierarchyCounts?.VILLAGE ?? constituencyStats?.villages ?? (isDemo ? 114 : 0),
+      totalBooths: snapshot?.hierarchyCounts?.BOOTH ?? constituencyStats?.booths ?? (isDemo ? 283 : 0),
+      voted: snapshot?.summary?.voted ?? (isDemo ? 159600 : 0),
+      remaining: snapshot?.summary?.remaining ?? (isDemo ? 68400 : 0),
     };
   }, [backendSummary, constituencyStats]);
 
@@ -398,7 +402,8 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
     ];
 
     if (grouped.size === 0) {
-      return DEFAULT_KONDAPI_VILLAGES;
+      const isDemo = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
+      return isDemo ? DEFAULT_KONDAPI_VILLAGES : [];
     }
 
     let currentSNo = 1;
@@ -929,26 +934,26 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} md:fixed shrink-0 select-none
       `}>
         {/* Brand Block */}
-        <div className="p-6 border-b border-slate-900 space-y-2">
+        <div className="p-5 border-b border-slate-900/90 space-y-2.5">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded bg-yellow-400 flex items-center justify-center text-slate-950 shrink-0 font-black text-sm">
-              TDP
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 flex items-center justify-center text-slate-950 shrink-0 font-black text-sm shadow-md shadow-amber-400/20">
+              <Crown className="w-5 h-5 text-slate-950" />
             </div>
             <div>
-              <h1 className="text-sm font-black text-white uppercase tracking-tight">Kondapi Connect</h1>
-              <p className="text-[10px] text-yellow-400 font-extrabold uppercase tracking-widest mt-0.5">Constituency Command</p>
+              <h1 className="text-sm font-black text-white tracking-tight">Kondapi Connect</h1>
+              <p className="text-[10px] text-amber-400 font-extrabold uppercase tracking-widest">Constituency Command</p>
             </div>
           </div>
-          <div className="bg-slate-900 border border-slate-800 rounded-lg p-2 flex items-center gap-2 mt-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-[9px] font-mono text-slate-400 font-bold uppercase tracking-wider truncate">
-              Chundi Ramesh Naidu
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+            <span className="text-[10px] font-mono text-slate-300 font-bold uppercase tracking-wider truncate">
+              {session?.userName || 'Chundi Ramesh Naidu'}
             </span>
           </div>
         </div>
 
         {/* Sidebar Nav Items */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1 no-scrollbar">
           {[
             { id: 'dashboard', name: 'Dashboard', icon: Home },
             { id: 'mandal_list', name: 'Mandal List', icon: Layers },
@@ -973,15 +978,15 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   setIsSidebarOpen(false);
                 }}
                 className={`
-                  w-full flex items-center gap-3 px-4 py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer uppercase tracking-wider
+                  w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer tracking-wide
                   ${isActive 
-                    ? 'bg-yellow-400 text-slate-950 font-black' 
-                    : 'hover:bg-slate-900 hover:text-white text-slate-400'
+                    ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 font-black shadow-md shadow-amber-400/20' 
+                    : 'hover:bg-slate-900/80 hover:text-white text-slate-400'
                   }
                 `}
               >
                 <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-slate-950' : 'text-slate-400'}`} />
-                {item.name}
+                <span className="truncate">{item.name}</span>
               </button>
             );
           })}
@@ -1006,22 +1011,30 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
         <div className="p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto" id="constituency-main-container">
           
           {/* Header Title block */}
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-slate-200 pb-5 gap-4">
-            <div>
-              <h2 className="text-2xl font-black text-slate-950 uppercase tracking-tight">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-slate-200/80 pb-5 gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 uppercase tracking-wider">
+                  <Crown className="w-3 h-3 text-amber-600" />
+                  Assembly Constituency Command
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                  AP State • Kondapi
+                </span>
+              </div>
+              <h2 className="text-2xl font-black text-slate-950 tracking-tight">
                 Kondapi Constituency Dashboard
               </h2>
-              <p className="text-xs text-slate-500 font-semibold mt-0.5">
-                Overview and political performance of all Mandals in Kondapi Assembly Constituency.
+              <p className="text-xs text-slate-500 font-medium">
+                Live political telemetry, booth infrastructure, and cadre performance across all Mandals.
               </p>
             </div>
             
-            <div className="flex items-center gap-3 shrink-0">
-              <span className="text-xs font-bold text-slate-400 font-mono">ROLE: CONSTITUENCY INCHARGE</span>
-              <span className="h-4 w-px bg-slate-300" />
-              <span className="text-xs bg-yellow-400/20 text-yellow-800 font-black px-2.5 py-1 rounded border border-yellow-300/50 uppercase tracking-wider text-[10px]">
-                AP State
-              </span>
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 shadow-xs flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-xs font-bold text-slate-700">Constituency Incharge</span>
+              </div>
             </div>
           </div>
 
@@ -1031,46 +1044,76 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
           {activeTab === 'dashboard' && (
             <div className="space-y-6 animate-fade-in" id="const-dashboard-tab">
               {/* Summary Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 
-                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between space-y-2">
-                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Total Voters</span>
-                  <div className="flex items-baseline justify-between">
+                <div className="bg-white/95 backdrop-blur-sm border border-slate-200/90 rounded-2xl p-4 shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Total Voters</span>
+                    <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                      <Users className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div>
                     <span className="text-2xl font-black text-slate-950 tracking-tight">{liveConstituencyStats.totalVoters.toLocaleString()}</span>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Aggregated from scoped hierarchy</p>
                   </div>
-                  <div className="text-[9px] text-slate-500 font-black">Aggregated from scoped hierarchy</div>
                 </div>
 
-                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between space-y-2">
-                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Total Mandals</span>
-                  <div className="flex items-baseline justify-between">
+                <div className="bg-white/95 backdrop-blur-sm border border-slate-200/90 rounded-2xl p-4 shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Total Mandals</span>
+                    <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                      <Layers className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div>
                     <span className="text-2xl font-black text-slate-950 tracking-tight">{liveConstituencyStats.totalMandals}</span>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Current operational mandals</p>
                   </div>
-                  <div className="text-[9px] text-slate-500 font-black">Current backend scope</div>
                 </div>
 
-                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between space-y-2">
-                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Total Villages</span>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-2xl font-black text-blue-600 tracking-tight">{liveConstituencyStats.totalVillages}</span>
+                <div className="bg-white/95 backdrop-blur-sm border border-slate-200/90 rounded-2xl p-4 shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Total Villages</span>
+                    <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+                      <MapPin className="w-4 h-4" />
+                    </div>
                   </div>
-                  <div className="text-[9px] text-slate-500 font-black">Resolved from child units</div>
+                  <div>
+                    <span className="text-2xl font-black text-slate-950 tracking-tight">{liveConstituencyStats.totalVillages}</span>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Resolved from child units</p>
+                  </div>
                 </div>
 
-                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between space-y-2">
-                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Total Booths</span>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-2xl font-black text-purple-600 tracking-tight">{liveConstituencyStats.totalBooths}</span>
+                <div className="bg-white/95 backdrop-blur-sm border border-slate-200/90 rounded-2xl p-4 shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Total Booths</span>
+                    <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+                      <Vote className="w-4 h-4" />
+                    </div>
                   </div>
-                  <div className="text-[9px] text-slate-500 font-black">Current operational booths</div>
+                  <div>
+                    <span className="text-2xl font-black text-slate-950 tracking-tight">{liveConstituencyStats.totalBooths}</span>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Active polling stations</p>
+                  </div>
                 </div>
 
-                <div className="bg-amber-50 text-slate-950 rounded-xl p-4 shadow-sm flex flex-col justify-between space-y-2 border-2 border-amber-400">
-                  <span className="text-[10px] text-amber-800 font-black uppercase tracking-wider">Live Voting</span>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-base font-black uppercase tracking-tight text-amber-600">{liveConstituencyStats.voted.toLocaleString()} Done</span>
+                <div className="bg-gradient-to-br from-amber-50 to-amber-100/70 border border-amber-300/80 rounded-2xl p-4 shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-amber-800 font-extrabold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                      Live Turnout
+                    </span>
+                    <div className="w-8 h-8 rounded-xl bg-amber-200/80 text-amber-800 flex items-center justify-center">
+                      <Activity className="w-4 h-4" />
+                    </div>
                   </div>
-                  <div className="text-[11px] text-slate-700 font-black bg-white/70 px-2 py-0.5 rounded border border-amber-200 w-fit">Remaining: {liveConstituencyStats.remaining.toLocaleString()}</div>
+                  <div>
+                    <span className="text-xl font-black text-amber-900 tracking-tight">{liveConstituencyStats.voted.toLocaleString()} Done</span>
+                    <div className="text-[10px] font-bold text-amber-800 bg-white/80 px-2 py-0.5 rounded-lg border border-amber-200/70 w-fit mt-1">
+                      Remaining: {liveConstituencyStats.remaining.toLocaleString()}
+                    </div>
+                  </div>
                 </div>
 
               </div>

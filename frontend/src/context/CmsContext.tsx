@@ -68,12 +68,16 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
     if (saved) {
       try {
         const parsed = JSON.parse(saved) as CmsConfig;
+        const initialLabels = { ...DEFAULT_CONFIG.hierarchyLabels, ...(parsed.hierarchyLabels || {}) };
+        if (initialLabels.VOTER_GROUP && (initialLabels.VOTER_GROUP === 'Indiramma Incharge (100 Voters)' || initialLabels.VOTER_GROUP.includes('Indiramma'))) {
+          initialLabels.VOTER_GROUP = '100 Voters Incharge';
+        }
         return {
           ...DEFAULT_CONFIG,
           ...parsed,
           activeHierarchyLevels: parsed.activeHierarchyLevels || DEFAULT_CONFIG.activeHierarchyLevels,
           featureToggles: { ...DEFAULT_CONFIG.featureToggles, ...(parsed.featureToggles || {}) },
-          hierarchyLabels: { ...DEFAULT_CONFIG.hierarchyLabels, ...(parsed.hierarchyLabels || {}) },
+          hierarchyLabels: initialLabels,
           constituencies: parsed.constituencies?.length ? parsed.constituencies : DEFAULT_CONFIG.constituencies,
         };
       } catch {
@@ -93,15 +97,30 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
       const data = await fetchCmsConfig();
       const constList = await fetchConstituenciesApi();
 
+      const mergedLabels = {
+        ...DEFAULT_CONFIG.hierarchyLabels,
+        ...(data?.config?.hierarchyLabels || {}),
+      };
+      if (mergedLabels.VOTER_GROUP && (mergedLabels.VOTER_GROUP === 'Indiramma Incharge (100 Voters)' || mergedLabels.VOTER_GROUP.includes('Indiramma'))) {
+        mergedLabels.VOTER_GROUP = '100 Voters Incharge';
+      }
+
       setConfig({
         ...DEFAULT_CONFIG,
         ...(data?.config || {}),
+        hierarchyLabels: mergedLabels,
         constituencies: constList.length > 0 ? constList : (data?.config?.constituencies || DEFAULT_CONFIG.constituencies),
       });
 
-      setParties(Array.isArray(data?.parties) && data.parties.length > 0 ? data.parties : []);
-      if (Array.isArray(data?.parties) && data.parties.length > 0) {
-        localStorage.setItem('kdp_custom_parties', JSON.stringify(data.parties));
+      const rawParties = Array.isArray(data?.parties) ? data.parties : [];
+      const cleanParties = rawParties.filter(
+        (p: any) => !p.code?.startsWith('TEST_') && p.name !== 'Democratic Progressive Front'
+      );
+      setParties(cleanParties);
+      if (cleanParties.length > 0) {
+        localStorage.setItem('kdp_custom_parties', JSON.stringify(cleanParties));
+      } else {
+        localStorage.removeItem('kdp_custom_parties');
       }
 
       setAnnouncements(Array.isArray(data?.announcements) ? data.announcements : []);
@@ -256,7 +275,11 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
   };
 
   const t = (hierarchyLevel: string, fallback?: string): string => {
-    return config.hierarchyLabels[hierarchyLevel] || fallback || hierarchyLevel;
+    const label = config.hierarchyLabels?.[hierarchyLevel];
+    if (label === 'Indiramma Incharge (100 Voters)' || (hierarchyLevel === 'VOTER_GROUP' && label?.includes('Indiramma'))) {
+      return '100 Voters Incharge';
+    }
+    return label || fallback || hierarchyLevel;
   };
 
   const isFeatureEnabled = (feature: keyof CmsConfig['featureToggles']): boolean => {

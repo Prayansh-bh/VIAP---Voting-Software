@@ -5,8 +5,9 @@ import { prisma } from '../../lib/prisma.js';
 import { successResponse } from '../../common/response.js';
 import { validateBody } from '../../common/validation.js';
 import { authenticate, optionalAuthenticate } from '../../middleware/auth.js';
-import { requireRoles } from '../../middleware/rbac.js';
+import { populateHierarchyScope, requireRoles } from '../../middleware/rbac.js';
 import { logAudit } from '../../middleware/audit.js';
+import bcrypt from 'bcryptjs';
 import {
   DEFAULT_ANALYTICS_CONFIG,
   DEFAULT_DASHBOARD_CONFIG,
@@ -117,8 +118,14 @@ const buildApplicationSchema = z.object({
     code: z.string().optional(),
     totalVoters: z.number().optional(),
     votersCount: z.number().optional(),
+    candidateName: z.string().optional(),
+    mlaName: z.string().optional(),
+    parliamentName: z.string().optional(),
+    candidateEmail: z.string().optional(),
   })).default([]),
   candidateName: z.string().optional(),
+  candidateEmail: z.string().optional(),
+  password: z.string().optional(),
   politicalParties: z.array(z.object({
     name: z.string().min(1),
     code: z.string().min(1),
@@ -154,7 +161,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   fastify.put(
     '/config',
     {
-      preHandler: [optionalAuthenticate],
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = (req.body || {}) as Record<string, any>;
@@ -203,7 +210,12 @@ export async function cmsRoutes(fastify: FastifyInstance) {
       });
 
       const parties = await prisma.politicalParty.findMany({
-        where: { isActive: true },
+        where: {
+          isActive: true,
+          NOT: {
+            code: { startsWith: 'TEST_' },
+          },
+        },
         orderBy: { sortOrder: 'asc' },
       });
 
@@ -217,6 +229,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/build-application',
     {
+      preHandler: [optionalAuthenticate],
       preValidation: [validateBody(buildApplicationSchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
@@ -459,8 +472,99 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         activeHierarchyLevels: body.activeHierarchyLevels,
       });
 
+      // 8. Provision Incharge Accounts & Dispatch Brevo Credentials Email
+      const candidateEmail = (body as any).candidateEmail?.trim().toLowerCase() || `candidate@${(body.appName || 'party').toLowerCase().replace(/[^a-z0-9]/g, '')}.org`;
+      const candidateName = (body as any).candidateName?.trim() || 'Key Candidate';
+      const initialPassword = (body as any).password?.trim() || 'Kondapi@2026';
+      const passwordHash = await bcrypt.hash(initialPassword, 10);
+
+      const primaryRole = body.appScope === 'STATE'
+        ? RoleType.STATE_ADMIN
+        : body.appScope === 'ZONE'
+        ? RoleType.ZONE_INCHARGE
+        : body.appScope === 'PARLIAMENT_MP'
+        ? RoleType.PARLIAMENT_INCHARGE
+        : RoleType.CONSTITUENCY_INCHARGE;
+
+      const primaryUnitId = body.appScope === 'STATE'
+        ? state.id
+        : body.appScope === 'ZONE'
+        ? zone.id
+        : body.appScope === 'PARLIAMENT_MP'
+        ? parliament.id
+        : createdConstituencies[0]?.id;
+
+      // Upsert primary candidate user in database
+      await prisma.user.upsert({
+        where: { mobileNumber: '9848012345' },
+        update: {
+          name: candidateName,
+          email: candidateEmail,
+          passwordHash,
+          role: primaryRole,
+          accountStatus: 'ACTIVE',
+          organisationId: org.id,
+          unitId: primaryUnitId,
+        },
+        create: {
+          organisationId: org.id,
+          userCode: `LEADER-${primaryRole.slice(0, 3)}-${Date.now().toString().slice(-4)}`,
+          name: candidateName,
+          mobileNumber: '9848012345',
+          email: candidateEmail,
+          passwordHash,
+          role: primaryRole,
+          accountStatus: 'ACTIVE',
+          isVerified: true,
+          unitId: primaryUnitId,
+        },
+      });
+
+      // Also ensure standard role accounts exist in DB for each hierarchy tier
+      const standardRoles = [
+        { role: RoleType.SUPER_ADMIN, email: 'superadmin@politicalconnect.in', mobile: '9848099999', name: 'Super Administrator', unitId: null },
+        { role: RoleType.STATE_ADMIN, email: 'stateincharge@politicalconnect.in', mobile: '9848088888', name: `${state.name} State Incharge`, unitId: state.id },
+        { role: RoleType.ZONE_INCHARGE, email: 'zone@politicalconnect.in', mobile: '9848099998', name: `${zone.name} Coordinator`, unitId: zone.id },
+        { role: RoleType.PARLIAMENT_INCHARGE, email: 'mp@politicalconnect.in', mobile: '9848088887', name: `${parliament.name} Incharge`, unitId: parliament.id },
+        { role: RoleType.MANDAL_INCHARGE, email: 'mandal@politicalconnect.in', mobile: '9848077777', name: 'Mandal President', unitId: null },
+        { role: RoleType.BOOTH_PRESIDENT, email: 'booth@politicalconnect.in', mobile: '9848010002', name: 'Booth President', unitId: null },
+        { role: RoleType.VOTER_100_INCHARGE, email: 'voter100@politicalconnect.in', mobile: '9848010003', name: '100 Voter Incharge', unitId: null },
+      ];
+
+      for (const r of standardRoles) {
+        await prisma.user.upsert({
+          where: { mobileNumber: r.mobile },
+          update: {
+            name: r.name,
+            email: r.email,
+            passwordHash,
+            role: r.role,
+            accountStatus: 'ACTIVE',
+            organisationId: org.id,
+          },
+          create: {
+            organisationId: org.id,
+            userCode: `DEMO-${r.role.slice(0, 3)}-${r.mobile.slice(-4)}`,
+            name: r.name,
+            email: r.email,
+            mobileNumber: r.mobile,
+            passwordHash,
+            role: r.role,
+            accountStatus: 'ACTIVE',
+            isVerified: true,
+            unitId: r.unitId,
+          },
+        });
+      }
+
+
       const allParties = await prisma.politicalParty.findMany({
-        where: { isActive: true },
+        where: {
+          isActive: true,
+          NOT: {
+            code: { startsWith: 'TEST_' },
+          },
+        },
         orderBy: { sortOrder: 'asc' },
       });
 
@@ -502,7 +606,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // LIST CONSTITUENCIES
   // --------------------------------------------------------------------------
-  fastify.get('/constituencies', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/constituencies', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
     const list = await prisma.constituency.findMany({
       select: {
         id: true,
@@ -520,7 +624,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 1. ORGANISATION MANAGEMENT
   // --------------------------------------------------------------------------
-  fastify.get('/organisation', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/organisation', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
     const org = await prisma.organisation.findFirst({
       orderBy: { createdAt: 'asc' },
     });
@@ -573,6 +677,11 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   fastify.get('/parties', async (_req: FastifyRequest, reply: FastifyReply) => {
     const parties = await prisma.politicalParty.findMany({
+      where: {
+        NOT: {
+          code: { startsWith: 'TEST_' },
+        },
+      },
       orderBy: { sortOrder: 'asc' },
     });
     return reply.send(successResponse(parties));
@@ -922,7 +1031,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 4. HIERARCHY TREE & DEPENDENCY-SAFE DELETION
   // --------------------------------------------------------------------------
-  fastify.get('/hierarchy-tree', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/hierarchy-tree', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
     const states = await prisma.state.findMany({
       include: {
         zones: {
@@ -1046,7 +1155,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 5. FEATURE CONFIGURATION
   // --------------------------------------------------------------------------
-  fastify.get('/features', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/features', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
     const config = await prisma.cMSConfiguration.findUnique({
       where: { configKey: 'default' },
     });
@@ -1079,7 +1188,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 6. DASHBOARD CONFIGURATION (Per-role Card & Section Visibility)
   // --------------------------------------------------------------------------
-  fastify.get('/dashboard-config', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/dashboard-config', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
     const config = await prisma.cMSConfiguration.findUnique({
       where: { configKey: 'default' },
     });
@@ -1112,7 +1221,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 7. TRAINING CMS
   // --------------------------------------------------------------------------
-  fastify.get('/training', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/training', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
     const videos = await prisma.trainingVideo.findMany({
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
       include: {
@@ -1126,7 +1235,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 8. TASK CMS & TEMPLATES
   // --------------------------------------------------------------------------
-  fastify.get('/task-templates', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/task-templates', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
     const templates = [
       {
         id: 'tpl-1',
@@ -1171,7 +1280,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 9. ANNOUNCEMENTS CMS
   // --------------------------------------------------------------------------
-  fastify.get('/announcements', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/announcements', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
     const items = await prisma.announcement.findMany({
       orderBy: { createdAt: 'desc' },
     });
@@ -1235,7 +1344,12 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 10. POLITICAL ANALYTICS CONFIGURATION
   // --------------------------------------------------------------------------
-  fastify.get('/analytics-config', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get(
+    '/analytics-config',
+    {
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN)],
+    },
+    async (_req: FastifyRequest, reply: FastifyReply) => {
     const config = await prisma.cMSConfiguration.findUnique({
       where: { configKey: 'default' },
     });
@@ -1268,7 +1382,12 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 11. INCHARGE ASSIGNMENT CMS
   // --------------------------------------------------------------------------
-  fastify.get('/incharges', async (req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get(
+    '/incharges',
+    {
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN, RoleType.CONSTITUENCY_INCHARGE)],
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
     const query = req.query as { constituencyId?: string };
 
     let constituency = query.constituencyId
@@ -1542,7 +1661,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/incharges/bulk-import',
     {
-      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN, RoleType.CONSTITUENCY_INCHARGE)],
+      preHandler: [authenticate, populateHierarchyScope, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN, RoleType.CONSTITUENCY_INCHARGE)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as {
@@ -1565,52 +1684,131 @@ export async function cmsRoutes(fastify: FastifyInstance) {
       }
 
       // 1. Resolve Target Constituency & Geography context
+      const scope = (req as any).hierarchyScope;
       let targetConstituency = null;
+
       if (body.constituencyId) {
-        targetConstituency = await prisma.constituency.findFirst({
-          where: {
-            OR: [
-              { id: body.constituencyId },
-              { name: { contains: body.constituencyId.replace(/\s*\(AC.*?\)\s*/gi, '').trim(), mode: 'insensitive' } },
-              { code: { equals: body.constituencyId.trim(), mode: 'insensitive' } },
-            ],
-          },
-          include: {
-            mandals: {
+        const rawId = body.constituencyId.trim();
+        const isTargetUuid = isUuid(rawId);
+
+        targetConstituency = isTargetUuid
+          ? await prisma.constituency.findUnique({
+              where: { id: rawId },
               include: {
-                villages: {
+                mandals: {
                   include: {
-                    booths: {
+                    villages: {
                       include: {
-                        voterGroups: true,
+                        booths: {
+                          include: {
+                            voterGroups: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            })
+          : await prisma.constituency.findFirst({
+              where: {
+                OR: [
+                  { code: { equals: rawId, mode: 'insensitive' } },
+                  { name: { equals: rawId, mode: 'insensitive' } },
+                ],
+              },
+              include: {
+                mandals: {
+                  include: {
+                    villages: {
+                      include: {
+                        booths: {
+                          include: {
+                            voterGroups: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            });
+
+        // Fail-closed on invalid constituency target (NEVER silently pick first constituency)
+        if (!targetConstituency) {
+          return reply.status(404).send({
+            success: false,
+            error: {
+              code: 'CONSTITUENCY_NOT_FOUND',
+              message: `Target constituency "${body.constituencyId}" does not exist.`,
+            },
+          });
+        }
+      } else {
+        // No explicit constituencyId supplied
+        if (scope && !scope.isGlobalScope) {
+          if (scope.accessibleConstituencyIds && scope.accessibleConstituencyIds.size === 1) {
+            const singleId = Array.from(scope.accessibleConstituencyIds as Set<string>)[0];
+            targetConstituency = await prisma.constituency.findUnique({
+              where: { id: singleId },
+              include: {
+                mandals: {
+                  include: {
+                    villages: {
+                      include: {
+                        booths: {
+                          include: {
+                            voterGroups: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            });
+          } else {
+            return reply.status(403).send({
+              success: false,
+              error: {
+                code: 'FORBIDDEN_SCOPE',
+                message: 'Target constituencyId is required and must be within your hierarchy scope.',
+              },
+            });
+          }
+        } else {
+          // Global user with no constituencyId supplied - load first constituency for context
+          targetConstituency = await prisma.constituency.findFirst({
+            include: {
+              mandals: {
+                include: {
+                  villages: {
+                    include: {
+                      booths: {
+                        include: {
+                          voterGroups: true,
+                        },
                       },
                     },
                   },
                 },
               },
             },
-          },
-        });
+          });
+        }
       }
 
-      if (!targetConstituency) {
-        targetConstituency = await prisma.constituency.findFirst({
-          include: {
-            mandals: {
-              include: {
-                villages: {
-                  include: {
-                    booths: {
-                      include: {
-                        voterGroups: true,
-                      },
-                    },
-                  },
-                },
-              },
+      // Hierarchy Scope Enforcement: non-global users must have access to the target constituency
+      if (scope && !scope.isGlobalScope && targetConstituency) {
+        if (!scope.accessibleConstituencyIds?.has(targetConstituency.id)) {
+          return reply.status(403).send({
+            success: false,
+            error: {
+              code: 'FORBIDDEN_SCOPE',
+              message: `Access denied: target constituency "${targetConstituency.name || targetConstituency.id}" is outside your authorized hierarchy scope.`,
             },
-          },
-        });
+          });
+        }
       }
 
       // Collect geography lookups
@@ -1768,108 +1966,110 @@ export async function cmsRoutes(fastify: FastifyInstance) {
       let createdCount = 0;
       let updatedCount = 0;
 
-      for (const row of validProcessedRows) {
-        // Find or create User
-        let user = await prisma.user.findFirst({
-          where: {
-            OR: [
-              { mobileNumber: row.mobile },
-              { mobileNumber: `+91${row.mobile}` },
-            ],
-          },
-        });
-
-        if (!user) {
-          user = await prisma.user.create({
-            data: {
-              organisationId: org.id,
-              userCode: `INC-${row.unitLevel.slice(0, 3)}-${row.mobile.slice(-4)}-${Date.now().toString().slice(-4)}`,
-              name: row.name,
-              mobileNumber: row.mobile,
-              role: row.role,
-              accountStatus: 'ACTIVE',
+      await prisma.$transaction(async (tx) => {
+        for (const row of validProcessedRows) {
+          // Find or create User
+          let user = await tx.user.findFirst({
+            where: {
+              OR: [
+                { mobileNumber: row.mobile },
+                { mobileNumber: `+91${row.mobile}` },
+              ],
             },
           });
-          createdCount++;
-        } else {
-          user = await prisma.user.update({
-            where: { id: user.id },
-            data: {
-              name: row.name,
-              role: row.role,
-              accountStatus: 'ACTIVE',
-            },
-          });
-          updatedCount++;
-        }
 
-        // Upsert UserHierarchyAssignment
-        const assignmentData: Prisma.UserHierarchyAssignmentUncheckedCreateInput = {
-          userId: user.id,
-          roleType: row.role,
-          isActive: true,
-        };
+          if (!user) {
+            user = await tx.user.create({
+              data: {
+                organisationId: org.id,
+                userCode: `INC-${row.unitLevel.slice(0, 3)}-${row.mobile.slice(-4)}-${Date.now().toString().slice(-4)}`,
+                name: row.name,
+                mobileNumber: row.mobile,
+                role: row.role,
+                accountStatus: 'ACTIVE',
+              },
+            });
+            createdCount++;
+          } else {
+            user = await tx.user.update({
+              where: { id: user.id },
+              data: {
+                name: row.name,
+                role: row.role,
+                accountStatus: 'ACTIVE',
+              },
+            });
+            updatedCount++;
+          }
 
-        if (row.unitLevel === 'CONSTITUENCY') assignmentData.constituencyId = row.unitId;
-        else if (row.unitLevel === 'MANDAL') assignmentData.mandalId = row.unitId;
-        else if (row.unitLevel === 'VILLAGE') assignmentData.villageId = row.unitId;
-        else if (row.unitLevel === 'BOOTH') assignmentData.boothId = row.unitId;
-        else if (row.unitLevel === 'VOTER_GROUP') {
-          assignmentData.voterGroupId = row.unitId;
-          await prisma.voterGroup.updateMany({
-            where: { id: row.unitId },
-            data: { assignedInchargeId: user.id },
-          });
-          await prisma.voter.updateMany({
-            where: { voterGroupId: row.unitId },
-            data: { assignedInchargeId: user.id },
-          });
-        }
-
-        const existingAssignment = await prisma.userHierarchyAssignment.findFirst({
-          where: {
+          // Upsert UserHierarchyAssignment
+          const assignmentData: Prisma.UserHierarchyAssignmentUncheckedCreateInput = {
             userId: user.id,
+            roleType: row.role,
             isActive: true,
-          },
-        });
+          };
 
-        if (existingAssignment) {
-          await prisma.userHierarchyAssignment.update({
-            where: { id: existingAssignment.id },
-            data: assignmentData,
-          });
-        } else {
-          await prisma.userHierarchyAssignment.create({
-            data: assignmentData,
-          });
-        }
+          if (row.unitLevel === 'CONSTITUENCY') assignmentData.constituencyId = row.unitId;
+          else if (row.unitLevel === 'MANDAL') assignmentData.mandalId = row.unitId;
+          else if (row.unitLevel === 'VILLAGE') assignmentData.villageId = row.unitId;
+          else if (row.unitLevel === 'BOOTH') assignmentData.boothId = row.unitId;
+          else if (row.unitLevel === 'VOTER_GROUP') {
+            assignmentData.voterGroupId = row.unitId;
+            await tx.voterGroup.updateMany({
+              where: { id: row.unitId },
+              data: { assignedInchargeId: user.id },
+            });
+            await tx.voter.updateMany({
+              where: { voterGroupId: row.unitId },
+              data: { assignedInchargeId: user.id },
+            });
+          }
 
-        // Upsert Cadre
-        const existingCadre = await prisma.cadre.findFirst({
-          where: { userId: user.id },
-        });
-
-        if (!existingCadre) {
-          await prisma.cadre.create({
-            data: {
+          const existingAssignment = await tx.userHierarchyAssignment.findFirst({
+            where: {
               userId: user.id,
-              performanceScore: 90.0,
-              totalAssignedVoters: row.unitLevel === 'VOTER_GROUP' ? 100 : 500,
+              isActive: true,
             },
           });
-        }
 
-        assignedUsers.push({
-          id: user.id,
-          name: user.name,
-          mobile: user.mobileNumber,
-          role: user.role,
-          level: row.unitLevel,
-          unitName: row.unitName,
-          code: user.userCode,
-          accountStatus: user.accountStatus,
-        });
-      }
+          if (existingAssignment) {
+            await tx.userHierarchyAssignment.update({
+              where: { id: existingAssignment.id },
+              data: assignmentData,
+            });
+          } else {
+            await tx.userHierarchyAssignment.create({
+              data: assignmentData,
+            });
+          }
+
+          // Upsert Cadre
+          const existingCadre = await tx.cadre.findFirst({
+            where: { userId: user.id },
+          });
+
+          if (!existingCadre) {
+            await tx.cadre.create({
+              data: {
+                userId: user.id,
+                performanceScore: 90.0,
+                totalAssignedVoters: row.unitLevel === 'VOTER_GROUP' ? 100 : 500,
+              },
+            });
+          }
+
+          assignedUsers.push({
+            id: user.id,
+            name: user.name,
+            mobile: user.mobileNumber,
+            role: user.role,
+            level: row.unitLevel,
+            unitName: row.unitName,
+            code: user.userCode,
+            accountStatus: user.accountStatus,
+          });
+        }
+      });
 
       await logAudit({
         action: AuditAction.CREATE,
@@ -1901,7 +2101,12 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   );
 
   // Incharge Dynamic Template Generator
-  fastify.get('/incharges/template', async (req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get(
+    '/incharges/template',
+    {
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN, RoleType.CONSTITUENCY_INCHARGE)],
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
     const query = req.query as { level?: string };
     const level = (query.level || 'CONSTITUENCY').toUpperCase();
 
@@ -2271,7 +2476,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 12. MULTI-APPLICATION CONFIGURATIONS LIST & SWITCH
   // --------------------------------------------------------------------------
-  fastify.get('/applications', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/applications', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
     const configs = await prisma.cMSConfiguration.findMany({
       include: { organisation: true },
       orderBy: { updatedAt: 'desc' },
@@ -2345,7 +2550,12 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 13. CONFIGURATION VERSION HISTORY & SNAPSHOTS
   // --------------------------------------------------------------------------
-  fastify.get('/versions', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get(
+    '/versions',
+    {
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND)],
+    },
+    async (_req: FastifyRequest, reply: FastifyReply) => {
     const logs = await prisma.auditLog.findMany({
       where: {
         entityType: {
@@ -2405,7 +2615,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 14. ROLES & PERMISSIONS MATRIX CONFIGURATION
   // --------------------------------------------------------------------------
-  fastify.get('/roles-permissions', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/roles-permissions', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
     const rolePermissionsMatrix = [
       {
         role: 'SUPER_ADMIN',
@@ -2487,7 +2697,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 15. GEOGRAPHY ENTITIES LIST & CREATE
   // --------------------------------------------------------------------------
-  fastify.get('/geography', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/geography', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
     const states = await prisma.state.findMany({
       include: {
         zones: {

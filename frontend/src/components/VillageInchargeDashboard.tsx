@@ -838,15 +838,17 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
 
           {/* Connected User Profile Widget */}
           <div className="p-3 bg-slate-800/60 rounded-xl border border-slate-800 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-yellow-400/10 border border-yellow-400/30 flex items-center justify-center text-yellow-400 font-extrabold shrink-0 text-xs">
+            <div className="w-9 h-9 rounded-lg bg-amber-400/15 border border-amber-400/30 flex items-center justify-center text-amber-400 font-extrabold shrink-0 text-xs">
               VI
             </div>
             <div className="min-w-0">
               <h4 className="text-xs font-black text-slate-100 truncate uppercase">{session.userName}</h4>
-              <p className="text-[9px] text-slate-400 font-bold truncate">VILLAGE INCHARGE</p>
-              <div className="flex items-center gap-1 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-                <span className="text-[8px] text-slate-400 font-black tracking-widest uppercase font-mono">ID: {session.userId}</span>
+              <p className="text-[10px] text-slate-400 font-bold truncate">VILLAGE INCHARGE</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="text-[9px] text-slate-400 font-bold tracking-wider uppercase font-mono">
+                  ID: {session.userId.slice(-8).toUpperCase()}
+                </span>
               </div>
             </div>
           </div>
@@ -928,12 +930,17 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
           <div className="space-y-6 animate-fade-in" id="village-view-dashboard">
             
             {/* Village Header */}
-            <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm" id="village-header-bar">
+            <div className="bg-white/95 backdrop-blur-sm border border-slate-200/90 rounded-2xl p-6 shadow-xs space-y-4" id="village-header-bar">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="space-y-1">
-                  <span className="text-[10px] bg-yellow-400 text-slate-950 px-2 py-0.5 rounded font-black uppercase tracking-widest">
-                    Kondapi Assembly Constituency
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                      Kondapi Assembly Constituency
+                    </span>
+                    <span className="text-[10px] bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full font-bold">
+                      Village Polling Station
+                    </span>
+                  </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight" id="village-overview-title">
                     My Village Overview
                   </h2>
@@ -941,118 +948,113 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
               </div>
               
               {/* Clean Information Row */}
-              <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-slate-600 font-bold">
+              <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-slate-600 font-semibold">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-slate-400 uppercase text-[10px] font-black">Village:</span>
-                  <span className="text-slate-900 font-black">Ponnaluru</span>
+                  <span className="text-slate-400 uppercase text-[10px] font-bold">Village:</span>
+                  <span className="text-slate-900 font-extrabold">{session.assignedVillage || 'Ponnaluru'}</span>
                 </div>
-                <div className="hidden sm:block text-slate-300">|</div>
+                <div className="hidden sm:block text-slate-300">•</div>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-slate-400 uppercase text-[10px] font-black">Mandal:</span>
-                  <span className="text-slate-900 font-black">Ponnaluru Mandal</span>
+                  <span className="text-slate-400 uppercase text-[10px] font-bold">Mandal:</span>
+                  <span className="text-slate-900 font-extrabold">{session.assignedMandal || 'Ponnaluru Mandal'}</span>
                 </div>
-                <div className="hidden sm:block text-slate-300">|</div>
+                <div className="hidden sm:block text-slate-300">•</div>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-slate-400 uppercase text-[10px] font-black">Total Booths:</span>
-                  <span className="text-slate-900 font-black">3</span>
+                  <span className="text-slate-400 uppercase text-[10px] font-bold">Total Booths:</span>
+                  <span className="text-slate-900 font-extrabold">{liveVillageStats.totalBooths}</span>
                 </div>
-                <div className="hidden sm:block text-slate-300">|</div>
+                <div className="hidden sm:block text-slate-300">•</div>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-slate-400 uppercase text-[10px] font-black">Total Voters:</span>
-                  <span className="text-slate-900 font-black">3,640</span>
+                  <span className="text-slate-400 uppercase text-[10px] font-bold">Total Voters:</span>
+                  <span className="text-slate-900 font-extrabold">{liveVillageStats.totalVoters.toLocaleString()}</span>
                 </div>
               </div>
-
-              {/* Subtitle */}
-              <p className="text-xs text-slate-400 font-semibold mt-2">
-                Live analytics from all polling booths in Ponnaluru Village.
-              </p>
             </div>
 
             {/* Election Forecast Banner */}
-            <div className="relative overflow-hidden bg-slate-900 text-white rounded-2xl border border-slate-800 shadow-md p-6" id="forecast-card-banner">
-              {/* Yellow top bar effect */}
-              <div className="absolute top-0 left-0 right-0 h-1 bg-yellow-400"></div>
+            <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 text-white rounded-2xl border border-slate-800 shadow-md p-6" id="forecast-card-banner">
+              <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500"></div>
               
               <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
                 <div className="space-y-1.5">
-                  <span className="text-[9px] font-black tracking-widest bg-yellow-400/15 text-yellow-400 border border-yellow-400/25 px-2.5 py-1 rounded uppercase flex items-center gap-1.5 w-fit">
-                    <TrendingUp className="w-3.5 h-3.5 text-yellow-400" />
-                    ELECTION FORECAST / RESULT
+                  <span className="text-[10px] font-bold tracking-wider bg-amber-400/15 text-amber-300 border border-amber-400/30 px-2.5 py-0.5 rounded-full uppercase flex items-center gap-1.5 w-fit">
+                    <TrendingUp className="w-3.5 h-3.5 text-amber-400" />
+                    Election Forecast & Analytics
                   </span>
                   
-                  <h3 className="text-xl md:text-2xl font-black text-slate-100 tracking-tight uppercase">
-                    {forecastData.leadingParty} LEADS by <span className="text-yellow-400">{forecastData.leadCount}</span> Votes
+                  <h3 className="text-xl md:text-2xl font-black text-slate-100 tracking-tight">
+                    {forecastData.leadingParty} LEADS by <span className="text-amber-400 font-black">{forecastData.leadCount}</span> Votes
                   </h3>
                   
                   <p className="text-xs text-slate-400 font-medium">
-                    Based on voters in Ponnaluru Village. Total registered support: TDP ({partyStats.TDP}), YSRCP ({partyStats.YSRCP}), JSP ({partyStats.JSP}), BJP ({partyStats.BJP}), INC ({partyStats.INC}).
+                    Live voter analytics for {session.assignedVillage || 'Ponnaluru'} Village. Total registered preferences: TDP ({partyStats.TDP}), YSRCP ({partyStats.YSRCP}), JSP ({partyStats.JSP}), BJP ({partyStats.BJP}), INC ({partyStats.INC}).
                   </p>
                 </div>
 
-                <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700 text-center w-full md:w-auto shrink-0" id="forecast-comparison-badge">
-                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Top Contest</p>
+                <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700 text-center w-full md:w-auto shrink-0 shadow-xs" id="forecast-comparison-badge">
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Top Contest</p>
                   <div className="flex items-center justify-center gap-4 mt-1 font-black">
-                    <span className="text-xs text-yellow-400">TDP: {partyStats.TDP}</span>
+                    <span className="text-xs text-amber-400 font-extrabold">TDP: {partyStats.TDP}</span>
                     <span className="text-xs text-slate-500 font-normal">vs</span>
-                    <span className="text-xs text-blue-400">YSRCP: {partyStats.YSRCP}</span>
+                    <span className="text-xs text-blue-400 font-extrabold">YSRCP: {partyStats.YSRCP}</span>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Top 4 Summary Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5" id="village-metrics-grid">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="village-metrics-grid">
               {/* Card 1: Total Voters */}
-              <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm hover:shadow-md transition-all flex items-center justify-between" id="metric-total-voters">
-                <div className="space-y-1.5">
-                  <p className="text-xs text-slate-400 font-black uppercase tracking-wider">Total Voters</p>
-                  <h3 className="text-2xl font-black text-slate-950 leading-none">{liveVillageStats.totalVoters}</h3>
-                  <p className="text-[10px] text-slate-500 font-black">{liveVillageStats.totalBooths} polling booths combined</p>
+              <div className="bg-white/95 backdrop-blur-sm border border-slate-200/90 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all duration-200 flex items-center justify-between" id="metric-total-voters">
+                <div className="space-y-1">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Total Voters</p>
+                  <h3 className="text-2xl font-black text-slate-900 leading-none">{liveVillageStats.totalVoters.toLocaleString()}</h3>
+                  <p className="text-[10px] text-slate-400 font-semibold">{liveVillageStats.totalBooths} polling booths</p>
                 </div>
-                <div className="p-3 bg-slate-50 rounded-xl text-slate-500">
-                  <Users className="w-6 h-6" />
+                <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600">
+                  <Users className="w-5 h-5" />
                 </div>
               </div>
 
               {/* Card 2: Votes Completed */}
-              <div className="bg-amber-50/50 border border-amber-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-all flex items-center justify-between" id="metric-tdp-supporters">
-                <div className="space-y-1.5">
-                  <p className="text-xs text-amber-700 font-black uppercase tracking-wider">Votes Completed</p>
-                  <h3 className="text-2xl font-black text-amber-500 leading-none">{liveVillageStats.voted}</h3>
-                  <p className="text-[10px] text-amber-600 font-black">
+              <div className="bg-white/95 backdrop-blur-sm border border-slate-200/90 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all duration-200 flex items-center justify-between" id="metric-tdp-supporters">
+                <div className="space-y-1">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Votes Completed</p>
+                  <h3 className="text-2xl font-black text-amber-600 leading-none">{liveVillageStats.voted.toLocaleString()}</h3>
+                  <p className="text-[10px] text-amber-600 font-bold">
                     {liveVillageStats.totalVoters > 0 ? Math.round((liveVillageStats.voted / liveVillageStats.totalVoters) * 100) : 0}% turnout
                   </p>
                 </div>
-                <div className="p-3 bg-amber-100 rounded-xl text-amber-500 border border-amber-200">
-                  <ShieldCheck className="w-6 h-6" />
+                <div className="p-3 bg-amber-50 rounded-xl text-amber-600 border border-amber-200/60">
+                  <ShieldCheck className="w-5 h-5" />
                 </div>
               </div>
 
               {/* Card 3: Remaining */}
-              <div className="bg-slate-50/50 border border-slate-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-all flex items-center justify-between" id="metric-neutral-swing">
-                <div className="space-y-1.5">
-                  <p className="text-xs text-slate-500 font-black uppercase tracking-wider">Remaining</p>
-                  <h3 className="text-2xl font-black text-slate-600 leading-none">{liveVillageStats.remaining}</h3>
-                  <p className="text-[10px] text-slate-500 font-black">Remaining citizens to mobilize</p>
+              <div className="bg-white/95 backdrop-blur-sm border border-slate-200/90 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all duration-200 flex items-center justify-between" id="metric-neutral-swing">
+                <div className="space-y-1">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Remaining</p>
+                  <h3 className="text-2xl font-black text-slate-700 leading-none">{liveVillageStats.remaining.toLocaleString()}</h3>
+                  <p className="text-[10px] text-slate-400 font-semibold">Citizens to mobilize</p>
                 </div>
-                <div className="p-3 bg-slate-100 rounded-xl text-slate-400 border border-slate-200">
-                  <RefreshCw className="w-6 h-6" />
+                <div className="p-3 bg-slate-100 rounded-xl text-slate-500 border border-slate-200">
+                  <RefreshCw className="w-5 h-5" />
                 </div>
               </div>
 
-              {/* Card 4: Fake / Migrated */}
-              <div className="bg-rose-50/50 border border-rose-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-all flex items-center justify-between" id="metric-fake-votes">
-                <div className="space-y-1.5">
-                  <p className="text-xs text-rose-700 font-black uppercase tracking-wider">Fake Votes</p>
+              {/* Card 4: Fake Votes */}
+              <div className="bg-white/95 backdrop-blur-sm border border-slate-200/90 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all duration-200 flex items-center justify-between" id="metric-fake-votes">
+                <div className="space-y-1">
+                  <p className="text-[11px] text-rose-700 font-bold uppercase tracking-wider">Flagged Votes</p>
                   <h3 className="text-2xl font-black text-rose-600 leading-none">{liveVillageStats.fake}</h3>
-                  <p className="text-[10px] text-rose-500 font-black">Migrated: {liveVillageStats.migrated}</p>
+                  <p className="text-[10px] text-rose-500 font-semibold">Requires verification</p>
                 </div>
-                <div className="p-3 bg-rose-100 rounded-xl text-red-500 border border-rose-200">
-                  <AlertTriangle className="w-6 h-6" />
+                <div className="p-3 bg-rose-50 rounded-xl text-rose-600 border border-rose-200/60">
+                  <AlertTriangle className="w-5 h-5" />
                 </div>
               </div>
             </div>
+
 
             {/* Voter Sentiment Share & Ground Report Breakdown Section */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="sentiment-split-section">

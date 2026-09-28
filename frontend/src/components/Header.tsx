@@ -45,20 +45,16 @@ export default function Header() {
         </p>
       </div>
 
-      {/* Tricolor Divider — Saffron | White | Green for INC, else party color bar */}
-      {isINC ? (
-        <div className="flex items-center gap-0 w-16 h-1 rounded-full overflow-hidden mt-3" id="header-divider">
-          <div className="flex-1 h-full bg-orange-500" />
-          <div className="flex-1 h-full bg-gray-200" />
-          <div className="flex-1 h-full bg-green-600" />
-        </div>
-      ) : (
-        <div
-          className="w-16 h-1 rounded-full transition-colors duration-300 mt-3"
-          style={{ backgroundColor: config.primaryColor || '#FF6600' }}
-          id="header-divider"
-        />
-      )}
+      {/* Clean Brand Accent Divider */}
+      <div
+        className="w-16 h-1 rounded-full transition-colors duration-300 mt-3"
+        style={{
+          background: isINC
+            ? 'linear-gradient(90deg, #f97316 0%, #10b981 100%)'
+            : (config.primaryColor || '#f59e0b'),
+        }}
+        id="header-divider"
+      />
     </header>
   );
 }

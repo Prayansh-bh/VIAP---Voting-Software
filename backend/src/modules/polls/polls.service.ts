@@ -1,6 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { CreatePollDto, VotePollDto } from './polls.schema.js';
-import { AuthenticatedUserPayload } from '../../common/types.js';
+import { AuthenticatedUserPayload, UserHierarchyScope } from '../../common/types.js';
 import { logAudit } from '../../middleware/audit.js';
 import { AuditAction } from '@prisma/client';
 
@@ -52,7 +52,16 @@ export class PollsService {
     });
   }
 
-  static async createPoll(dto: CreatePollDto, user: AuthenticatedUserPayload) {
+  static async createPoll(dto: CreatePollDto, user: AuthenticatedUserPayload, scope?: UserHierarchyScope) {
+    if (scope && !scope.isGlobalScope && dto.unitId) {
+      if (!scope.accessibleUnitIds.has(dto.unitId)) {
+        const err: any = new Error(`Access denied: Geographical node ${dto.unitId} is outside your authorized hierarchy scope.`);
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_SCOPE';
+        throw err;
+      }
+    }
+
     const poll = await prisma.poll.create({
       data: {
         title: dto.title,
@@ -143,7 +152,30 @@ export class PollsService {
     };
   }
 
-  static async closePoll(pollId: string, user: AuthenticatedUserPayload) {
+  static async closePoll(pollId: string, user: AuthenticatedUserPayload, scope?: UserHierarchyScope) {
+    const existing = await prisma.poll.findUnique({
+      where: { id: pollId },
+    });
+
+    if (!existing) {
+      const err: any = new Error('Poll not found');
+      err.statusCode = 404;
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+
+    if (scope && !scope.isGlobalScope) {
+      const isCreator = existing.createdById === user.userId;
+      const isUnitAdmin = existing.unitId && scope.accessibleUnitIds.has(existing.unitId);
+
+      if (!isCreator && !isUnitAdmin) {
+        const err: any = new Error('Access denied: You do not have permission to close this poll.');
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_SCOPE';
+        throw err;
+      }
+    }
+
     const poll = await prisma.poll.update({
       where: { id: pollId },
       data: { status: 'CLOSED' },

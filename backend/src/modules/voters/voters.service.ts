@@ -50,11 +50,41 @@ export class VotersService {
     if (houseNumber) where.houseNumber = { contains: houseNumber, mode: 'insensitive' };
 
     // Hierarchy & Status Filters
-    if (constituencyId) where.constituencyId = constituencyId;
-    if (mandalId) where.mandalId = mandalId;
-    if (villageId) where.villageId = villageId;
-    if (boothId) where.boothId = boothId;
-    if (voterGroupId) where.voterGroupId = voterGroupId;
+    if (constituencyId) {
+      if (scope && !scope.isGlobalScope && !scope.accessibleConstituencyIds.has(constituencyId)) {
+        where.constituencyId = '00000000-0000-0000-0000-000000000000';
+      } else {
+        where.constituencyId = constituencyId;
+      }
+    }
+    if (mandalId) {
+      if (scope && !scope.isGlobalScope && !scope.accessibleMandalIds.has(mandalId)) {
+        where.mandalId = '00000000-0000-0000-0000-000000000000';
+      } else {
+        where.mandalId = mandalId;
+      }
+    }
+    if (villageId) {
+      if (scope && !scope.isGlobalScope && !scope.accessibleVillageIds.has(villageId)) {
+        where.villageId = '00000000-0000-0000-0000-000000000000';
+      } else {
+        where.villageId = villageId;
+      }
+    }
+    if (boothId) {
+      if (scope && !scope.isGlobalScope && !scope.accessibleBoothIds.has(boothId)) {
+        where.boothId = '00000000-0000-0000-0000-000000000000';
+      } else {
+        where.boothId = boothId;
+      }
+    }
+    if (voterGroupId) {
+      if (scope && !scope.isGlobalScope && !scope.accessibleVoterGroupIds.has(voterGroupId)) {
+        where.voterGroupId = '00000000-0000-0000-0000-000000000000';
+      } else {
+        where.voterGroupId = voterGroupId;
+      }
+    }
     if (assignedInchargeId) where.assignedInchargeId = assignedInchargeId;
     if (voterStatus) where.voterStatus = voterStatus;
     if (surveyStatus) where.surveyStatus = surveyStatus;
@@ -76,47 +106,19 @@ export class VotersService {
           where.assignedInchargeId = scope.userId;
         }
       } else if (scope.role === 'BOOTH_PRESIDENT' || scope.role === 'BOOTH_INCHARGE') {
-        const conds: Prisma.VoterWhereInput[] = [];
-        if (scope.accessibleBoothIds.size > 0) conds.push({ boothId: { in: Array.from(scope.accessibleBoothIds) } });
-        if (scope.accessibleUnitIds.size > 0) conds.push({ unitId: { in: Array.from(scope.accessibleUnitIds) } });
-        if (conds.length === 1) Object.assign(where, conds[0]);
-        else if (conds.length > 1) where.OR = conds;
+        if (!boothId) where.boothId = { in: Array.from(scope.accessibleBoothIds) };
       } else if (scope.role === 'VILLAGE_INCHARGE') {
-        const conds: Prisma.VoterWhereInput[] = [];
-        if (scope.accessibleVillageIds.size > 0) conds.push({ villageId: { in: Array.from(scope.accessibleVillageIds) } });
-        if (scope.accessibleUnitIds.size > 0) conds.push({ unitId: { in: Array.from(scope.accessibleUnitIds) } });
-        if (conds.length === 1) Object.assign(where, conds[0]);
-        else if (conds.length > 1) where.OR = conds;
+        if (!villageId) where.villageId = { in: Array.from(scope.accessibleVillageIds) };
       } else if (scope.role === 'MANDAL_INCHARGE') {
-        const conds: Prisma.VoterWhereInput[] = [];
-        if (scope.accessibleMandalIds.size > 0) conds.push({ mandalId: { in: Array.from(scope.accessibleMandalIds) } });
-        if (scope.accessibleUnitIds.size > 0) conds.push({ unitId: { in: Array.from(scope.accessibleUnitIds) } });
-        if (conds.length === 1) Object.assign(where, conds[0]);
-        else if (conds.length > 1) where.OR = conds;
+        if (!mandalId) where.mandalId = { in: Array.from(scope.accessibleMandalIds) };
       } else if (scope.role === 'CONSTITUENCY_INCHARGE' || scope.role === 'VIEWER') {
-        const conds: Prisma.VoterWhereInput[] = [];
-        if (scope.accessibleConstituencyIds.size > 0) conds.push({ constituencyId: { in: Array.from(scope.accessibleConstituencyIds) } });
-        if (scope.accessibleUnitIds.size > 0) conds.push({ unitId: { in: Array.from(scope.accessibleUnitIds) } });
-        if (conds.length === 1) Object.assign(where, conds[0]);
-        else if (conds.length > 1) where.OR = conds;
+        if (!constituencyId) where.constituencyId = { in: Array.from(scope.accessibleConstituencyIds) };
       } else if (scope.role === 'PARLIAMENT_INCHARGE') {
-        const conds: Prisma.VoterWhereInput[] = [];
-        if (scope.accessibleParliamentIds.size > 0) conds.push({ parliamentId: { in: Array.from(scope.accessibleParliamentIds) } });
-        if (scope.accessibleUnitIds.size > 0) conds.push({ unitId: { in: Array.from(scope.accessibleUnitIds) } });
-        if (conds.length === 1) Object.assign(where, conds[0]);
-        else if (conds.length > 1) where.OR = conds;
+        where.parliamentId = { in: Array.from(scope.accessibleParliamentIds) };
       } else if (scope.role === 'ZONE_INCHARGE') {
-        const conds: Prisma.VoterWhereInput[] = [];
-        if (scope.accessibleZoneIds.size > 0) conds.push({ zoneId: { in: Array.from(scope.accessibleZoneIds) } });
-        if (scope.accessibleUnitIds.size > 0) conds.push({ unitId: { in: Array.from(scope.accessibleUnitIds) } });
-        if (conds.length === 1) Object.assign(where, conds[0]);
-        else if (conds.length > 1) where.OR = conds;
+        where.zoneId = { in: Array.from(scope.accessibleZoneIds) };
       } else if (scope.role === 'STATE_ADMIN' || scope.role === 'HIGH_COMMAND') {
-        const conds: Prisma.VoterWhereInput[] = [];
-        if (scope.accessibleStateIds.size > 0) conds.push({ stateId: { in: Array.from(scope.accessibleStateIds) } });
-        if (scope.accessibleUnitIds.size > 0) conds.push({ unitId: { in: Array.from(scope.accessibleUnitIds) } });
-        if (conds.length === 1) Object.assign(where, conds[0]);
-        else if (conds.length > 1) where.OR = conds;
+        where.stateId = { in: Array.from(scope.accessibleStateIds) };
       } else if (scope.accessibleUnitIds.size > 0) {
         where.unitId = { in: Array.from(scope.accessibleUnitIds) };
       }
@@ -596,19 +598,16 @@ export class VotersService {
     const voter = await prisma.voter.findUnique({ where: { id } });
     if (!voter) throw new Error('Voter not found');
 
-    const resolvedStatus = (dto.status || (dto.locationStatus === 'MIGRATED' ? VoterLocationStatus.MIGRATED : VoterLocationStatus.LOCAL)) as VoterLocationStatus;
-    const resolvedCity = dto.destinationCity || dto.migrationCity || 'Other City';
-
     const migration = await prisma.voterMigration.create({
       data: {
         voterId: id,
-        status: resolvedStatus,
-        destinationCity: resolvedCity,
+        status: dto.status,
+        destinationCity: dto.destinationCity,
         destinationState: dto.destinationState,
-        destinationCountry: dto.destinationCountry || 'India',
+        destinationCountry: dto.destinationCountry,
         contactInCity: dto.contactInCity,
-        travelRequired: Boolean(dto.travelRequired),
-        transportArranged: Boolean(dto.transportArranged),
+        travelRequired: dto.travelRequired,
+        transportArranged: dto.transportArranged,
         returnPlannedDate: dto.returnPlannedDate ? new Date(dto.returnPlannedDate) : undefined,
         notes: dto.notes,
       },
@@ -617,8 +616,8 @@ export class VotersService {
     await prisma.voter.update({
       where: { id },
       data: {
-        voterLocationStatus: resolvedStatus,
-        currentLocation: resolvedStatus === VoterLocationStatus.MIGRATED ? resolvedCity : 'Local',
+        voterLocationStatus: dto.status,
+        currentLocation: dto.status === VoterLocationStatus.MIGRATED ? dto.destinationCity : 'Local',
       },
     });
 
@@ -631,10 +630,7 @@ export class VotersService {
       changes: dto as unknown as Prisma.InputJsonValue,
     });
 
-    return {
-      ...migration,
-      migrationCity: migration.destinationCity,
-    };
+    return migration;
   }
 
   static async getVoterHistory(id: string) {

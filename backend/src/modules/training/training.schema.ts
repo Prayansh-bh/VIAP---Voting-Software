@@ -19,17 +19,8 @@ export const assignTrainingSchema = z.object({
   userIds: z.array(z.string().uuid()).optional(),
 });
 
-const normalizeTrainingStatus = (val: unknown) => {
-  if (typeof val === 'string') {
-    const s = val.trim().toUpperCase();
-    if (s === 'COMPLETED' || s === 'WATCHED' || s === 'ASSIGNED') return s;
-  }
-  return val;
-};
-
 export const updateTrainingProgressSchema = z.object({
-  status: z.preprocess(normalizeTrainingStatus, z.nativeEnum(TrainingStatus)),
+  status: z.nativeEnum(TrainingStatus),
   quizScore: z.number().min(0).max(100).optional(),
   notes: z.string().optional(),
 });
-

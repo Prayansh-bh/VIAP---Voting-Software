@@ -1,5 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { askAiStrategy, fetchNewsArticles, fetchSocialTrends, fetchAiInsights } from '../lib/api/ai.api';
+import React, { useState, useMemo } from 'react';
 import { 
   Compass, 
   Sparkles, 
@@ -108,7 +107,6 @@ type SubTabType =
   | 'ask_ai';
 
 export default function AIStrategicIntelligenceCenter({
-  session,
   mandalsData = [],
   villagesData = [],
   constituencyStats = { voters: 228000, mandals: 6, villages: 114, booths: 240, tdp: 124000, ysrcp: 98000, neutral: 6000 },
@@ -139,28 +137,6 @@ export default function AIStrategicIntelligenceCenter({
 
   // Map layer toggle
   const [mapLayer, setMapLayer] = useState<'political' | 'survey' | 'cadre' | 'ground_issues'>('political');
-
-  // Live Backend Strategic Data
-  const [liveNews, setLiveNews] = useState<any[] | null>(null);
-  const [liveTrends, setLiveTrends] = useState<any[] | null>(null);
-  const [liveInsights, setLiveInsights] = useState<any[] | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    fetchNewsArticles().then(data => {
-      if (active && Array.isArray(data) && data.length > 0) setLiveNews(data);
-    }).catch(() => {});
-
-    fetchSocialTrends().then(data => {
-      if (active && Array.isArray(data) && data.length > 0) setLiveTrends(data);
-    }).catch(() => {});
-
-    fetchAiInsights().then(data => {
-      if (active && Array.isArray(data) && data.length > 0) setLiveInsights(data);
-    }).catch(() => {});
-
-    return () => { active = false; };
-  }, []);
 
   // Trigger analysis generation effect
   const handleGenerateIntelligence = () => {
@@ -252,7 +228,7 @@ export default function AIStrategicIntelligenceCenter({
   ], []);
 
   // --- 4. NEWS INTELLIGENCE DATABASE ---
-  const defaultNewsArticles = useMemo(() => [
+  const newsArticles = useMemo(() => [
     {
       id: 'N-01',
       headline: 'Prakasam District Collector Announces High-Speed Water Tanker Relief Funds',
@@ -295,44 +271,13 @@ export default function AIStrategicIntelligenceCenter({
     }
   ], []);
 
-  const newsArticles = useMemo(() => {
-    if (liveNews && liveNews.length > 0) {
-      return liveNews.map((item, idx) => ({
-        id: item.id || `N-LIVE-${idx}`,
-        headline: item.title || item.headline,
-        source: item.source || 'Verified Media',
-        date: item.publishedAt ? item.publishedAt.split('T')[0] : (item.date || '2026-07-29'),
-        summary: item.summary || item.content || '',
-        relevance: item.relevance || 'KONDAPI DIRECT',
-        topic: item.topic || 'Constituency Development',
-        url: item.url || '#'
-      }));
-    }
-    return defaultNewsArticles;
-  }, [liveNews, defaultNewsArticles]);
-
   // --- 5. PUBLIC SOCIAL TRENDS ---
-  const defaultSocialTrends = useMemo(() => [
+  const socialTrends = useMemo(() => [
     { topic: 'Borewell Dryouts', mentions: 184, source: 'Facebook Groups & Twitter Local hashtags', trend: 'RISING' as const, relevantMandals: 'Singarayakonda, Tangutur', detected: '2026-07-25', updated: '2026-07-29' },
     { topic: 'Highway Compensation', mentions: 125, source: 'Local WhatsApp & Public FB Comments', trend: 'RISING' as const, relevantMandals: 'Singarayakonda', detected: '2026-07-26', updated: '2026-07-29' },
     { topic: 'TDP Cadre Training Success', mentions: 95, source: 'Verified TDP Cadre Twitter posts', trend: 'STABLE' as const, relevantMandals: 'All Mandals', detected: '2026-07-22', updated: '2026-07-28' },
     { topic: 'Rythu Bharosa delay complaints', mentions: 62, source: 'Public Agriculture Forum Discussions', trend: 'DECLINING' as const, relevantMandals: 'Marripudi, Ponnaluru', detected: '2026-07-24', updated: '2026-07-28' }
   ], []);
-
-  const socialTrends = useMemo(() => {
-    if (liveTrends && liveTrends.length > 0) {
-      return liveTrends.map(item => ({
-        topic: item.topic || item.name,
-        mentions: Number(item.mentionsCount || item.mentions || 120),
-        source: item.source || 'Social Media & Ground Intelligence',
-        trend: (item.sentiment === 'POSITIVE' || item.sentiment === 'RISING' || item.trend === 'RISING') ? ('RISING' as const) : ('STABLE' as const),
-        relevantMandals: item.relevantMandals || 'All Mandals',
-        detected: item.detectedAt ? item.detectedAt.split('T')[0] : (item.detected || '2026-07-25'),
-        updated: item.updatedAt ? item.updatedAt.split('T')[0] : (item.updated || '2026-07-29')
-      }));
-    }
-    return defaultSocialTrends;
-  }, [liveTrends, defaultSocialTrends]);
 
   // --- 6. GOVERNMENT & DEVELOPMENT MONITOR ---
   const govtProjects = useMemo(() => [
@@ -359,7 +304,7 @@ export default function AIStrategicIntelligenceCenter({
   }, []);
 
   // --- 8. AI CHAT BOT RESPONSES ---
-  const handleChatSubmit = async (e: React.FormEvent) => {
+  const handleChatSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
 
@@ -373,25 +318,6 @@ export default function AIStrategicIntelligenceCenter({
     ];
     setChatMessages(updatedMessages);
     setChatInput('');
-
-    try {
-      const unitId = session?.assignedUnitId || session?.unitId || 'const-107';
-      const aiResponse = await askAiStrategy(unitId, userMsg);
-      if (aiResponse && aiResponse.answer) {
-        setChatMessages(prev => [
-          ...prev,
-          {
-            sender: 'ai',
-            text: aiResponse.answer,
-            citations: [aiResponse.provider === 'GEMINI_LIVE' ? 'Gemini 2.5 Flash Strategy' : 'Constituency Strategic Model', 'Verified DB'],
-            timestamp: new Date().toTimeString().substring(0, 5)
-          }
-        ]);
-        return;
-      }
-    } catch (_err) {
-      // Fallback to local heuristic rule engine
-    }
 
     // Formulate intelligent AI answer based on keywords
     setTimeout(() => {

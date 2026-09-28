@@ -7,13 +7,13 @@ import { authenticate } from '../../middleware/auth.js';
 import { AIService } from './ai.service.js';
 
 const aiQuerySchema = z.object({
-  unitId: z.string().optional(),
+  unitId: z.string().uuid(),
   prompt: z.string().min(3),
   language: z.enum(['en', 'te']).default('en'),
 });
 
 const aiReportSchema = z.object({
-  unitId: z.string().optional(),
+  unitId: z.string().uuid(),
   language: z.enum(['en', 'te']).default('en'),
 });
 

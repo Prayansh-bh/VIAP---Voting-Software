@@ -41,23 +41,8 @@ export class TrainingController {
     return reply.send(successResponse(progress, 'Training progress updated'));
   }
 
-  static async getProgress(req: FastifyRequest, reply: FastifyReply) {
-    const query = req.query as { userId?: string; unitId?: string };
-    const userId = query.userId || req.user?.userId;
-    const items = await TrainingService.getProgress(userId, query.unitId);
-    return reply.send(successResponse(items));
-  }
-
-  static async ensureAssigned(req: FastifyRequest, reply: FastifyReply) {
-    const body = req.body as { userId?: string; videoId: string };
-    const userId = body.userId || req.user!.userId;
-    const item = await TrainingService.ensureAssigned(userId, body.videoId, req.user?.userId);
-    return reply.send(successResponse(item, 'Video assignment ensured'));
-  }
-
   static async getAnalytics(req: FastifyRequest, reply: FastifyReply) {
     const data = await TrainingService.getTrainingAnalytics(req.hierarchyScope?.accessibleUnitIds);
     return reply.send(successResponse(data));
   }
 }
-

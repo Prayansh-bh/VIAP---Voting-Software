@@ -3,11 +3,15 @@ import { prisma } from '../../lib/prisma.js';
 import { logAudit } from '../../middleware/audit.js';
 
 export class CadreService {
-  static async listCadres(accessibleUnitIds?: Set<string>) {
+  static async listCadres(accessibleUnitIds?: Set<string>, page = 1, limit = 100) {
     const where: any = {};
     if (accessibleUnitIds && accessibleUnitIds.size > 0) {
       where.user = { unitId: { in: Array.from(accessibleUnitIds) } };
     }
+
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.min(200, Math.max(1, Number(limit) || 100));
+    const skip = (safePage - 1) * safeLimit;
 
     return prisma.cadre.findMany({
       where,
@@ -17,6 +21,8 @@ export class CadreService {
         },
       },
       orderBy: { performanceScore: 'desc' },
+      skip,
+      take: safeLimit,
     });
   }
 

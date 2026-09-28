@@ -754,7 +754,7 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
             <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Active Agent</p>
             <h4 className="text-xs font-bold text-slate-100">{session.userName}</h4>
             <div className="text-[10px] text-slate-400 flex flex-col gap-0.5 font-mono">
-              <span>ID: {session.userId}</span>
+              <span title={session.userId}>ID: {session.userId?.slice(-8).toUpperCase() || 'AGENT'}</span>
               <span>Village: {session.assignedVillage}</span>
               <span>Booth: {session.assignedBooth?.split(' ')[1] || '76'}</span>
               <span>Group: {session.assignedVoterGroup}</span>

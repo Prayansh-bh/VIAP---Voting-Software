@@ -1,20 +1,38 @@
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { AuditAction, RoleType } from '@prisma/client';
 import { env } from '../../config/env.js';
 import { prisma } from '../../lib/prisma.js';
 import { AuthenticatedUserPayload } from '../../common/types.js';
 import { logAudit } from '../../middleware/audit.js';
 import { SmsProviderFactory } from '../../lib/sms/factory.js';
-import { RequestOtpDto, VerifyOtpDto } from './auth.schema.js';
+import { RequestOtpDto, VerifyOtpDto, DeviceSessionDto, RevokeDeviceDto, DemoLoginDto } from './auth.schema.js';
 import { OtpService } from './services/otp.service.js';
 import { TokenService } from './services/token.service.js';
 import { HierarchyAssignmentService } from './services/hierarchy-assignment.service.js';
 
 export class AuthService {
   /**
-   * Finds existing user by mobile number or auto-provisions a new user with appropriate role.
+   * Requests a login OTP for an existing, active user matching the requested role.
+   * Authentication NEVER creates users or mutates roles.
+   * Mitigates account enumeration by returning a uniform response shape while retaining authoritative checks internally.
    */
-  private static async findOrCreateUser(cleanMobile: string, role: RoleType) {
-    let user = await prisma.user.findFirst({
+  static async requestOtp(dto: RequestOtpDto, reqInfo?: { ip?: string; userAgent?: string }) {
+    const cleanMobile = dto.mobileNumber.replace(/\D/g, '').slice(-10);
+
+    // 1. Enforce Server-Side Rate Limiting (Cooldown + Sliding Window on normalized mobile number)
+    await OtpService.enforceCooldown(cleanMobile);
+    await OtpService.enforceWindowRateLimit(cleanMobile);
+
+    // Record request timestamp uniformly for all mobile numbers to prevent side-channel account enumeration
+    OtpService.recordRequest(cleanMobile);
+
+    const smsProvider = SmsProviderFactory.getProvider();
+    const cooldownSeconds = Math.ceil(env.OTP_RESEND_COOLDOWN_MS / 1000);
+
+    // 2. Authoritative database lookup of existing user
+    const user = await prisma.user.findFirst({
       where: {
         mobileNumber: {
           endsWith: cleanMobile,
@@ -26,113 +44,113 @@ export class AuthService {
       },
     });
 
-    let roleRecord = await prisma.role.findFirst({ where: { code: role } });
-    if (!roleRecord) {
-      const org = await prisma.organisation.findFirst();
-      if (org) {
-        try {
-          roleRecord = await prisma.role.create({
-            data: {
-              organisationId: org.id,
-              code: role,
-              name: role.replace(/_/g, ' '),
-              hierarchyLevel: 'CONSTITUENCY',
-            },
-          });
-        } catch {
-          roleRecord = await prisma.role.findFirst({ where: { code: role } });
-        }
-      }
-    }
+    // 3. Authoritative internal security checks
+    const isEligible = Boolean(user && user.accountStatus === 'ACTIVE' && (!dto.role || user.role === dto.role));
 
-    if (user) {
-      if (user.role !== role) {
-        user = await prisma.user.update({
-          where: { id: user.id },
-          data: {
-            role,
-            roleId: roleRecord?.id || user.roleId,
-            accountStatus: 'ACTIVE',
-            isVerified: true,
-          },
-          include: {
-            organisation: true,
-            roleRef: true,
-          },
-        });
-      }
-    } else {
-      const org = await prisma.organisation.findFirst();
-      user = await prisma.user.create({
-        data: {
-          organisationId: org?.id || null,
-          userCode: `USR-${role.slice(0, 4)}-${cleanMobile.slice(-4)}-${Date.now().toString().slice(-4)}`,
-          name: `${role.replace(/_/g, ' ')} Officer`,
-          mobileNumber: cleanMobile,
-          role,
-          roleId: roleRecord?.id,
-          accountStatus: 'ACTIVE',
-          isVerified: true,
+    if (!isEligible) {
+      // Diagnostic logging (sanitized, internal only - no PII or secrets leaked)
+      const reason = !user
+        ? 'USER_NOT_FOUND'
+        : user.accountStatus !== 'ACTIVE'
+        ? 'ACCOUNT_INACTIVE'
+        : 'ROLE_MISMATCH';
+
+      await logAudit({
+        action: AuditAction.CREATE,
+        entityType: 'OTPVerification',
+        entityId: 'unauthorized-request',
+        userId: user?.id || undefined,
+        changes: {
+          event: 'OTP_REQUEST_REJECTED',
+          reason,
+          role: dto.role,
         },
-        include: { organisation: true, roleRef: true },
+        ipAddress: reqInfo?.ip,
+        userAgent: reqInfo?.userAgent,
       });
+
+      // Uniform response: Opaque crypto random request ID, no OTP generated or sent
+      return {
+        requestId: crypto.randomUUID(),
+        expiresAt: new Date(Date.now() + env.OTP_EXPIRY_MS),
+        cooldownSeconds,
+        provider: smsProvider.name,
+        message: 'If an eligible account exists, an OTP has been dispatched.',
+      };
     }
 
-    return user;
-  }
+    // 4. Generate and Save OTP Record (Hashed in DB) for eligible user
+    const { record, rawOtp } = await OtpService.generateAndSaveOtp(cleanMobile, dto.role, user!.id);
 
-  /**
-   * Requests a login OTP: provisions identity, checks cooldown, generates OTP, and sends SMS.
-   */
-  static async requestOtp(dto: RequestOtpDto, reqInfo?: { ip?: string; userAgent?: string }) {
-    const cleanMobile = dto.mobileNumber.replace(/\D/g, '').slice(-10);
-
-    // 1. Verify or dynamically associate user for given role and mobile number
-    const user = await this.findOrCreateUser(cleanMobile, dto.role);
-
-    if (user.accountStatus !== 'ACTIVE') {
-      throw new Error('This user account is currently suspended or inactive.');
+    // 5. Dispatch through configured SMS Provider with failure handling
+    let smsResult;
+    try {
+      smsResult = await smsProvider.sendOtp(cleanMobile, rawOtp, {
+        senderId: env.SMS_SENDER_ID,
+        templateId: env.MSG91_TEMPLATE_ID,
+      });
+    } catch (dispatchErr: any) {
+      smsResult = { success: false, error: dispatchErr?.message || 'SMS dispatch failure' };
     }
 
-    // 2. Ensure user has valid organizationUnit and userHierarchyAssignment
-    await HierarchyAssignmentService.resolveUnitAndAssignment(user, dto.role);
+    if (!smsResult.success) {
+      // Invalidate pending OTP and reset cooldown on definitive provider failure
+      try {
+        await prisma.oTPVerification.delete({ where: { id: record.id } });
+      } catch {}
+      OtpService.clearCooldown(cleanMobile);
 
-    // 3. Enforce Resend Cooldown
-    await OtpService.enforceCooldown(cleanMobile, dto.role);
+      console.error(
+        `[SMS Dispatch Failed] Mobile: +91${cleanMobile}, Provider: ${smsProvider.name}, Error: ${smsResult.error || 'Unknown'}`
+      );
 
-    // 4. Generate and Save OTP Record
-    const { record, rawOtp } = await OtpService.generateAndSaveOtp(cleanMobile, dto.role, user.id);
+      await logAudit({
+        action: AuditAction.CREATE,
+        entityType: 'OTPVerification',
+        entityId: record.id,
+        userId: user!.id,
+        changes: {
+          event: 'SMS_DISPATCH_FAILED',
+          provider: smsProvider.name,
+          error: smsResult.error,
+        },
+        ipAddress: reqInfo?.ip,
+        userAgent: reqInfo?.userAgent,
+      });
 
-    // 5. Dispatch through configured SMS Provider
-    const smsProvider = SmsProviderFactory.getProvider();
-    const smsResult = await smsProvider.sendOtp(cleanMobile, rawOtp, {
-      senderId: env.SMS_SENDER_ID,
-      templateId: env.SMS_TEMPLATE_ID,
-    });
+      const error: any = new Error('Failed to dispatch SMS OTP. Please try again later.');
+      error.code = 'SMS_DISPATCH_FAILED';
+      error.statusCode = 502;
+      throw error;
+    }
 
-    console.log(`[SMS Dispatch] Mobile: +91${cleanMobile}, Role: ${dto.role}, Provider: ${smsProvider.name}, Success: ${smsResult.success}, Error: ${smsResult.error || 'None'}, OTP: ${rawOtp}`);
+    // Sanitized logging: plaintext OTP is NEVER logged
+    console.log(
+      `[SMS Dispatch] Mobile: +91${cleanMobile}, Role: ${dto.role}, Provider: ${smsProvider.name}, Success: true`
+    );
 
     // 6. Audit Logging
     await logAudit({
       action: AuditAction.CREATE,
       entityType: 'OTPVerification',
       entityId: record.id,
-      userId: user.id,
+      userId: user!.id,
       changes: {
         role: dto.role,
         provider: smsProvider.name,
-        smsDispatched: smsResult.success,
+        smsDispatched: true,
       },
       ipAddress: reqInfo?.ip,
       userAgent: reqInfo?.userAgent,
     });
 
+    // Strip devOtp / rawOtp completely from response
     return {
       requestId: record.id,
       expiresAt: record.expiresAt,
-      cooldownSeconds: 30,
+      cooldownSeconds,
       provider: smsProvider.name,
-      devOtp: rawOtp,
+      message: 'If an eligible account exists, an OTP has been dispatched.',
     };
   }
 
@@ -186,6 +204,28 @@ export class AuthService {
       throw new Error('User account is currently inactive.');
     }
 
+    // Safe post-authentication hierarchy resolution using database-assigned role only
+    if (!user.unitId || user.hierarchyAssignments.length === 0) {
+      await HierarchyAssignmentService.resolveUnitAndAssignment(user, user.role);
+      user.hierarchyAssignments = await prisma.userHierarchyAssignment.findMany({
+        where: { userId: user.id, isActive: true },
+        include: {
+          state: true,
+          zone: true,
+          parliament: true,
+          constituency: true,
+          mandal: true,
+          village: true,
+          booth: true,
+          voterGroup: true,
+        },
+      });
+      const reloadedUser = await prisma.user.findUnique({ where: { id: user.id } });
+      if (reloadedUser?.unitId) {
+        user.unitId = reloadedUser.unitId;
+      }
+    }
+
     // Construct authenticated payload & issue tokens
     const payload: AuthenticatedUserPayload = {
       userId: user.id,
@@ -198,7 +238,7 @@ export class AuthService {
 
     const { token, refreshToken, sessionId } = TokenService.generateTokens(payload);
 
-    // Create LoginSession record
+    // Create LoginSession record linked to sessionId (jti)
     const loginSession = await TokenService.recordLoginSession(
       user.id,
       user.mobileNumber,
@@ -226,9 +266,49 @@ export class AuthService {
       },
     });
 
+    // 7. Authorize & Remember Device (Zomato/Uber style persistent device authorization)
+    const resolvedDeviceId = dto.deviceId || crypto.randomUUID();
+    const rawDeviceToken = crypto.randomBytes(32).toString('hex');
+    const deviceTokenHash = crypto.createHash('sha256').update(rawDeviceToken).digest('hex');
+
+    try {
+      await (prisma as any).userDevice.upsert({
+        where: {
+          userId_deviceId: {
+            userId: user.id,
+            deviceId: resolvedDeviceId,
+          },
+        },
+        create: {
+          userId: user.id,
+          deviceId: resolvedDeviceId,
+          deviceName: dto.deviceName || reqInfo?.userAgent || 'Authorized Mobile / Browser',
+          ipAddress: reqInfo?.ip,
+          userAgent: reqInfo?.userAgent,
+          isAuthorized: true,
+          deviceTokenHash,
+          lastActiveAt: new Date(),
+        },
+        update: {
+          deviceName: dto.deviceName || reqInfo?.userAgent || 'Authorized Mobile / Browser',
+          ipAddress: reqInfo?.ip,
+          userAgent: reqInfo?.userAgent,
+          isAuthorized: true,
+          deviceTokenHash,
+          revokedAt: null,
+          revokedReason: null,
+          lastActiveAt: new Date(),
+        },
+      });
+    } catch (deviceErr: any) {
+      console.warn('[AuthService] Could not persist UserDevice record:', deviceErr?.message);
+    }
+
     return {
       token,
       refreshToken,
+      deviceId: resolvedDeviceId,
+      deviceToken: rawDeviceToken,
       user: {
         id: user.id,
         userCode: user.userCode,
@@ -248,11 +328,422 @@ export class AuthService {
   }
 
   /**
+   * Authenticates user using remembered Device Token (Zomato/Uber/Ola style auto-login).
+   * Opens application directly without re-prompting for OTP, unless revoked by Admin.
+   */
+  static async authenticateDeviceSession(dto: DeviceSessionDto, reqInfo?: { ip?: string; userAgent?: string }) {
+    const deviceTokenHash = crypto.createHash('sha256').update(dto.deviceToken).digest('hex');
+
+    const userDevice = await (prisma as any).userDevice.findFirst({
+      where: {
+        deviceId: dto.deviceId,
+        deviceTokenHash,
+      },
+      include: {
+        user: {
+          include: {
+            organisation: true,
+            roleRef: true,
+            cadreProfile: true,
+            hierarchyAssignments: {
+              where: { isActive: true },
+              include: {
+                state: true,
+                zone: true,
+                parliament: true,
+                constituency: true,
+                mandal: true,
+                village: true,
+                booth: true,
+                voterGroup: true,
+              },
+            },
+            unit: true,
+          },
+        },
+      },
+    });
+
+    if (!userDevice) {
+      const err: any = new Error('Device authorization not found or has expired. Please verify with OTP.');
+      err.statusCode = 401;
+      err.code = 'DEVICE_UNAUTHORIZED';
+      throw err;
+    }
+
+    if (!userDevice.isAuthorized) {
+      const err: any = new Error(userDevice.revokedReason || 'Device access has been revoked by Administrator. Please re-verify via OTP.');
+      err.statusCode = 403;
+      err.code = 'DEVICE_REVOKED';
+      throw err;
+    }
+
+    const user = userDevice.user;
+    if (!user || user.accountStatus !== 'ACTIVE') {
+      const err: any = new Error('Account access has been restricted or disabled by Administrator.');
+      err.statusCode = 403;
+      err.code = 'ACCOUNT_RESTRICTED';
+      throw err;
+    }
+
+    // Update lastActive timestamp on device
+    try {
+      await (prisma as any).userDevice.update({
+        where: { id: userDevice.id },
+        data: {
+          lastActiveAt: new Date(),
+          ipAddress: reqInfo?.ip,
+          userAgent: reqInfo?.userAgent || userDevice.userAgent,
+        },
+      });
+    } catch {}
+
+    // Resolve unit assignment if missing
+    if (!user.unitId || user.hierarchyAssignments.length === 0) {
+      await HierarchyAssignmentService.resolveUnitAndAssignment(user, user.role);
+    }
+
+    const payload: AuthenticatedUserPayload = {
+      userId: user.id,
+      userCode: user.userCode,
+      mobileNumber: user.mobileNumber,
+      role: user.role,
+      organisationId: user.organisationId,
+      unitId: user.unitId,
+    };
+
+    const { token, refreshToken, sessionId } = TokenService.generateTokens(payload);
+
+    const loginSession = await TokenService.recordLoginSession(
+      user.id,
+      user.mobileNumber,
+      token,
+      sessionId,
+      reqInfo
+    );
+
+    const primaryAssignment = user.hierarchyAssignments[0] || null;
+
+    await logAudit({
+      action: AuditAction.LOGIN,
+      entityType: 'UserDevice',
+      entityId: userDevice.id,
+      userId: user.id,
+      unitId: user.unitId ?? undefined,
+      ipAddress: reqInfo?.ip,
+      userAgent: reqInfo?.userAgent,
+      metadata: {
+        sessionId: loginSession.id,
+        mobileNumber: user.mobileNumber,
+        role: user.role,
+        authMethod: 'DEVICE_TOKEN_AUTO_LOGIN',
+        deviceId: dto.deviceId,
+      },
+    });
+
+    return {
+      token,
+      refreshToken,
+      deviceId: userDevice.deviceId,
+      deviceToken: dto.deviceToken,
+      user: {
+        id: user.id,
+        userCode: user.userCode,
+        name: user.name,
+        mobileNumber: user.mobileNumber,
+        email: user.email,
+        role: user.role,
+        roleDetails: user.roleRef,
+        accountStatus: user.accountStatus,
+        organisation: user.organisation,
+        unitId: user.unitId,
+        unitName: user.unit?.name,
+        cadre: user.cadreProfile,
+        hierarchyAssignment: HierarchyAssignmentService.formatHierarchyAssignment(primaryAssignment),
+      },
+    };
+  }
+
+  /**
+   * Revokes device authorization (Admin control or user security sign-out).
+   * Instantly forces the device to verify via fresh OTP on next launch.
+   */
+  static async revokeDevice(targetDeviceId: string, adminUserId?: string, reason?: string) {
+    const device = await (prisma as any).userDevice.findFirst({
+      where: { deviceId: targetDeviceId },
+    });
+
+    if (!device) {
+      const err: any = new Error('Device not found.');
+      err.statusCode = 404;
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+
+    const updated = await (prisma as any).userDevice.update({
+      where: { id: device.id },
+      data: {
+        isAuthorized: false,
+        revokedAt: new Date(),
+        revokedReason: reason || 'Access revoked by Administrator',
+      },
+    });
+
+    // Revoke all active login sessions for this user as well
+    try {
+      await prisma.loginSession.updateMany({
+        where: { userId: device.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    } catch {}
+
+    await logAudit({
+      action: AuditAction.STATUS_CHANGE,
+      entityType: 'UserDevice',
+      entityId: device.id,
+      userId: adminUserId,
+      changes: {
+        targetUserId: device.userId,
+        deviceId: targetDeviceId,
+        isAuthorized: false,
+        reason,
+      },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Lists all active/authorized devices for a user.
+   */
+  static async listUserDevices(userId: string) {
+    return (prisma as any).userDevice.findMany({
+      where: { userId },
+      orderBy: { lastActiveAt: 'desc' },
+      select: {
+        id: true,
+        deviceId: true,
+        deviceName: true,
+        ipAddress: true,
+        userAgent: true,
+        isAuthorized: true,
+        lastActiveAt: true,
+        createdAt: true,
+        revokedAt: true,
+        revokedReason: true,
+      },
+    });
+  }
+
+  /**
+   * Fast 1-Click Demo Authentication for reviewers, clients, and testing.
+   * Authorizes the device and creates an active session for the chosen role without requiring OTP.
+   */
+  static async authenticateDemoRole(dto: DemoLoginDto, reqInfo?: { ip?: string; userAgent?: string }) {
+    const demoDir: Record<string, { mobile: string; name: string; userCode: string }> = {
+      SUPER_ADMIN: { mobile: '9848099999', name: 'Super Administrator', userCode: 'DEMO-SUP-9999' },
+      STATE_ADMIN: { mobile: '9848088888', name: 'State Incharge', userCode: 'DEMO-STA-8888' },
+      ZONE_INCHARGE: { mobile: '9848099998', name: 'Zone Coordinator', userCode: 'DEMO-ZON-9998' },
+      PARLIAMENT_INCHARGE: { mobile: '9848088887', name: 'Parliament Incharge', userCode: 'DEMO-PAR-8887' },
+      CONSTITUENCY_INCHARGE: { mobile: '9848012345', name: 'Constituency Incharge', userCode: 'DEMO-CON-2345' },
+      MANDAL_INCHARGE: { mobile: '9848077777', name: 'Mandal President', userCode: 'DEMO-MAN-7777' },
+      VILLAGE_INCHARGE: { mobile: '9848010001', name: 'Village Incharge', userCode: 'DEMO-VIL-0001' },
+      BOOTH_PRESIDENT: { mobile: '9848010002', name: 'Booth President', userCode: 'DEMO-BOO-0002' },
+      VOTER_100_INCHARGE: { mobile: '9848010003', name: '100 Voter Incharge', userCode: 'DEMO-VOT-0003' },
+      POLLING_AGENT: { mobile: '9848010004', name: 'Polling Agent', userCode: 'DEMO-POL-0004' },
+      VIEWER: { mobile: '9848010005', name: 'Observer / Viewer', userCode: 'DEMO-VIE-0005' },
+    };
+
+    const targetDemo = demoDir[dto.role] || {
+      mobile: '9848012345',
+      name: `${dto.role} Incharge`,
+      userCode: `DEMO-${dto.role.slice(0, 3)}-0001`,
+    };
+
+    // Find existing demo user or create on-the-fly
+    let user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { role: dto.role, accountStatus: 'ACTIVE' },
+          { mobileNumber: targetDemo.mobile },
+        ],
+      },
+      include: {
+        organisation: true,
+        roleRef: true,
+        cadreProfile: true,
+        hierarchyAssignments: {
+          where: { isActive: true },
+          include: {
+            state: true,
+            zone: true,
+            parliament: true,
+            constituency: true,
+            mandal: true,
+            village: true,
+            booth: true,
+            voterGroup: true,
+          },
+        },
+        unit: true,
+      },
+    });
+
+    if (!user) {
+      const org = await prisma.organisation.findFirst({ where: { isActive: true } });
+      user = await prisma.user.create({
+        data: {
+          organisationId: org?.id,
+          userCode: targetDemo.userCode,
+          name: targetDemo.name,
+          mobileNumber: targetDemo.mobile,
+          role: dto.role,
+          accountStatus: 'ACTIVE',
+          isVerified: true,
+        },
+        include: {
+          organisation: true,
+          roleRef: true,
+          cadreProfile: true,
+          hierarchyAssignments: true,
+          unit: true,
+        },
+      }) as any;
+    }
+
+    if (!user!.unitId || user!.hierarchyAssignments.length === 0) {
+      await HierarchyAssignmentService.resolveUnitAndAssignment(user!, user!.role);
+      user!.hierarchyAssignments = await prisma.userHierarchyAssignment.findMany({
+        where: { userId: user!.id, isActive: true },
+        include: {
+          state: true,
+          zone: true,
+          parliament: true,
+          constituency: true,
+          mandal: true,
+          village: true,
+          booth: true,
+          voterGroup: true,
+        },
+      });
+      const reloaded = await prisma.user.findUnique({ where: { id: user!.id } });
+      if (reloaded?.unitId) {
+        user!.unitId = reloaded.unitId;
+      }
+    }
+
+    const payload: AuthenticatedUserPayload = {
+      userId: user!.id,
+      userCode: user!.userCode,
+      mobileNumber: user!.mobileNumber,
+      role: user!.role,
+      organisationId: user!.organisationId,
+      unitId: user!.unitId,
+    };
+
+    const { token, refreshToken, sessionId } = TokenService.generateTokens(payload);
+
+    const loginSession = await TokenService.recordLoginSession(
+      user!.id,
+      user!.mobileNumber,
+      token,
+      sessionId,
+      reqInfo
+    );
+
+    const resolvedDeviceId = dto.deviceId || crypto.randomUUID();
+    const rawDeviceToken = crypto.randomBytes(32).toString('hex');
+    const deviceTokenHash = crypto.createHash('sha256').update(rawDeviceToken).digest('hex');
+
+    try {
+      await (prisma as any).userDevice.upsert({
+        where: {
+          userId_deviceId: {
+            userId: user!.id,
+            deviceId: resolvedDeviceId,
+          },
+        },
+        create: {
+          userId: user!.id,
+          deviceId: resolvedDeviceId,
+          deviceName: dto.deviceName || reqInfo?.userAgent || 'Authorized Demo Device',
+          ipAddress: reqInfo?.ip,
+          userAgent: reqInfo?.userAgent,
+          isAuthorized: true,
+          deviceTokenHash,
+          lastActiveAt: new Date(),
+        },
+        update: {
+          deviceName: dto.deviceName || reqInfo?.userAgent || 'Authorized Demo Device',
+          ipAddress: reqInfo?.ip,
+          userAgent: reqInfo?.userAgent,
+          isAuthorized: true,
+          deviceTokenHash,
+          revokedAt: null,
+          revokedReason: null,
+          lastActiveAt: new Date(),
+        },
+      });
+    } catch {}
+
+    const primaryAssignment = user!.hierarchyAssignments[0] || null;
+
+    await logAudit({
+      action: AuditAction.LOGIN,
+      entityType: 'User',
+      entityId: user!.id,
+      userId: user!.id,
+      unitId: user!.unitId ?? undefined,
+      ipAddress: reqInfo?.ip,
+      userAgent: reqInfo?.userAgent,
+      metadata: {
+        sessionId: loginSession.id,
+        mobileNumber: user!.mobileNumber,
+        role: user!.role,
+        authMethod: '1_CLICK_DEMO_SIGN_IN',
+        deviceId: resolvedDeviceId,
+      },
+    });
+
+    return {
+      token,
+      refreshToken,
+      deviceId: resolvedDeviceId,
+      deviceToken: rawDeviceToken,
+      user: {
+        id: user!.id,
+        userCode: user!.userCode,
+        name: user!.name,
+        mobileNumber: user!.mobileNumber,
+        role: user!.role,
+        roleDetails: user!.roleRef,
+        accountStatus: user!.accountStatus,
+        organisation: user!.organisation,
+        unitId: user!.unitId,
+        unitName: user!.unit?.name,
+        cadre: user!.cadreProfile,
+        hierarchyAssignment: HierarchyAssignmentService.formatHierarchyAssignment(primaryAssignment),
+      },
+    };
+  }
+
+  /**
    * Refreshes an active session with a valid refresh token.
    */
   static async refreshSession(refreshTokenString: string, reqInfo?: { ip?: string; userAgent?: string }) {
     try {
       const decoded = TokenService.verifyRefreshToken(refreshTokenString);
+
+      if (decoded.sessionId) {
+        const sessionCheck = await TokenService.validateSession(decoded.sessionId, decoded.userId);
+        if (!sessionCheck.valid) {
+          const error: any = new Error(sessionCheck.message || 'Session is invalid or revoked.');
+          error.statusCode = 401;
+          error.code = sessionCheck.code || 'INVALID_SESSION';
+          throw error;
+        }
+      }
+
       const user = await prisma.user.findUnique({
         where: { id: decoded.userId },
         include: {
@@ -290,7 +781,7 @@ export class AuthService {
         unitId: user.unitId,
       };
 
-      const token = TokenService.generateAccessToken(payload);
+      const token = TokenService.generateAccessToken(payload, decoded.sessionId);
 
       await logAudit({
         action: AuditAction.LOGIN,
@@ -317,7 +808,8 @@ export class AuthService {
           hierarchyAssignment: user.hierarchyAssignments[0] || null,
         },
       };
-    } catch {
+    } catch (err: any) {
+      if (err.statusCode && err.code) throw err;
       const error: any = new Error('Invalid or expired refresh token.');
       error.code = 'INVALID_REFRESH_TOKEN';
       error.statusCode = 401;
@@ -328,7 +820,16 @@ export class AuthService {
   /**
    * Logs out user and revokes active sessions.
    */
-  static async logout(userId: string, _tokenString?: string, reqInfo?: { ip?: string; userAgent?: string }) {
+  static async logout(userId: string, tokenString?: string, reqInfo?: { ip?: string; userAgent?: string }) {
+    if (tokenString) {
+      try {
+        const decoded = jwt.decode(tokenString) as any;
+        if (decoded?.jti) {
+          await TokenService.revokeSession(decoded.jti);
+        }
+      } catch {}
+    }
+
     await TokenService.revokeSessions(userId);
 
     await logAudit({
@@ -343,6 +844,7 @@ export class AuthService {
 
     return { success: true };
   }
+
 
   /**
    * Retrieves profile information for the authenticated user.

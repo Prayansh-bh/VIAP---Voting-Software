@@ -1,6 +1,11 @@
 import { Server as SocketIOServer } from 'socket.io';
 import type { Server as HTTPServer } from 'node:http';
+import { createAdapter } from '@socket.io/redis-adapter';
 import { prisma } from './prisma.js';
+import { verifyTokenAndSession } from '../middleware/auth.js';
+import { computeUserHierarchyScope } from '../middleware/rbac.js';
+import { UserHierarchyScope } from '../common/types.js';
+import { getRedisClient, createRedisSubscriber } from './redis.js';
 
 let io: SocketIOServer | null = null;
 
@@ -13,26 +18,78 @@ export function initSocketServer(httpServer: HTTPServer, corsOrigin: string): So
     transports: ['websocket', 'polling'],
   });
 
+  // Enable Redis horizontal pub/sub adapter if Redis URL is configured
+  const pubClient = getRedisClient();
+  const subClient = createRedisSubscriber();
+  if (pubClient && subClient) {
+    io.adapter(createAdapter(pubClient, subClient));
+  }
+
+  // Enforce JWT authentication and session validation on socket handshake
+  io.use(async (socket, next) => {
+    try {
+      const authHeader = socket.handshake.headers.authorization;
+      const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
+      const handshakeAuthToken = socket.handshake.auth?.token;
+      const queryToken = typeof socket.handshake.query?.token === 'string' ? socket.handshake.query.token : undefined;
+
+      const token = handshakeAuthToken || bearerToken || queryToken;
+
+      if (!token) {
+        return next(new Error('Authentication required'));
+      }
+
+      const result = await verifyTokenAndSession(token);
+      if (!result.valid || !result.user) {
+        return next(new Error('Authentication failed'));
+      }
+
+      const hierarchyScope = await computeUserHierarchyScope(result.user.userId);
+
+      socket.data.user = result.user;
+      socket.data.hierarchyScope = hierarchyScope;
+
+      next();
+    } catch {
+      return next(new Error('Authentication failed'));
+    }
+  });
+
   io.on('connection', (socket) => {
-    const userId = socket.handshake.query.userId as string | undefined;
-    const unitId = socket.handshake.query.unitId as string | undefined;
+    const user = socket.data.user;
+    const scope: UserHierarchyScope = socket.data.hierarchyScope;
 
-    if (userId) {
-      socket.join(`user:${userId}`);
+    if (!user || !scope) {
+      socket.disconnect(true);
+      return;
     }
 
-    if (unitId) {
-      socket.join(`unit:${unitId}`);
+    // Join ONLY the authenticated user's own room (never trust handshake userId)
+    socket.join(`user:${user.userId}`);
+
+    // Join user's assigned home unit room ONLY if authorized in hierarchy
+    if (user.unitId && scope.accessibleUnitIds.has(user.unitId)) {
+      socket.join(`unit:${user.unitId}`);
     }
 
-    socket.on('join:unit', (targetUnitId: string) => {
-      if (targetUnitId) {
+    // Secure unit room joining: validate against authorized hierarchy scope
+    socket.on('join:unit', (targetUnitId: string, ack?: (res: { success: boolean; error?: string }) => void) => {
+      if (!targetUnitId || typeof targetUnitId !== 'string') {
+        if (ack) ack({ success: false, error: 'Invalid unit identifier' });
+        return;
+      }
+
+      if (scope.isGlobalScope || scope.accessibleUnitIds.has(targetUnitId)) {
         socket.join(`unit:${targetUnitId}`);
+        if (ack) ack({ success: true });
+      } else {
+        socket.emit('error:unauthorized', { message: 'Unauthorized room access' });
+        if (ack) ack({ success: false, error: 'Unauthorized' });
       }
     });
 
     socket.on('leave:unit', (targetUnitId: string) => {
-      if (targetUnitId) {
+      if (targetUnitId && typeof targetUnitId === 'string') {
         socket.leave(`unit:${targetUnitId}`);
       }
     });
@@ -44,6 +101,7 @@ export function initSocketServer(httpServer: HTTPServer, corsOrigin: string): So
 
   return io;
 }
+
 
 export function getSocketIO(): SocketIOServer | null {
   return io;

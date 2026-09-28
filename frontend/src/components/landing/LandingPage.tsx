@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
+  LogIn,
   ShieldCheck,
   Lock,
   Layers,
@@ -83,7 +84,7 @@ export default function LandingPage({
     if (onOpenLogin) {
       onOpenLogin();
     } else {
-      window.location.hash = '/app';
+      window.location.hash = '/roles';
     }
   };
 
@@ -307,7 +308,7 @@ export default function LandingPage({
             : 'bg-transparent border-b border-transparent py-5'
         }`}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
+        <div className="max-w-7xl xl:max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 flex items-center justify-between">
           {/* Brand Logo & Name */}
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-yellow-500 via-amber-500 to-yellow-600 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-yellow-500/20 border border-yellow-400/40">
@@ -364,6 +365,14 @@ export default function LandingPage({
           {/* Action CTAs */}
           <div className="hidden md:flex items-center gap-3">
             <button
+              onClick={handleLogin}
+              id="landing-btn-login"
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-all border border-slate-700 hover:border-slate-600 active:scale-95 flex items-center gap-2 cursor-pointer shadow-sm"
+            >
+              <LogIn className="w-3.5 h-3.5 text-yellow-400" />
+              <span>Sign In</span>
+            </button>
+            <button
               onClick={() => {
                 window.location.hash = '/cms';
               }}
@@ -386,6 +395,13 @@ export default function LandingPage({
 
           {/* Mobile Menu Toggle */}
           <div className="md:hidden flex items-center gap-2">
+            <button
+              onClick={handleLogin}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-white border border-slate-700 flex items-center gap-1"
+            >
+              <LogIn className="w-3 h-3 text-yellow-400" />
+              <span>Sign In</span>
+            </button>
             <button
               onClick={() => {
                 window.location.hash = '/cms';
@@ -440,9 +456,19 @@ export default function LandingPage({
               <button
                 onClick={() => {
                   setMobileMenuOpen(false);
+                  handleLogin();
+                }}
+                className="flex-1 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs text-center cursor-pointer border border-slate-700 flex items-center justify-center gap-1.5"
+              >
+                <LogIn className="w-3.5 h-3.5 text-yellow-400" />
+                <span>Sign In</span>
+              </button>
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
                   window.location.hash = '/cms';
                 }}
-                className="w-full py-2.5 rounded-lg bg-amber-400 text-slate-950 font-black text-xs text-center cursor-pointer"
+                className="flex-1 py-2.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs text-center cursor-pointer"
               >
                 CMS Studio
               </button>
@@ -459,16 +485,16 @@ export default function LandingPage({
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[350px] bg-gradient-to-r from-yellow-500/10 via-emerald-500/10 to-indigo-500/10 blur-[130px] pointer-events-none rounded-full" />
         <div className="absolute top-10 right-10 w-72 h-72 bg-yellow-500/5 blur-[100px] pointer-events-none" />
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+        <div className="max-w-7xl xl:max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 relative z-10">
           <div className="text-center max-w-3xl mx-auto space-y-6">
             {/* Top Positioning Badge */}
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/80 border border-slate-800 text-xs font-semibold text-slate-300 shadow-inner">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/90 border border-slate-800 text-xs font-medium text-slate-300 shadow-sm">
               <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
               <span>Next-Generation Civic Intelligence & Field Operations Platform</span>
             </div>
 
             {/* Main Headline */}
-            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight leading-[1.15]">
+            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-white tracking-tight leading-[1.12]">
               Intelligent Field Operations.
               <span className="block mt-2 bg-gradient-to-r from-yellow-400 via-amber-300 to-yellow-500 bg-clip-text text-transparent">
                 One Connected Platform.
@@ -480,57 +506,50 @@ export default function LandingPage({
               VIAP brings voter data, field teams, hierarchical operations, surveys, tasks, intelligence and reporting into one secure, configurable platform.
             </p>
 
-            {/* Status & Single CTA */}
-            {!isPartyCreated ? (
-              <div className="space-y-4 pt-2">
-                <div className="flex justify-center">
-                  <button
-                    onClick={() => {
-                      window.location.hash = '/cms';
-                    }}
-                    id="hero-btn-cms-studio"
-                    className="px-8 py-4 rounded-2xl bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-base transition-all shadow-xl shadow-amber-500/30 active:scale-95 flex items-center gap-3 cursor-pointer hover:ring-4 hover:ring-amber-400/20"
-                  >
-                    <Sliders className="w-5 h-5 text-slate-950" />
-                    <span>Launch CMS Studio</span>
-                    <ArrowRight className="w-5 h-5" />
-                  </button>
-                </div>
-                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-medium">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Step 1: Create your application in CMS Studio. Role dashboards activate dynamically upon creation.</span>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4 pt-2">
+            {/* Status & Action CTAs: Direct Login & CMS Studio Builder */}
+            <div className="space-y-4 pt-2">
+              {isPartyCreated && (
                 <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-medium">
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Application Active: <strong>{config.organisationName || config.headerTitle || 'Configured Party'}</strong></span>
                 </div>
-                <div className="flex flex-wrap items-center justify-center gap-3">
+              )}
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  onClick={handleLogin}
+                  id="hero-btn-enter-app"
+                  className="px-8 py-4 rounded-2xl bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-base transition-all shadow-xl shadow-amber-500/30 active:scale-95 flex items-center gap-3 cursor-pointer hover:ring-4 hover:ring-amber-400/20"
+                >
+                  <LogIn className="w-5 h-5 text-slate-950" />
+                  <span>Enter Application / Sign In</span>
+                  <ArrowRight className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={() => {
+                    window.location.hash = '/cms';
+                  }}
+                  id="hero-btn-cms-studio"
+                  className="px-6 py-4 rounded-2xl bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white font-bold text-sm transition-all border border-slate-700/80 active:scale-95 flex items-center gap-2.5 cursor-pointer shadow-lg"
+                >
+                  <Sliders className="w-4 h-4 text-amber-400" />
+                  <span>CMS Studio (Campaign Builder)</span>
+                </button>
+                {isPartyCreated && onResetParty && (
                   <button
-                    onClick={() => {
-                      window.location.hash = '/cms';
-                    }}
-                    id="hero-btn-cms-studio"
-                    className="px-8 py-4 rounded-2xl bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-base transition-all shadow-xl shadow-amber-500/30 active:scale-95 flex items-center gap-3 cursor-pointer hover:ring-4 hover:ring-amber-400/20"
+                    onClick={onResetParty}
+                    title="Reset application to initial state"
+                    className="px-4 py-4 rounded-2xl bg-slate-900/60 hover:bg-rose-900/30 text-slate-400 hover:text-rose-300 font-medium text-xs transition-all border border-slate-800 hover:border-rose-500/30 cursor-pointer flex items-center gap-1.5"
                   >
-                    <Sliders className="w-5 h-5 text-slate-950" />
-                    <span>Open CMS Studio</span>
-                    <ArrowRight className="w-5 h-5" />
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Reset Setup</span>
                   </button>
-                  {onResetParty && (
-                    <button
-                      onClick={onResetParty}
-                      className="px-4 py-4 rounded-2xl bg-slate-900/60 hover:bg-rose-900/30 text-slate-400 hover:text-rose-300 font-medium text-xs transition-all border border-slate-800 hover:border-rose-500/30 cursor-pointer flex items-center gap-1.5"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Reset Application</span>
-                    </button>
-                  )}
-                </div>
+                )}
               </div>
-            )}
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-900/80 border border-slate-800 text-slate-400 text-xs font-medium">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>Direct login available for all 8 hierarchy command tiers • CMS Studio for rebranding & hierarchy configuration</span>
+              </div>
+            </div>
 
             {/* Operational Sequence Indicator */}
             <div className="pt-4 flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-400 font-mono font-medium">
@@ -1218,12 +1237,19 @@ export default function LandingPage({
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 pt-3">
             <button
-              onClick={handleStart}
+              onClick={handleLogin}
               className="px-7 py-3.5 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-slate-950 font-black text-sm transition-all shadow-xl shadow-yellow-500/30 active:scale-95 flex items-center gap-2 cursor-pointer"
             >
-              <Sliders className="w-4 h-4 text-slate-950" />
-              <span>Launch CMS Studio</span>
+              <LogIn className="w-4 h-4 text-slate-950" />
+              <span>Enter Application / Sign In</span>
               <ArrowRight className="w-4 h-4" />
+            </button>
+            <button
+              onClick={handleStart}
+              className="px-7 py-3.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-white font-bold text-sm transition-all border border-slate-700 active:scale-95 flex items-center gap-2 cursor-pointer shadow-lg"
+            >
+              <Sliders className="w-4 h-4 text-amber-400" />
+              <span>Launch CMS Studio</span>
             </button>
           </div>
         </div>
@@ -1296,8 +1322,13 @@ export default function LandingPage({
             <div className="font-bold text-white uppercase text-[11px] tracking-wider">Access</div>
             <ul className="space-y-1.5 text-[11px]">
               <li>
+                <button onClick={handleLogin} className="hover:text-white cursor-pointer font-bold text-yellow-400">
+                  Sign In / Enter Application
+                </button>
+              </li>
+              <li>
                 <button onClick={handleStart} className="hover:text-white cursor-pointer">
-                  Configure Application
+                  Configure Application (CMS)
                 </button>
               </li>
             </ul>

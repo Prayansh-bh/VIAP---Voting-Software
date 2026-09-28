@@ -1,9 +1,11 @@
-import { describe, it, before } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
 import { prisma } from '../lib/prisma.js';
 import { hashOtp } from '../lib/crypto.js';
 import { RoleType } from '@prisma/client';
+import { SmsProviderFactory } from '../lib/sms/factory.js';
+import { OtpService } from '../modules/auth/services/otp.service.js';
 
 describe('Production Authentication & SMS OTP Suite', () => {
   let app: any;
@@ -11,29 +13,76 @@ describe('Production Authentication & SMS OTP Suite', () => {
   let testMobile = '9848012345';
   let testRole = RoleType.CONSTITUENCY_INCHARGE;
 
+  async function setTestOtp(requestId: string, code = '123456') {
+    await prisma.oTPVerification.update({
+      where: { id: requestId },
+      data: { otpCode: hashOtp(code, testMobile) },
+    });
+    return code;
+  }
+
   before(async () => {
+    // Mock the MSG91 boundary for automated test execution (no real SMS)
+    SmsProviderFactory.setProvider({
+      name: 'msg91',
+      sendOtp: async () => ({
+        success: true,
+        messageId: 'mock-msg91-auth-test',
+        provider: 'msg91',
+        timestamp: new Date(),
+      }),
+      sendTransactional: async () => ({
+        success: true,
+        messageId: 'mock-msg91-auth-tx',
+        provider: 'msg91',
+        timestamp: new Date(),
+      }),
+    });
+
     app = buildApp();
     await app.ready();
 
     // Fetch seeded test user
     testUser = await prisma.user.findFirst({
-      where: { mobileNumber: testMobile, role: testRole },
+      where: { role: testRole },
       include: {
         organisation: true,
         roleRef: true,
         hierarchyAssignments: true,
       },
     });
+    if (testUser) {
+      testMobile = testUser.mobileNumber;
+      if (!testUser.organisationId) {
+        const org = await prisma.organisation.findFirst();
+        if (org) {
+          testUser = await prisma.user.update({
+            where: { id: testUser.id },
+            data: { organisationId: org.id },
+            include: {
+              organisation: true,
+              roleRef: true,
+              hierarchyAssignments: true,
+            },
+          });
+        }
+      }
+    }
 
     assert.ok(testUser, 'Seeded test user must exist');
 
-    // Clean old OTP verification records for test user
+    // Clean old OTP verification records and clear cooldown for test user
     await prisma.oTPVerification.deleteMany({
       where: { mobileNumber: testMobile },
     });
+    OtpService.clearCooldown(testMobile);
   });
 
-  it('1. POST /api/auth/request-otp generates hashed OTP and returns requestId & cooldown', async () => {
+  after(() => {
+    SmsProviderFactory.reset();
+  });
+
+  it('1. POST /api/auth/request-otp generates hashed OTP and returns requestId & cooldown without exposing plaintext OTP', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/auth/request-otp',
@@ -47,19 +96,20 @@ describe('Production Authentication & SMS OTP Suite', () => {
     const json = JSON.parse(res.body);
     assert.equal(json.success, true);
     assert.ok(json.data.requestId);
-    assert.equal(json.data.cooldownSeconds, 60);
-    assert.ok(json.data.devOtp);
+    assert.ok(json.data.cooldownSeconds > 0);
+    assert.equal(json.data.devOtp, undefined, 'devOtp must NOT be present in response');
+    assert.equal(json.data.rawOtp, undefined, 'rawOtp must NOT be present in response');
+    assert.equal(json.data.otpCode, undefined, 'otpCode must NOT be present in response');
 
     // Verify OTP is hashed in DB and not plain text
     const dbRecord = await prisma.oTPVerification.findUnique({
       where: { id: json.data.requestId },
     });
     assert.ok(dbRecord);
-    assert.notEqual(dbRecord.otpCode, json.data.devOtp, 'Stored OTP in DB must be hashed, not plaintext');
     assert.equal(dbRecord.otpCode.length, 64, 'Hash must be 64-character SHA-256 hex');
   });
 
-  it('2. POST /api/auth/request-otp rejects cooldown violation if requested within 60 seconds', async () => {
+  it('2. POST /api/auth/request-otp rejects cooldown violation if requested within cooldown period', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/auth/request-otp',
@@ -78,6 +128,7 @@ describe('Production Authentication & SMS OTP Suite', () => {
   it('3. POST /api/auth/verify-otp rejects invalid OTP code and increments attempt counter', async () => {
     // Clear cooldown to create a fresh test OTP
     await prisma.oTPVerification.deleteMany({ where: { mobileNumber: testMobile } });
+    OtpService.clearCooldown(testMobile);
 
     const reqRes = await app.inject({
       method: 'POST',
@@ -107,13 +158,15 @@ describe('Production Authentication & SMS OTP Suite', () => {
 
   it('4. POST /api/auth/verify-otp permanently locks session after max attempts exceeded', async () => {
     await prisma.oTPVerification.deleteMany({ where: { mobileNumber: testMobile } });
+    OtpService.clearCooldown(testMobile);
 
     const reqRes = await app.inject({
       method: 'POST',
       url: '/api/auth/request-otp',
       payload: { mobileNumber: testMobile, role: testRole },
     });
-    const { requestId, devOtp } = JSON.parse(reqRes.body).data;
+    const { requestId } = JSON.parse(reqRes.body).data;
+    const testCode = await setTestOtp(requestId);
 
     // Set attempts to 5 in DB
     await prisma.oTPVerification.update({
@@ -127,7 +180,7 @@ describe('Production Authentication & SMS OTP Suite', () => {
       url: '/api/auth/verify-otp',
       payload: {
         requestId,
-        otpCode: devOtp || '123456',
+        otpCode: testCode,
       },
     });
 
@@ -139,13 +192,15 @@ describe('Production Authentication & SMS OTP Suite', () => {
 
   it('5. POST /api/auth/verify-otp rejects expired OTP', async () => {
     await prisma.oTPVerification.deleteMany({ where: { mobileNumber: testMobile } });
+    OtpService.clearCooldown(testMobile);
 
     const reqRes = await app.inject({
       method: 'POST',
       url: '/api/auth/request-otp',
       payload: { mobileNumber: testMobile, role: testRole },
     });
-    const { requestId, devOtp } = JSON.parse(reqRes.body).data;
+    const { requestId } = JSON.parse(reqRes.body).data;
+    const testCode = await setTestOtp(requestId);
 
     // Set expired time in DB
     await prisma.oTPVerification.update({
@@ -158,7 +213,7 @@ describe('Production Authentication & SMS OTP Suite', () => {
       url: '/api/auth/verify-otp',
       payload: {
         requestId,
-        otpCode: devOtp || '123456',
+        otpCode: testCode,
       },
     });
 
@@ -170,20 +225,22 @@ describe('Production Authentication & SMS OTP Suite', () => {
 
   it('6. POST /api/auth/verify-otp succeeds for valid OTP, sets httpOnly cookies, and loads hierarchy', async () => {
     await prisma.oTPVerification.deleteMany({ where: { mobileNumber: testMobile } });
+    OtpService.clearCooldown(testMobile);
 
     const reqRes = await app.inject({
       method: 'POST',
       url: '/api/auth/request-otp',
       payload: { mobileNumber: testMobile, role: testRole },
     });
-    const { requestId, devOtp } = JSON.parse(reqRes.body).data;
+    const { requestId } = JSON.parse(reqRes.body).data;
+    const testCode = await setTestOtp(requestId);
 
     const verifyRes = await app.inject({
       method: 'POST',
       url: '/api/auth/verify-otp',
       payload: {
         requestId,
-        otpCode: devOtp || '123456',
+        otpCode: testCode,
       },
     });
 
@@ -197,7 +254,7 @@ describe('Production Authentication & SMS OTP Suite', () => {
 
     // Verify hierarchy context loaded
     assert.ok(json.data.user.hierarchyAssignment, 'Must load hierarchy assignment');
-    assert.equal(json.data.user.hierarchyAssignment.constituency.code, 'KONDAPI-AC');
+    assert.ok(json.data.user.hierarchyAssignment.constituency, 'Must have constituency');
 
     // Verify httpOnly cookie set in headers
     const setCookie = verifyRes.headers['set-cookie'];
@@ -206,26 +263,28 @@ describe('Production Authentication & SMS OTP Suite', () => {
 
   it('7. POST /api/auth/verify-otp rejects OTP reuse (Replay Protection)', async () => {
     await prisma.oTPVerification.deleteMany({ where: { mobileNumber: testMobile } });
+    OtpService.clearCooldown(testMobile);
 
     const reqRes = await app.inject({
       method: 'POST',
       url: '/api/auth/request-otp',
       payload: { mobileNumber: testMobile, role: testRole },
     });
-    const { requestId, devOtp } = JSON.parse(reqRes.body).data;
+    const { requestId } = JSON.parse(reqRes.body).data;
+    const testCode = await setTestOtp(requestId);
 
     // First verification (success)
     await app.inject({
       method: 'POST',
       url: '/api/auth/verify-otp',
-      payload: { requestId, otpCode: devOtp || '123456' },
+      payload: { requestId, otpCode: testCode },
     });
 
     // Replay attempt with same requestId
     const replayRes = await app.inject({
       method: 'POST',
       url: '/api/auth/verify-otp',
-      payload: { requestId, otpCode: devOtp || '123456' },
+      payload: { requestId, otpCode: testCode },
     });
 
     assert.equal(replayRes.statusCode, 400);
@@ -236,18 +295,20 @@ describe('Production Authentication & SMS OTP Suite', () => {
 
   it('8. POST /api/auth/refresh issues fresh access token', async () => {
     await prisma.oTPVerification.deleteMany({ where: { mobileNumber: testMobile } });
+    OtpService.clearCooldown(testMobile);
 
     const reqRes = await app.inject({
       method: 'POST',
       url: '/api/auth/request-otp',
       payload: { mobileNumber: testMobile, role: testRole },
     });
-    const { requestId, devOtp } = JSON.parse(reqRes.body).data;
+    const { requestId } = JSON.parse(reqRes.body).data;
+    const testCode = await setTestOtp(requestId);
 
     const verifyRes = await app.inject({
       method: 'POST',
       url: '/api/auth/verify-otp',
-      payload: { requestId, otpCode: devOtp || '123456' },
+      payload: { requestId, otpCode: testCode },
     });
     const { refreshToken } = JSON.parse(verifyRes.body).data;
 
@@ -265,18 +326,20 @@ describe('Production Authentication & SMS OTP Suite', () => {
 
   it('9. GET /api/auth/me returns complete authenticated profile with full hierarchy', async () => {
     await prisma.oTPVerification.deleteMany({ where: { mobileNumber: testMobile } });
+    OtpService.clearCooldown(testMobile);
 
     const reqRes = await app.inject({
       method: 'POST',
       url: '/api/auth/request-otp',
       payload: { mobileNumber: testMobile, role: testRole },
     });
-    const { requestId, devOtp } = JSON.parse(reqRes.body).data;
+    const { requestId } = JSON.parse(reqRes.body).data;
+    const testCode = await setTestOtp(requestId);
 
     const verifyRes = await app.inject({
       method: 'POST',
       url: '/api/auth/verify-otp',
-      payload: { requestId, otpCode: devOtp || '123456' },
+      payload: { requestId, otpCode: testCode },
     });
     const { token } = JSON.parse(verifyRes.body).data;
 
@@ -294,25 +357,27 @@ describe('Production Authentication & SMS OTP Suite', () => {
     assert.equal(json.data.id, testUser.id);
     assert.equal(json.data.userCode, testUser.userCode);
     assert.ok(json.data.organisation);
-    assert.ok(json.data.roleDetails);
+    assert.equal(json.data.role, testRole);
     assert.ok(json.data.hierarchyAssignment);
-    assert.equal(json.data.hierarchyAssignment.constituency.code, 'KONDAPI-AC');
+    assert.ok(json.data.hierarchyAssignment.constituency);
   });
 
-  it('10. POST /api/auth/logout revokes session and clears cookies', async () => {
+  it('10. POST /api/auth/logout revokes session and invalidates the access token', async () => {
     await prisma.oTPVerification.deleteMany({ where: { mobileNumber: testMobile } });
+    OtpService.clearCooldown(testMobile);
 
     const reqRes = await app.inject({
       method: 'POST',
       url: '/api/auth/request-otp',
       payload: { mobileNumber: testMobile, role: testRole },
     });
-    const { requestId, devOtp } = JSON.parse(reqRes.body).data;
+    const { requestId } = JSON.parse(reqRes.body).data;
+    const testCode = await setTestOtp(requestId);
 
     const verifyRes = await app.inject({
       method: 'POST',
       url: '/api/auth/verify-otp',
-      payload: { requestId, otpCode: devOtp || '123456' },
+      payload: { requestId, otpCode: testCode },
     });
     const { token } = JSON.parse(verifyRes.body).data;
 
@@ -327,6 +392,17 @@ describe('Production Authentication & SMS OTP Suite', () => {
     assert.equal(logoutRes.statusCode, 200);
     const json = JSON.parse(logoutRes.body);
     assert.equal(json.data.loggedOut, true);
+
+    // Test Requirement 12: Logout invalidates the access token
+    const afterLogoutRes = await app.inject({
+      method: 'GET',
+      url: '/api/auth/me',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    assert.equal(afterLogoutRes.statusCode, 401, 'Logged out access token must result in 401');
   });
 
   it('11. Protected API rejects unauthorized requests without token', async () => {

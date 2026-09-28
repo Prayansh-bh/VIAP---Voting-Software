@@ -18,12 +18,43 @@ const createOrgSchema = z.object({
 export async function organisationsRoutes(fastify: FastifyInstance) {
   fastify.addHook('preHandler', authenticate);
 
-  fastify.get('/', async (_req: FastifyRequest, reply: FastifyReply) => {
-    const orgs = await prisma.organisation.findMany({
-      include: { parties: true, states: true },
-      orderBy: { name: 'asc' },
-    });
-    return reply.send(successResponse(orgs));
+  fastify.get('/', async (req: FastifyRequest<{ Querystring: { page?: string; limit?: string } }>, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN || req.user?.role === RoleType.HIGH_COMMAND;
+    const where: Prisma.OrganisationWhereInput = {};
+
+    // Strict multi-tenant isolation: non-superadmin accounts can only view their own organisation
+    if (!isSuperAdmin) {
+      if (req.user?.organisationId) {
+        where.id = req.user.organisationId;
+      } else {
+        return reply.send(successResponse([]));
+      }
+    }
+
+    const page = Math.max(1, Number(req.query?.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query?.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    const [orgs, total] = await Promise.all([
+      prisma.organisation.findMany({
+        where,
+        include: { parties: true, states: true },
+        orderBy: { name: 'asc' },
+        skip,
+        take: limit,
+      }),
+      prisma.organisation.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit) || 1;
+    return reply.send(successResponse(orgs, undefined, {
+      total,
+      page,
+      limit,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    }));
   });
 
   fastify.post(
