@@ -36,22 +36,20 @@ interface SwitcherItem {
   path: string;
   icon: React.ComponentType<{ className?: string }>;
   color: string;
+  isExternal?: boolean;
 }
 
 const SWITCHER_ITEMS: SwitcherItem[] = [
   // System & Management
   { role: 'ROLES', category: 'system', label: 'Role Command Selection', shortLabel: 'Role Center', subtitle: 'Universal Role Gateway', path: '/roles', icon: LayoutGrid, color: '#10b981' },
-  { role: 'ROLES', category: 'system', label: 'CMS Platform Admin', shortLabel: 'Platform Admin', subtitle: 'System Governance', path: '/platform-admin', icon: Settings, color: '#f59e0b' },
-  { role: 'ROLES', category: 'system', label: 'Approval Management Engine', shortLabel: 'Approvals', subtitle: 'User & Data Governance', path: '/approvals', icon: UserCheck, color: '#6366f1' },
-  { role: 'ROLES', category: 'system', label: 'Data Ingestion & Import', shortLabel: 'Assign Data', subtitle: 'Voter & Geographic Rolls', path: '/assign-data', icon: Database, color: '#06b6d4' },
-  { role: 'ROLES', category: 'system', label: 'Cadre & Incharge Deployment', shortLabel: 'Assign Incharges', subtitle: 'Hierarchy Assignment', path: '/assign-incharges', icon: UserCheck, color: '#ec4899' },
-  
+  { role: 'ROLES', category: 'system', label: 'CMS & Platform Admin (Port 3001)', shortLabel: 'Admin Panel', subtitle: 'Dedicated CMS Console', path: 'http://localhost:3001', icon: Settings, color: '#f59e0b', isExternal: true },
+
   // Apex Command
   { role: 'STATE_ADMIN', levelKey: 'STATE', category: 'apex', label: 'State Incharge (Apex)', shortLabel: 'State', subtitle: 'Statewide War Room', path: '/state', icon: Building, color: '#f59e0b' },
   { role: 'ZONE_INCHARGE', levelKey: 'ZONE', category: 'apex', label: 'Zone Coordinator', shortLabel: 'Zone', subtitle: 'Multi-Parliament Command', path: '/zone', icon: Building, color: '#8b5cf6' },
   { role: 'PARLIAMENT_INCHARGE', levelKey: 'PARLIAMENT', category: 'apex', label: 'Parliament Incharge (MP)', shortLabel: 'Parliament', subtitle: 'Parliamentary Constituency', path: '/parliament', icon: Crown, color: '#3b82f6' },
   { role: 'CONSTITUENCY_INCHARGE', levelKey: 'DISTRICT', category: 'apex', label: 'District Incharge', shortLabel: 'District', subtitle: 'District Level DCC Command', path: '/constituency', icon: Building, color: '#a855f7' },
-  
+
   // Field Command
   { role: 'CONSTITUENCY_INCHARGE', levelKey: 'CONSTITUENCY', category: 'field', label: 'Constituency Incharge (MLA)', shortLabel: 'Constituency', subtitle: 'Assembly Command Center', path: '/constituency', icon: Crown, color: '#06b6d4' },
   { role: 'MANDAL_INCHARGE', levelKey: 'MANDAL', category: 'field', label: 'Mandal President', shortLabel: 'Mandal', subtitle: 'Mandal Level Operations', path: '/mandal', icon: Layers, color: '#10b981' },
@@ -114,7 +112,7 @@ export default function RoleQuickSwitcher({
           return parsed.activeHierarchyLevels;
         }
       }
-    } catch {}
+    } catch { }
     return ['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
   }, [config.activeHierarchyLevels]);
 
@@ -187,11 +185,10 @@ export default function RoleQuickSwitcher({
           {/* Main Station Switcher Button */}
           <button
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shadow-xs ${
-              isDropdownOpen
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shadow-xs ${isDropdownOpen
                 ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold shadow-md shadow-amber-400/20'
                 : 'bg-slate-900/90 hover:bg-slate-800 text-slate-200 border-slate-700/80 hover:border-slate-600'
-            }`}
+              }`}
             title="Click to switch between command stations & modules"
           >
             <div className={`w-5 h-5 rounded-md flex items-center justify-center ${isDropdownOpen ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-800 text-amber-400'}`}>
@@ -207,11 +204,10 @@ export default function RoleQuickSwitcher({
           <div className="hidden lg:flex items-center gap-1.5">
             <button
               onClick={() => { window.location.hash = '/roles'; }}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition border cursor-pointer ${
-                currentPath === '/roles' || currentPath === '/app'
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition border cursor-pointer ${currentPath === '/roles' || currentPath === '/app'
                   ? 'bg-amber-400/20 text-amber-300 border-amber-400/40'
                   : 'bg-slate-900/60 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800'
-              }`}
+                }`}
             >
               Role Gateway
             </button>
@@ -261,11 +257,10 @@ export default function RoleQuickSwitcher({
                       <button
                         key={item.label}
                         onClick={() => handleSelect(item)}
-                        className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${
-                          isCurrent
+                        className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${isCurrent
                             ? 'bg-amber-400/15 text-white border border-amber-400/40 font-bold'
                             : 'hover:bg-slate-800/80 text-slate-300 hover:text-white border border-transparent'
-                        }`}
+                          }`}
                       >
                         <div
                           className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
@@ -299,11 +294,10 @@ export default function RoleQuickSwitcher({
                       <button
                         key={item.label}
                         onClick={() => handleSelect(item)}
-                        className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${
-                          isCurrent
+                        className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${isCurrent
                             ? 'bg-amber-400/15 text-white border border-amber-400/40 font-bold'
                             : 'hover:bg-slate-800/80 text-slate-300 hover:text-white border border-transparent'
-                        }`}
+                          }`}
                       >
                         <div
                           className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
@@ -337,11 +331,10 @@ export default function RoleQuickSwitcher({
                       <button
                         key={item.label}
                         onClick={() => handleSelect(item)}
-                        className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${
-                          isCurrent
+                        className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${isCurrent
                             ? 'bg-amber-400/15 text-white border border-amber-400/40 font-bold'
                             : 'hover:bg-slate-800/80 text-slate-300 hover:text-white border border-transparent'
-                        }`}
+                          }`}
                       >
                         <div
                           className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"

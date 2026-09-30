@@ -25,6 +25,7 @@ import PlatformAdminPortal from './components/PlatformAdminPortal';
 import AssignDataModule from './components/cms/AssignDataModule';
 import AssignInchargesModule from './components/cms/AssignInchargesModule';
 import ApprovalManagementModule from './components/cms/ApprovalManagementModule';
+import AdminPanelHandoff from './components/AdminPanelHandoff';
 import LandingPage from './components/landing/LandingPage';
 import { Sliders } from 'lucide-react';
 import { CommandRole, RoleType, UserSession } from './types';
@@ -385,59 +386,11 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
       );
     }
 
-    // 2. CMS Platform Admin & Assignment routes
-    if (currentPath === '/platform-admin' || currentPath === '/admin') {
-      return <PlatformAdminPortal />;
-    }
-
-    if (currentPath === '/approvals') {
+    // 2. Dedicated CMS & Admin Panel Hand-off (running on http://localhost:3001)
+    if (isCmsRoute) {
       return (
-        <ApprovalManagementModule
-          onBack={() => {
-            window.location.hash = '/platform-admin';
-          }}
-        />
-      );
-    }
-
-    if (currentPath === '/assign-data') {
-      return (
-        <AssignDataModule
-          onNavigateToIncharges={() => {
-            window.location.hash = '/assign-incharges';
-          }}
-          onClose={() => {
-            window.location.hash = '/platform-admin';
-          }}
-        />
-      );
-    }
-
-    if (currentPath === '/assign-incharges') {
-      return (
-        <AssignInchargesModule
-          onNavigateToData={() => {
-            window.location.hash = '/assign-data';
-          }}
-          onClose={() => {
-            window.location.hash = '/platform-admin';
-          }}
-        />
-      );
-    }
-
-    // 3. CMS Studio
-    if (currentPath === '/cms') {
-      return (
-        <CmsStudio
-          isOpen={true}
-          mode={isPartyCreated ? 'editor' : 'setup'}
-          onClose={() => {
-            window.location.hash = '/roles';
-          }}
-          onOpenRoleModules={() => {
-            setIsPartyCreated(true);
-            localStorage.setItem('kdp_party_created', 'true');
+        <AdminPanelHandoff
+          onReturnToPartyApp={() => {
             window.location.hash = '/roles';
           }}
         />
