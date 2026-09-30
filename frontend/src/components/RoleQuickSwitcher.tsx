@@ -28,6 +28,7 @@ interface RoleQuickSwitcherProps {
 
 interface SwitcherItem {
   role: RoleType | 'ROLES';
+  levelKey?: string;
   category: 'apex' | 'field' | 'system';
   label: string;
   shortLabel: string;
@@ -41,20 +42,22 @@ const SWITCHER_ITEMS: SwitcherItem[] = [
   // System & Management
   { role: 'ROLES', category: 'system', label: 'Role Command Selection', shortLabel: 'Role Center', subtitle: 'Universal Role Gateway', path: '/roles', icon: LayoutGrid, color: '#10b981' },
   { role: 'ROLES', category: 'system', label: 'CMS Platform Admin', shortLabel: 'Platform Admin', subtitle: 'System Governance', path: '/platform-admin', icon: Settings, color: '#f59e0b' },
+  { role: 'ROLES', category: 'system', label: 'Approval Management Engine', shortLabel: 'Approvals', subtitle: 'User & Data Governance', path: '/approvals', icon: UserCheck, color: '#6366f1' },
   { role: 'ROLES', category: 'system', label: 'Data Ingestion & Import', shortLabel: 'Assign Data', subtitle: 'Voter & Geographic Rolls', path: '/assign-data', icon: Database, color: '#06b6d4' },
   { role: 'ROLES', category: 'system', label: 'Cadre & Incharge Deployment', shortLabel: 'Assign Incharges', subtitle: 'Hierarchy Assignment', path: '/assign-incharges', icon: UserCheck, color: '#ec4899' },
   
   // Apex Command
-  { role: 'STATE_ADMIN', category: 'apex', label: 'State Incharge (Apex)', shortLabel: 'State', subtitle: 'Statewide War Room', path: '/state', icon: Building, color: '#f59e0b' },
-  { role: 'ZONE_INCHARGE', category: 'apex', label: 'Zone Coordinator', shortLabel: 'Zone', subtitle: 'Multi-Parliament Command', path: '/zone', icon: Building, color: '#8b5cf6' },
-  { role: 'PARLIAMENT_INCHARGE', category: 'apex', label: 'Parliament Incharge (MP)', shortLabel: 'Parliament', subtitle: 'Parliamentary Constituency', path: '/parliament', icon: Crown, color: '#3b82f6' },
+  { role: 'STATE_ADMIN', levelKey: 'STATE', category: 'apex', label: 'State Incharge (Apex)', shortLabel: 'State', subtitle: 'Statewide War Room', path: '/state', icon: Building, color: '#f59e0b' },
+  { role: 'ZONE_INCHARGE', levelKey: 'ZONE', category: 'apex', label: 'Zone Coordinator', shortLabel: 'Zone', subtitle: 'Multi-Parliament Command', path: '/zone', icon: Building, color: '#8b5cf6' },
+  { role: 'PARLIAMENT_INCHARGE', levelKey: 'PARLIAMENT', category: 'apex', label: 'Parliament Incharge (MP)', shortLabel: 'Parliament', subtitle: 'Parliamentary Constituency', path: '/parliament', icon: Crown, color: '#3b82f6' },
+  { role: 'CONSTITUENCY_INCHARGE', levelKey: 'DISTRICT', category: 'apex', label: 'District Incharge', shortLabel: 'District', subtitle: 'District Level DCC Command', path: '/constituency', icon: Building, color: '#a855f7' },
   
   // Field Command
-  { role: 'CONSTITUENCY_INCHARGE', category: 'field', label: 'Constituency Incharge (MLA)', shortLabel: 'Constituency', subtitle: 'Assembly Command Center', path: '/constituency', icon: Crown, color: '#06b6d4' },
-  { role: 'MANDAL_INCHARGE', category: 'field', label: 'Mandal President', shortLabel: 'Mandal', subtitle: 'Mandal Level Operations', path: '/mandal', icon: Layers, color: '#10b981' },
-  { role: 'VILLAGE_INCHARGE', category: 'field', label: 'Village Incharge', shortLabel: 'Village', subtitle: 'Village Polling Command', path: '/village', icon: Home, color: '#84cc16' },
-  { role: 'BOOTH_PRESIDENT', category: 'field', label: 'Booth President', shortLabel: 'Booth', subtitle: 'Polling Station Defense', path: '/booth', icon: Vote, color: '#eab308' },
-  { role: 'VOTER_100_INCHARGE', category: 'field', label: '100-Voter Incharge', shortLabel: '100-Voter', subtitle: 'Micro-Cluster Outreach', path: '/100-voter', icon: Users, color: '#f97316' },
+  { role: 'CONSTITUENCY_INCHARGE', levelKey: 'CONSTITUENCY', category: 'field', label: 'Constituency Incharge (MLA)', shortLabel: 'Constituency', subtitle: 'Assembly Command Center', path: '/constituency', icon: Crown, color: '#06b6d4' },
+  { role: 'MANDAL_INCHARGE', levelKey: 'MANDAL', category: 'field', label: 'Mandal President', shortLabel: 'Mandal', subtitle: 'Mandal Level Operations', path: '/mandal', icon: Layers, color: '#10b981' },
+  { role: 'VILLAGE_INCHARGE', levelKey: 'VILLAGE', category: 'field', label: 'Village Incharge', shortLabel: 'Village', subtitle: 'Village Polling Command', path: '/village', icon: Home, color: '#84cc16' },
+  { role: 'BOOTH_PRESIDENT', levelKey: 'BOOTH', category: 'field', label: 'Booth President', shortLabel: 'Booth', subtitle: 'Polling Station Defense', path: '/booth', icon: Vote, color: '#eab308' },
+  { role: 'VOTER_100_INCHARGE', levelKey: 'VOTER_GROUP', category: 'field', label: '100-Voter Incharge', shortLabel: '100-Voter', subtitle: 'Micro-Cluster Outreach', path: '/100-voter', icon: Users, color: '#f97316' },
 ];
 
 const roleLevelMap: Record<string, string> = {
@@ -112,12 +115,12 @@ export default function RoleQuickSwitcher({
         }
       }
     } catch {}
-    return ['STATE', 'ZONE', 'PARLIAMENT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
+    return ['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
   }, [config.activeHierarchyLevels]);
 
   const visibleItems = useMemo(() => {
     return SWITCHER_ITEMS.filter((item) => {
-      const level = roleLevelMap[item.role];
+      const level = item.levelKey || roleLevelMap[item.role];
       if (!level) return true; // System routes
       return enabledLevels.includes(level);
     });

@@ -119,6 +119,36 @@ export async function applicationsRoutes(fastify: FastifyInstance) {
     ApplicationsController.deleteIncharge,
   );
 
+  fastify.post(
+    '/:applicationId/incharges/:id/transfer',
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
+    ApplicationsController.transferIncharge,
+  );
+
+  fastify.post(
+    '/:applicationId/incharges/:id/replace',
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
+    ApplicationsController.replaceIncharge,
+  );
+
+  fastify.patch(
+    '/:applicationId/incharges/:id/status',
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
+    ApplicationsController.updateInchargeStatus,
+  );
+
+  fastify.post(
+    '/:applicationId/incharges/:id/reset-credentials',
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
+    ApplicationsController.resetCredentials,
+  );
+
+  fastify.get(
+    '/:applicationId/incharges/performance',
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
+    ApplicationsController.getInchargePerformance,
+  );
+
   // 6. Voters, Booths & Groups (Field APIs & Scoped access)
   fastify.get(
     '/:applicationId/voters',

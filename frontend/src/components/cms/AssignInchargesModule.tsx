@@ -19,6 +19,11 @@ import {
   Phone,
   Mail,
   UserCheck,
+  KeyRound,
+  ArrowRightLeft,
+  UserX,
+  BarChart3,
+  X,
 } from 'lucide-react';
 import {
   fetchCmsApplications,
@@ -27,6 +32,11 @@ import {
   fetchApplicationIncharges,
   assignApplicationIncharge,
   deleteApplicationIncharge,
+  transferApplicationIncharge,
+  replaceApplicationIncharge,
+  updateInchargeStatusApi,
+  resetInchargeCredentialsApi,
+  fetchInchargePerformanceApi,
   ApplicationHierarchy,
   InchargeRecord,
 } from '../../lib/api/applications.api';
@@ -89,6 +99,23 @@ export default function AssignInchargesModule({
   const [searchQuery, setSearchQuery] = useState('');
   const [levelFilter, setLevelFilter] = useState<string>('ALL');
 
+  // Performance & Modal States
+  const [performanceStats, setPerformanceStats] = useState<any>(null);
+  const [transferModalIncharge, setTransferModalIncharge] = useState<InchargeRecord | null>(null);
+  const [replaceModalIncharge, setReplaceModalIncharge] = useState<InchargeRecord | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  // Transfer fields
+  const [transferUnitLevel, setTransferUnitLevel] = useState<string>('BOOTH');
+  const [transferUnitId, setTransferUnitId] = useState<string>('');
+  const [transferReason, setTransferReason] = useState<string>('Jurisdiction Reallocation');
+
+  // Replace fields
+  const [replaceName, setReplaceName] = useState<string>('');
+  const [replaceMobile, setReplaceMobile] = useState<string>('');
+  const [replaceEmail, setReplaceEmail] = useState<string>('');
+  const [replaceReason, setReplaceReason] = useState<string>('Cadre Replacement & Handover');
+
   // 1. Load CMS applications on mount
   useEffect(() => {
     async function loadApps() {
@@ -104,6 +131,12 @@ export default function AssignInchargesModule({
     }
     loadApps();
   }, []);
+
+  useEffect(() => {
+    if (selectedAppId) {
+      fetchInchargePerformanceApi(selectedAppId).then((st) => setPerformanceStats(st)).catch(() => {});
+    }
+  }, [selectedAppId]);
 
   // 2. Load hierarchy and incharges when selectedAppId changes
   useEffect(() => {
@@ -329,8 +362,76 @@ export default function AssignInchargesModule({
     try {
       await deleteApplicationIncharge(selectedAppId, inchargeId);
       loadIncharges(selectedAppId);
+      setActionSuccess(`Assignment revoked for ${name}.`);
     } catch (err: any) {
       alert(`Error revoking incharge: ${err.message}`);
+    }
+  };
+
+  // Transfer incharge
+  const handleExecuteTransfer = async () => {
+    if (!transferModalIncharge || !transferUnitId) {
+      alert('Please enter or select a target jurisdiction unit ID');
+      return;
+    }
+    try {
+      await transferApplicationIncharge(selectedAppId, transferModalIncharge.id, {
+        targetUnitLevel: transferUnitLevel,
+        targetUnitId: transferUnitId,
+        reason: transferReason,
+      });
+      setActionSuccess(`Incharge ${transferModalIncharge.userName} transferred to ${transferUnitLevel} jurisdiction successfully.`);
+      setTransferModalIncharge(null);
+      loadIncharges(selectedAppId);
+    } catch (err: any) {
+      alert(err.message || 'Transfer failed');
+    }
+  };
+
+  // Replace incharge
+  const handleExecuteReplace = async () => {
+    if (!replaceModalIncharge || !replaceName.trim() || !replaceMobile.trim()) {
+      alert('Replacement Incharge Full Name and Mobile Number are required.');
+      return;
+    }
+    try {
+      await replaceApplicationIncharge(selectedAppId, replaceModalIncharge.id, {
+        name: replaceName.trim(),
+        mobileNumber: replaceMobile.trim(),
+        email: replaceEmail.trim() || undefined,
+        reason: replaceReason,
+      });
+      setActionSuccess(`Incharge ${replaceModalIncharge.userName} successfully replaced with ${replaceName}.`);
+      setReplaceModalIncharge(null);
+      setReplaceName('');
+      setReplaceMobile('');
+      loadIncharges(selectedAppId);
+    } catch (err: any) {
+      alert(err.message || 'Replacement failed');
+    }
+  };
+
+  // Toggle incharge status
+  const handleToggleStatus = async (inc: InchargeRecord) => {
+    const nextStatus = inc.status !== 'ACTIVE';
+    try {
+      await updateInchargeStatusApi(selectedAppId, inc.id, nextStatus);
+      setActionSuccess(`Status for ${inc.userName} updated to ${nextStatus ? 'ACTIVE' : 'INACTIVE'}.`);
+      loadIncharges(selectedAppId);
+    } catch (err: any) {
+      alert(err.message || 'Failed to update status');
+    }
+  };
+
+  // Reset incharge credentials
+  const handleResetCredentials = async (inc: InchargeRecord) => {
+    if (!confirm(`Reset credentials & authorized devices for ${inc.userName} (${inc.mobileNumber})?`)) return;
+    try {
+      const res = await resetInchargeCredentialsApi(selectedAppId, inc.id);
+      alert(res.message || 'Credentials reset successfully.');
+      setActionSuccess(`Credentials reset for ${inc.userName}. They can now log in via fresh OTP.`);
+    } catch (err: any) {
+      alert(err.message || 'Reset credentials failed');
     }
   };
 
@@ -757,13 +858,54 @@ export default function AssignInchargesModule({
                             {new Date(inc.assignedAt).toLocaleDateString('en-IN')}
                           </td>
                           <td className="py-2.5 px-3 text-right">
-                            <button
-                              onClick={() => handleDeleteIncharge(inc.id, inc.userName)}
-                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer"
-                              title="Revoke Incharge Assignment"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                onClick={() => {
+                                  setTransferModalIncharge(inc);
+                                  setTransferUnitLevel(inc.jurisdictionType || 'BOOTH');
+                                }}
+                                className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
+                                title="Transfer Incharge to another jurisdiction"
+                              >
+                                <ArrowRightLeft className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setReplaceModalIncharge(inc);
+                                  setReplaceName('');
+                                  setReplaceMobile('');
+                                }}
+                                className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                                title="Replace with new Incharge"
+                              >
+                                <UserCheck className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleResetCredentials(inc)}
+                                className="p-1.5 text-slate-500 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition"
+                                title="Reset Login Credentials & Devices"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleToggleStatus(inc)}
+                                className={`p-1.5 rounded-lg transition ${
+                                  inc.status === 'ACTIVE'
+                                    ? 'text-slate-500 hover:text-amber-700 hover:bg-amber-50'
+                                    : 'text-slate-400 hover:text-emerald-700 hover:bg-emerald-50'
+                                }`}
+                                title={inc.status === 'ACTIVE' ? 'Deactivate Incharge' : 'Activate Incharge'}
+                              >
+                                {inc.status === 'ACTIVE' ? <UserX className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                              </button>
+                              <button
+                                onClick={() => handleDeleteIncharge(inc.id, inc.userName)}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer"
+                                title="Revoke Incharge Assignment"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -774,6 +916,151 @@ export default function AssignInchargesModule({
             </div>
           </div>
         </div>
+
+        {/* Transfer Incharge Modal */}
+        {transferModalIncharge && (
+          <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 border border-slate-200 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <ArrowRightLeft className="w-5 h-5 text-amber-600" />
+                  <h3 className="font-extrabold text-slate-900 text-sm">Transfer Incharge</h3>
+                </div>
+                <button onClick={() => setTransferModalIncharge(null)} className="text-slate-400 hover:text-slate-700">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="text-xs text-slate-600 space-y-1">
+                <div>Transferring: <strong className="text-slate-900">{transferModalIncharge.userName}</strong> ({transferModalIncharge.inchargeType})</div>
+                <div>Current Area: <span className="font-mono">{transferModalIncharge.jurisdictionName}</span></div>
+              </div>
+
+              <div className="space-y-3 pt-1">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Target Level</label>
+                  <select
+                    value={transferUnitLevel}
+                    onChange={(e) => setTransferUnitLevel(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold text-slate-800"
+                  >
+                    <option value="BOOTH">Polling Booth</option>
+                    <option value="VILLAGE">Village / Ward</option>
+                    <option value="MANDAL">Mandal / Block</option>
+                    <option value="CONSTITUENCY">Constituency</option>
+                    <option value="VOTER_GROUP">100-Voter Cluster</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Target Unit / Jurisdiction ID *</label>
+                  <input
+                    type="text"
+                    placeholder="Enter target jurisdiction unit ID..."
+                    value={transferUnitId}
+                    onChange={(e) => setTransferUnitId(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold text-slate-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Reason for Transfer</label>
+                  <input
+                    type="text"
+                    value={transferReason}
+                    onChange={(e) => setTransferReason(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold text-slate-800"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button onClick={() => setTransferModalIncharge(null)} className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 border hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button onClick={handleExecuteTransfer} className="px-4 py-2 rounded-xl text-xs font-black uppercase text-white bg-amber-600 hover:bg-amber-700">
+                  Confirm Transfer
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Replace Incharge Modal */}
+        {replaceModalIncharge && (
+          <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 border border-slate-200 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="w-5 h-5 text-blue-600" />
+                  <h3 className="font-extrabold text-slate-900 text-sm">Replace Incharge</h3>
+                </div>
+                <button onClick={() => setReplaceModalIncharge(null)} className="text-slate-400 hover:text-slate-700">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="text-xs text-slate-600 space-y-1">
+                <div>Replacing: <strong className="text-slate-900">{replaceModalIncharge.userName}</strong></div>
+                <div>Jurisdiction: <span className="font-mono">{replaceModalIncharge.jurisdictionName} ({replaceModalIncharge.jurisdictionType})</span></div>
+              </div>
+
+              <div className="space-y-3 pt-1">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Replacement Full Name *</label>
+                  <input
+                    type="text"
+                    placeholder="Enter new incharge full name..."
+                    value={replaceName}
+                    onChange={(e) => setReplaceName(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold text-slate-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">10-Digit Mobile Number *</label>
+                  <input
+                    type="tel"
+                    placeholder="e.g. 9848011222"
+                    value={replaceMobile}
+                    onChange={(e) => setReplaceMobile(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold text-slate-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Email Address (Optional)</label>
+                  <input
+                    type="email"
+                    placeholder="incharge@party.org"
+                    value={replaceEmail}
+                    onChange={(e) => setReplaceEmail(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold text-slate-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Replacement Reason</label>
+                  <input
+                    type="text"
+                    value={replaceReason}
+                    onChange={(e) => setReplaceReason(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold text-slate-800"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button onClick={() => setReplaceModalIncharge(null)} className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 border hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button onClick={handleExecuteReplace} className="px-4 py-2 rounded-xl text-xs font-black uppercase text-white bg-blue-600 hover:bg-blue-700">
+                  Confirm Replacement
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

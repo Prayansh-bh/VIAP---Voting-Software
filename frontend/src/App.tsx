@@ -24,6 +24,7 @@ import RoleQuickSwitcher from './components/RoleQuickSwitcher';
 import PlatformAdminPortal from './components/PlatformAdminPortal';
 import AssignDataModule from './components/cms/AssignDataModule';
 import AssignInchargesModule from './components/cms/AssignInchargesModule';
+import ApprovalManagementModule from './components/cms/ApprovalManagementModule';
 import LandingPage from './components/landing/LandingPage';
 import { Sliders } from 'lucide-react';
 import { CommandRole, RoleType, UserSession } from './types';
@@ -53,6 +54,7 @@ const ROUTE_BY_ROLE: Record<RoleType, string> = {
 };
 
 export default function App({ initialPath }: { initialPath?: string } = {}) {
+  const { config } = useCms();
   const [isPartyCreated, setIsPartyCreated] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('kdp_party_created') === 'true';
@@ -198,6 +200,33 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     localStorage.removeItem('kdp_active_session');
   }, [activeSession]);
 
+  const roleLevelMap: Partial<Record<RoleType, string>> = {
+    STATE_ADMIN: 'STATE',
+    ZONE_INCHARGE: 'ZONE',
+    PARLIAMENT_INCHARGE: 'PARLIAMENT',
+    CONSTITUENCY_INCHARGE: 'CONSTITUENCY',
+    MANDAL_INCHARGE: 'MANDAL',
+    VILLAGE_INCHARGE: 'VILLAGE',
+    BOOTH_PRESIDENT: 'BOOTH',
+    VOTER_100_INCHARGE: 'VOTER_GROUP',
+  };
+
+  const enabledLevels = useMemo(() => {
+    if (Array.isArray(config.activeHierarchyLevels) && config.activeHierarchyLevels.length > 0) {
+      return config.activeHierarchyLevels;
+    }
+    try {
+      const saved = localStorage.getItem('kdp_cms_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.activeHierarchyLevels) && parsed.activeHierarchyLevels.length > 0) {
+          return parsed.activeHierarchyLevels;
+        }
+      }
+    } catch {}
+    return ['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
+  }, [config.activeHierarchyLevels]);
+
   const currentRouteRole = useMemo<RoleType | null>(() => {
     if (currentPath.startsWith('/super-admin')) return 'SUPER_ADMIN';
     if (currentPath.startsWith('/state')) return 'STATE_ADMIN';
@@ -211,17 +240,24 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     return null;
   }, [currentPath]);
 
-  // Enforce session check on protected role routes:
-  // If user navigates to a role route without a valid session, redirect to login flow (/roles)
+  // Enforce session check & dynamic hierarchy level availability on protected role routes:
+  // If user navigates to a role route without a valid session or if that hierarchy level is disabled, redirect to login flow (/roles)
   useEffect(() => {
     if (currentRouteRole) {
+      const requiredLevel = roleLevelMap[currentRouteRole];
+      if (requiredLevel && !enabledLevels.includes(requiredLevel)) {
+        // Hierarchy level is disabled for this party application
+        window.location.hash = '/roles';
+        return;
+      }
+
       if (!activeSession) {
         window.location.hash = '/roles';
       } else if (activeSession.role !== currentRouteRole) {
         window.location.hash = ROUTE_BY_ROLE[activeSession.role] || '/roles';
       }
     }
-  }, [currentRouteRole, activeSession]);
+  }, [currentRouteRole, activeSession, enabledLevels]);
 
   const isLandingRoute = currentPath === '/' || currentPath === '' || currentPath === '/landing';
   const isRolesRoute = currentPath === '/app' || currentPath === '/app/' || currentPath === '/roles';
@@ -230,7 +266,8 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     currentPath === '/admin' ||
     currentPath === '/platform-admin' ||
     currentPath === '/assign-data' ||
-    currentPath === '/assign-incharges';
+    currentPath === '/assign-incharges' ||
+    currentPath === '/approvals';
   const isDashboardActive = Boolean(activeSession) && !isCmsRoute && !isLandingRoute && !isRolesRoute;
 
   const handleResetParty = () => {
@@ -328,8 +365,6 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     }
   };
 
-  const { config } = useCms();
-
   const renderView = () => {
     // 1. Landing Page (Default initial view)
     if (isLandingRoute) {
@@ -353,6 +388,16 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     // 2. CMS Platform Admin & Assignment routes
     if (currentPath === '/platform-admin' || currentPath === '/admin') {
       return <PlatformAdminPortal />;
+    }
+
+    if (currentPath === '/approvals') {
+      return (
+        <ApprovalManagementModule
+          onBack={() => {
+            window.location.hash = '/platform-admin';
+          }}
+        />
+      );
     }
 
     if (currentPath === '/assign-data') {

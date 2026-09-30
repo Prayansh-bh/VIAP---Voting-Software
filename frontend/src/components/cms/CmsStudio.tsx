@@ -76,11 +76,19 @@ const ALL_HIERARCHY_TIERS: HierarchyTierDefinition[] = [
     icon: Crown,
   },
   {
+    key: 'DISTRICT',
+    name: 'District / Zilla Level',
+    roleName: 'District Incharge',
+    subtitle: 'District DCC committee & multi-constituency oversight',
+    levelBadge: 'L4',
+    icon: Building,
+  },
+  {
     key: 'CONSTITUENCY',
     name: 'Assembly Constituency',
     roleName: 'Constituency Incharge',
     subtitle: 'Assembly MLA seat operations & mandal tracking',
-    levelBadge: 'L4',
+    levelBadge: 'L5',
     icon: Users,
   },
   {
@@ -88,7 +96,7 @@ const ALL_HIERARCHY_TIERS: HierarchyTierDefinition[] = [
     name: 'Mandal / Block',
     roleName: 'Mandal President',
     subtitle: 'Mandal cadre coordination, village clusters & issues',
-    levelBadge: 'L5',
+    levelBadge: 'L6',
     icon: Layers,
   },
   {
@@ -96,7 +104,7 @@ const ALL_HIERARCHY_TIERS: HierarchyTierDefinition[] = [
     name: 'Village / Ward',
     roleName: 'Village Incharge',
     subtitle: 'Gram panchayat ward intel & ground outreach',
-    levelBadge: 'L6',
+    levelBadge: 'L7',
     icon: Home,
   },
   {
@@ -104,7 +112,7 @@ const ALL_HIERARCHY_TIERS: HierarchyTierDefinition[] = [
     name: 'Polling Booth',
     roleName: 'Booth President',
     subtitle: 'Polling booth voting command & live voter turnout',
-    levelBadge: 'L7',
+    levelBadge: 'L8',
     icon: Vote,
   },
   {
@@ -112,7 +120,7 @@ const ALL_HIERARCHY_TIERS: HierarchyTierDefinition[] = [
     name: '100-Voter Cluster / Booth Committee',
     roleName: '100 Voter Incharge',
     subtitle: 'Door-to-door micro voter family committee',
-    levelBadge: 'L8',
+    levelBadge: 'L9',
     icon: Users,
   },
 ];

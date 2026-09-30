@@ -185,6 +185,46 @@ export class ApplicationsController {
     return reply.send(successResponse(data, 'Incharge assignment successfully revoked'));
   }
 
+  static async transferIncharge(req: FastifyRequest, reply: FastifyReply) {
+    const { applicationId, id } = req.params as { applicationId: string; id: string };
+    const body = (req.body || {}) as { targetUnitLevel: string; targetUnitId: string; reason?: string };
+    const data = await ApplicationsService.transferIncharge(
+      applicationId,
+      id,
+      body.targetUnitLevel,
+      body.targetUnitId,
+      body.reason,
+      req.user
+    );
+    return reply.send(successResponse(data, 'Incharge jurisdiction transferred successfully'));
+  }
+
+  static async replaceIncharge(req: FastifyRequest, reply: FastifyReply) {
+    const { applicationId, id } = req.params as { applicationId: string; id: string };
+    const body = (req.body || {}) as { name: string; mobileNumber: string; email?: string; reason?: string };
+    const data = await ApplicationsService.replaceIncharge(applicationId, id, body, req.user);
+    return reply.status(201).send(successResponse(data, 'Incharge replaced successfully'));
+  }
+
+  static async updateInchargeStatus(req: FastifyRequest, reply: FastifyReply) {
+    const { applicationId, id } = req.params as { applicationId: string; id: string };
+    const body = (req.body || {}) as { isActive: boolean };
+    const data = await ApplicationsService.updateInchargeStatus(applicationId, id, Boolean(body.isActive), req.user);
+    return reply.send(successResponse(data, `Incharge status updated to ${body.isActive ? 'ACTIVE' : 'INACTIVE'}`));
+  }
+
+  static async resetCredentials(req: FastifyRequest, reply: FastifyReply) {
+    const { applicationId, id } = req.params as { applicationId: string; id: string };
+    const data = await ApplicationsService.resetCredentials(applicationId, id, req.user);
+    return reply.send(successResponse(data, data.message));
+  }
+
+  static async getInchargePerformance(req: FastifyRequest, reply: FastifyReply) {
+    const { applicationId } = req.params as { applicationId: string };
+    const data = await ApplicationsService.getInchargePerformance(applicationId);
+    return reply.send(successResponse(data));
+  }
+
   static async getVoters(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId } = req.params as { applicationId: string };
     const query = req.query as any;

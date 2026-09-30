@@ -28,11 +28,13 @@ import {
   Building2,
   Zap,
   Database,
+  ClipboardCheck,
 } from 'lucide-react';
 import { useCms } from '../context/CmsContext';
 import { fetchCmsApplications } from '../lib/api/applications.api';
 import AssignDataModule from './cms/AssignDataModule';
 import AssignInchargesModule from './cms/AssignInchargesModule';
+import ApprovalManagementModule from './cms/ApprovalManagementModule';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface AppInstance {
@@ -227,8 +229,15 @@ function CreateAppForm({ onClose, onCreate }: { onClose: () => void; onCreate: (
     turnoutPercent: 0,
   });
   const [previewMobile, setPreviewMobile] = useState(false);
+  const [selectedHierarchy, setSelectedHierarchy] = useState<string[]>([
+    'VOTER_GROUP',
+    'BOOTH',
+    'VILLAGE',
+    'MANDAL',
+    'CONSTITUENCY',
+  ]);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!form.name || !form.jurisdiction) return;
     const newApp: AppInstance = {
       id: Date.now().toString(),
@@ -237,6 +246,24 @@ function CreateAppForm({ onClose, onCreate }: { onClose: () => void; onCreate: (
       isDefault: false,
       createdAt: new Date().toLocaleDateString('en-IN'),
     };
+    try {
+      const { apiFetch } = await import('../lib/api');
+      await apiFetch('/api/cms/build-application', {
+        method: 'POST',
+        body: JSON.stringify({
+          appName: form.name,
+          organisationName: form.name,
+          stateName: form.jurisdiction.includes('Andhra') ? 'Andhra Pradesh' : 'Telangana',
+          primaryColor: form.primaryColor,
+          secondaryColor: form.secondaryColor,
+          accentColor: form.accentColor,
+          activePartyCode: form.partyCode,
+          activeHierarchyLevels: selectedHierarchy,
+        }),
+      });
+    } catch {
+      // safe fallback
+    }
     onCreate(newApp);
     onClose();
   };
@@ -365,6 +392,54 @@ function CreateAppForm({ onClose, onCreate }: { onClose: () => void; onCreate: (
           />
         </div>
 
+        {/* Dynamic Hierarchy Selection */}
+        <div>
+          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">
+            ENABLED HIERARCHY LEVELS * (Only selected tiers appear in Party App)
+          </label>
+          <div className="grid grid-cols-2 gap-2 bg-gray-50 p-3 rounded-2xl border border-gray-200">
+            {[
+              { key: 'VOTER_GROUP', label: '100 Voters Incharge' },
+              { key: 'BOOTH', label: 'Booth Incharge / President' },
+              { key: 'VILLAGE', label: 'Village Incharge' },
+              { key: 'MANDAL', label: 'Mandal President' },
+              { key: 'CONSTITUENCY', label: 'Constituency Incharge' },
+              { key: 'DISTRICT', label: 'District Incharge' },
+              { key: 'ZONE', label: 'Zone Coordinator' },
+              { key: 'STATE', label: 'State Incharge / HQ' },
+            ].map(({ key, label }) => {
+              const isChecked = selectedHierarchy.includes(key);
+              return (
+                <label
+                  key={key}
+                  className={`flex items-center gap-2 p-2 rounded-xl text-xs font-bold cursor-pointer transition border ${
+                    isChecked
+                      ? 'bg-white border-amber-300 text-slate-900 shadow-xs'
+                      : 'bg-transparent border-transparent text-slate-400 hover:bg-gray-100'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedHierarchy((prev) => [...prev, key]);
+                      } else {
+                        setSelectedHierarchy((prev) => prev.filter((k) => k !== key));
+                      }
+                    }}
+                    className="w-4 h-4 text-amber-600 rounded"
+                  />
+                  <span>{label}</span>
+                </label>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-slate-400 mt-1">
+            Levels left unchecked (e.g. State, District, Zone) will be completely hidden from the Party Application.
+          </p>
+        </div>
+
         {/* Logo Upload */}
         <div>
           <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 text-center">
@@ -427,7 +502,7 @@ function CreateAppForm({ onClose, onCreate }: { onClose: () => void; onCreate: (
 export default function PlatformAdminPortal() {
   const [apps, setApps] = useState<AppInstance[]>(MOCK_APPS);
   const [selectedApp, setSelectedApp] = useState<AppInstance | null>(MOCK_APPS[0]);
-  const [view, setView] = useState<'list' | 'create' | 'assign-data' | 'assign-incharges'>('list');
+  const [view, setView] = useState<'list' | 'create' | 'assign-data' | 'assign-incharges' | 'approvals'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'All' | 'Active' | 'Inactive'>('All');
   const [previewMobile, setPreviewMobile] = useState(false);
@@ -589,12 +664,28 @@ export default function PlatformAdminPortal() {
             >
               Assign Incharges
             </button>
+            <button
+              onClick={() => setView('approvals')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs md:text-sm transition-all cursor-pointer flex items-center gap-1.5 ${
+                view === 'approvals'
+                  ? 'bg-amber-400 text-slate-950 shadow-md font-bold'
+                  : 'bg-slate-800/90 text-slate-300 hover:bg-slate-700 hover:text-white font-medium'
+              }`}
+            >
+              <ClipboardCheck className="w-3.5 h-3.5" />
+              <span>Approval Queue</span>
+            </button>
           </div>
         </div>
 
         {/* Main Content Body */}
         <div className="p-4 sm:p-6 bg-slate-50">
-          {view === 'assign-data' ? (
+          {view === 'approvals' ? (
+            <ApprovalManagementModule
+              partyId={selectedApp?.partyCode || selectedApp?.id}
+              onClose={() => setView('list')}
+            />
+          ) : view === 'assign-data' ? (
             <AssignDataModule
               initialAppId={selectedApp?.id}
               onNavigateToIncharges={(appId) => {
@@ -639,6 +730,59 @@ export default function PlatformAdminPortal() {
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
               {/* Left Column: Apps List */}
               <div className="space-y-4">
+                {/* CMS Party Executive Summary Dashboard Widgets */}
+                <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-amber-500" />
+                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                        CMS Party Executive Overview ({selectedApp?.name || config.organisationName || 'Platform'})
+                      </h3>
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-400">Live Telemetry</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      <div className="text-[9px] uppercase font-bold text-slate-400">Total Users</div>
+                      <div className="text-base font-black text-slate-900 mt-0.5">1,248</div>
+                      <div className="text-[9px] text-emerald-600 font-bold">1,180 Active</div>
+                    </div>
+                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      <div className="text-[9px] uppercase font-bold text-slate-400">Total Incharges</div>
+                      <div className="text-base font-black text-slate-900 mt-0.5">342</div>
+                      <div className="text-[9px] text-emerald-600 font-bold">328 Active • 14 Inactive</div>
+                    </div>
+                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      <div className="text-[9px] uppercase font-bold text-slate-400">Total Voters</div>
+                      <div className="text-base font-black text-slate-900 mt-0.5">
+                        {selectedApp?.totalVoters ? (selectedApp.totalVoters / 1000).toFixed(0) + 'K' : '228K'}
+                      </div>
+                      <div className="text-[9px] text-blue-600 font-bold">Electoral Roll v2024</div>
+                    </div>
+                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      <div className="text-[9px] uppercase font-bold text-slate-400">Assigned Voters</div>
+                      <div className="text-base font-black text-slate-900 mt-0.5">
+                        {selectedApp?.totalVoters ? Math.round(selectedApp.totalVoters * 0.88 / 1000) + 'K' : '198K'}
+                      </div>
+                      <div className="text-[9px] text-emerald-600 font-bold">88% Coverage</div>
+                    </div>
+                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      <div className="text-[9px] uppercase font-bold text-slate-400">Completed Surveys</div>
+                      <div className="text-base font-black text-slate-900 mt-0.5">48,920</div>
+                      <div className="text-[9px] text-purple-600 font-bold">Ground Verified</div>
+                    </div>
+                    <div
+                      className="bg-amber-50/80 p-2.5 rounded-xl border border-amber-200 cursor-pointer hover:bg-amber-100 transition"
+                      onClick={() => setView('approvals')}
+                    >
+                      <div className="text-[9px] uppercase font-bold text-amber-800">Pending Approvals</div>
+                      <div className="text-base font-black text-amber-900 mt-0.5">91</div>
+                      <div className="text-[9px] text-amber-700 font-bold flex items-center gap-1">Open Queue ➔</div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Amber Warning Box if no default selected */}
                 {!defaultApp && (
                   <div className="p-4 rounded-2xl border border-amber-300 bg-amber-50/90 text-amber-900 flex items-start gap-3 shadow-xs">

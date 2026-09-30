@@ -349,6 +349,71 @@ export async function deleteApplicationIncharge(
   return res.data || res;
 }
 
+export async function transferApplicationIncharge(
+  appId: string,
+  inchargeId: string,
+  payload: { targetUnitLevel: string; targetUnitId: string; reason?: string },
+): Promise<any> {
+  const res = await apiFetch<any>(
+    `/api/applications/${encodeURIComponent(appId)}/incharges/${encodeURIComponent(inchargeId)}/transfer`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+  return res.data || res;
+}
+
+export async function replaceApplicationIncharge(
+  appId: string,
+  inchargeId: string,
+  payload: { name: string; mobileNumber: string; email?: string; reason?: string },
+): Promise<any> {
+  const res = await apiFetch<any>(
+    `/api/applications/${encodeURIComponent(appId)}/incharges/${encodeURIComponent(inchargeId)}/replace`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+  return res.data || res;
+}
+
+export async function updateInchargeStatusApi(
+  appId: string,
+  inchargeId: string,
+  isActive: boolean,
+): Promise<any> {
+  const res = await apiFetch<any>(
+    `/api/applications/${encodeURIComponent(appId)}/incharges/${encodeURIComponent(inchargeId)}/status`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive }),
+    },
+  );
+  return res.data || res;
+}
+
+export async function resetInchargeCredentialsApi(
+  appId: string,
+  inchargeId: string,
+): Promise<any> {
+  const res = await apiFetch<any>(
+    `/api/applications/${encodeURIComponent(appId)}/incharges/${encodeURIComponent(inchargeId)}/reset-credentials`,
+    {
+      method: 'POST',
+    },
+  );
+  return res.data || res;
+}
+
+export async function fetchInchargePerformanceApi(appId: string): Promise<any> {
+  const res = await apiFetch<any>(
+    `/api/applications/${encodeURIComponent(appId)}/incharges/performance`,
+  );
+  return res.data || res;
+}
+
 export async function fetchApplicationSummary(appId: string): Promise<ApplicationSummaryKpis> {
   const res = await apiFetch<any>(`/api/applications/${encodeURIComponent(appId)}/reports/summary`);
   return res.data || res;

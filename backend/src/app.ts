@@ -22,6 +22,7 @@ import { cmsRoutes } from './modules/cms/cms.routes.js';
 import { auditRoutes } from './modules/audit/audit.routes.js';
 import { pollsRoutes } from './modules/polls/polls.routes.js';
 import { applicationsRoutes } from './modules/applications/applications.routes.js';
+import { approvalsRoutes } from './modules/approvals/approvals.routes.js';
 
 import { isOriginAllowed, getTrustedOrigins } from './common/origin.js';
 import { getRedisClient } from './lib/redis.js';
@@ -117,6 +118,7 @@ export function buildApp(): FastifyInstance {
   app.register(cmsRoutes, { prefix: '/api/cms' });
   app.register(auditRoutes, { prefix: '/api/audit' });
   app.register(applicationsRoutes, { prefix: '/api/applications' });
+  app.register(approvalsRoutes, { prefix: '/api/approvals' });
 
   return app;
 }

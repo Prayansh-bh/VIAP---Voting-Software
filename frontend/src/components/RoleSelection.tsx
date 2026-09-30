@@ -62,7 +62,17 @@ export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, 
         path: '/parliament',
         iconName: 'Crown',
       },
-      // 4. Constituency Incharge
+      // 4. District Incharge
+      {
+        id: 'CONSTITUENCY_INCHARGE' as any,
+        levelKey: 'DISTRICT',
+        name: t('DISTRICT', 'District Incharge'),
+        subtitle: `${config.stateName || 'District'} Zilla Command`,
+        description: 'District DCC committee & multi-constituency coordination.',
+        path: '/constituency',
+        iconName: 'Building',
+      },
+      // 5. Constituency Incharge
       {
         id: 'CONSTITUENCY_INCHARGE',
         levelKey: 'CONSTITUENCY',
