@@ -101,6 +101,27 @@ export async function authenticateAdminCredentials(mobileNumber: string, passcod
   return adminUser;
 }
 
+// ── Candidate Registration OTP Verification (WhatsApp / SMS) ──
+export async function requestRegistrationOtp(
+  mobileNumber: string,
+  channel: 'SMS' | 'WHATSAPP' = 'WHATSAPP'
+): Promise<{ requestId: string; expiresAt?: string; message?: string }> {
+  return request('/auth/register-otp', {
+    method: 'POST',
+    body: JSON.stringify({ mobileNumber, channel }),
+  });
+}
+
+export async function verifyRegistrationOtp(
+  requestId: string,
+  otpCode: string
+): Promise<{ verified: boolean; mobileNumber?: string; message?: string }> {
+  return request('/auth/verify-register-otp', {
+    method: 'POST',
+    body: JSON.stringify({ requestId, otpCode }),
+  });
+}
+
 // ── Applications (Multi-Party Engine) ──
 export async function fetchApplications(): Promise<AppInstance[]> {
   try {

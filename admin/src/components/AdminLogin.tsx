@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Shield, Phone, ArrowRight, KeyRound, Loader2 } from 'lucide-react';
+import { Shield, Phone, ArrowRight, KeyRound, Loader2, Zap } from 'lucide-react';
 import { AdminUser } from '../types';
 import { authenticateAdminCredentials, authenticateAdminRole } from '../lib/api';
 
@@ -121,6 +121,30 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
               </>
             )}
           </button>
+
+          {/* Instant 1-Click Demo Buttons for Admin */}
+          <div className="pt-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleDemoLogin('SUPER_ADMIN')}
+                disabled={loading}
+                className="flex-1 py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-300 font-bold text-[11px] transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                <span>Demo Super Admin</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDemoLogin('ORGANISER')}
+                disabled={loading}
+                className="flex-1 py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-300 font-bold text-[11px] transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Zap className="w-3.5 h-3.5 text-sky-400 fill-sky-400" />
+                <span>Demo Organiser</span>
+              </button>
+            </div>
+          </div>
         </form>
 
         {/* Security Notice & Default Authoritative Credentials */}

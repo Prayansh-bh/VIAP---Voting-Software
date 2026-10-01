@@ -3,22 +3,32 @@ import { getOrCreateDeviceId, setDeviceToken, clearDeviceToken } from '../authSt
 
 export async function requestOtpApi(
   mobileNumber: string,
-  role: string
-): Promise<{ requestId: string; expiresAt?: string; cooldownSeconds?: number; provider?: string }> {
-  return apiFetch<{ requestId: string; expiresAt?: string; cooldownSeconds?: number; provider?: string }>(
+  role: string,
+  channel: 'SMS' | 'WHATSAPP' = 'SMS',
+  options?: { devMode?: boolean; name?: string }
+): Promise<{ requestId: string; expiresAt?: string; cooldownSeconds?: number; provider?: string; channel?: string; devOtp?: string; message?: string }> {
+  return apiFetch<{ requestId: string; expiresAt?: string; cooldownSeconds?: number; provider?: string; channel?: string; devOtp?: string; message?: string }>(
     '/api/auth/request-otp',
     {
       method: 'POST',
-      body: JSON.stringify({ mobileNumber, role }),
+      body: JSON.stringify({
+        mobileNumber,
+        role,
+        channel,
+        devMode: options?.devMode,
+        name: options?.name,
+      }),
     }
   );
 }
 
 export async function requestOtp(
   mobileNumber: string,
-  role: string
-): Promise<{ requestId: string; expiresAt?: string; cooldownSeconds?: number; provider?: string }> {
-  return requestOtpApi(mobileNumber, role);
+  role: string,
+  channel: 'SMS' | 'WHATSAPP' = 'SMS',
+  options?: { devMode?: boolean; name?: string }
+): Promise<{ requestId: string; expiresAt?: string; cooldownSeconds?: number; provider?: string; channel?: string; devOtp?: string; message?: string }> {
+  return requestOtpApi(mobileNumber, role, channel, options);
 }
 
 export async function verifyOtpApi(
@@ -78,13 +88,15 @@ export async function verifyOtp(
 }
 
 /**
- * Fast 1-Click Demo Authentication for reviewers, clients, and testing.
- * Automatically authorizes device and creates session for selected role without prompting for OTP.
+ * Fast 1-Click Demo / In-App Dev Authentication.
+ * Supports pre-seeded demo roles OR custom mobile numbers for new user dev onboarding.
  */
 export async function loginAsDemoRoleApi(
   role: string,
   deviceId?: string,
-  deviceName?: string
+  deviceName?: string,
+  mobileNumber?: string,
+  name?: string
 ): Promise<{ token: string; refreshToken?: string; deviceId: string; deviceToken: string; user: any }> {
   const resolvedDeviceId = deviceId || getOrCreateDeviceId();
   return apiFetch<{ token: string; refreshToken?: string; deviceId: string; deviceToken: string; user: any }>(
@@ -93,6 +105,8 @@ export async function loginAsDemoRoleApi(
       method: 'POST',
       body: JSON.stringify({
         role,
+        mobileNumber,
+        name,
         deviceId: resolvedDeviceId,
         deviceName: deviceName || (typeof navigator !== 'undefined' ? navigator.userAgent : 'Authorized Demo Device'),
       }),
@@ -102,10 +116,12 @@ export async function loginAsDemoRoleApi(
 
 export async function loginAsDemoRole(
   role: string,
-  deviceName?: string
+  deviceName?: string,
+  mobileNumber?: string,
+  name?: string
 ): Promise<{ session: any; token: string; deviceId: string; deviceToken: string }> {
   const deviceId = getOrCreateDeviceId();
-  const data = await loginAsDemoRoleApi(role, deviceId, deviceName);
+  const data = await loginAsDemoRoleApi(role, deviceId, deviceName, mobileNumber, name);
 
   if (data.deviceToken) {
     setDeviceToken(data.deviceToken);
@@ -132,6 +148,18 @@ export async function loginAsDemoRole(
       accountStatus: user.accountStatus === 'ACTIVE' ? 'Active' : 'Pending',
     },
   };
+}
+
+/**
+ * In-App Dev Mode: 1-Click login or onboarding for ANY new user mobile number
+ */
+export async function loginAsDevUser(
+  mobileNumber: string,
+  role: string,
+  name?: string,
+  deviceName?: string
+): Promise<{ session: any; token: string; deviceId: string; deviceToken: string }> {
+  return loginAsDemoRole(role, deviceName, mobileNumber, name);
 }
 
 /**

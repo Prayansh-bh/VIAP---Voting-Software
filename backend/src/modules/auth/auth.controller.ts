@@ -2,7 +2,7 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { errorResponse, successResponse } from '../../common/response.js';
 import { isOriginAllowed } from '../../common/origin.js';
 import { AuthService } from './auth.service.js';
-import { RequestOtpDto, VerifyOtpDto, DeviceSessionDto, DemoLoginDto } from './auth.schema.js';
+import { RequestOtpDto, RegisterOtpDto, VerifyRegisterOtpDto, VerifyOtpDto, DeviceSessionDto, DemoLoginDto } from './auth.schema.js';
 
 export class AuthController {
   /**
@@ -116,6 +116,38 @@ export class AuthController {
       return reply.status(statusCode).send(errorResponse(err.message, code, {
         retryAfter: err.retryAfter,
       }));
+    }
+  }
+
+  static async registerOtp(req: FastifyRequest, reply: FastifyReply) {
+    const body = req.body as RegisterOtpDto;
+    try {
+      const result = await AuthService.requestRegistrationOtp(body, {
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+      return reply.status(200).send(successResponse(result, 'Registration OTP dispatched successfully.'));
+    } catch (err: any) {
+      const statusCode = err.statusCode || 400;
+      const code = err.code || 'OTP_REQUEST_FAILED';
+      return reply.status(statusCode).send(errorResponse(err.message, code, {
+        retryAfter: err.retryAfter,
+      }));
+    }
+  }
+
+  static async verifyRegisterOtp(req: FastifyRequest, reply: FastifyReply) {
+    const body = req.body as VerifyRegisterOtpDto;
+    try {
+      const result = await AuthService.verifyRegistrationOtp(body, {
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+      return reply.status(200).send(successResponse(result, 'Registration OTP verified successfully.'));
+    } catch (err: any) {
+      const statusCode = err.statusCode || 400;
+      const code = err.code || 'VERIFICATION_FAILED';
+      return reply.status(statusCode).send(errorResponse(err.message, code));
     }
   }
 

@@ -3,6 +3,8 @@ import { validateBody } from '../../common/validation.js';
 import { authenticate } from '../../middleware/auth.js';
 import {
   requestOtpSchema,
+  registerOtpSchema,
+  verifyRegisterOtpSchema,
   verifyOtpSchema,
   refreshTokenSchema,
   deviceSessionSchema,
@@ -69,6 +71,36 @@ export async function authRoutes(fastify: FastifyInstance) {
       preValidation: [validateBody(requestOtpSchema)],
     },
     AuthController.requestOtp,
+  );
+
+  // Candidate Registration OTP Generation (WhatsApp / SMS)
+  fastify.post(
+    '/register-otp',
+    {
+      config: {
+        rateLimit: {
+          max: process.env.NODE_ENV === 'test' ? 100 : 15,
+          timeWindow: '1 minute',
+        },
+      },
+      preValidation: [validateBody(registerOtpSchema)],
+    },
+    AuthController.registerOtp,
+  );
+
+  // Verify Candidate Registration OTP
+  fastify.post(
+    '/verify-register-otp',
+    {
+      config: {
+        rateLimit: {
+          max: process.env.NODE_ENV === 'test' ? 100 : 25,
+          timeWindow: '1 minute',
+        },
+      },
+      preValidation: [validateBody(verifyRegisterOtpSchema)],
+    },
+    AuthController.verifyRegisterOtp,
   );
 
   // Verify OTP and authorize device

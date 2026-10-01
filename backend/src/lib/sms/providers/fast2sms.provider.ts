@@ -24,6 +24,7 @@ export class Fast2SmsProvider implements SmsProvider {
     }
 
     try {
+      const cleanMobile = mobileNumber.replace(/\D/g, '').slice(-10);
       const response = await fetch('https://www.fast2sms.com/dev/bulkV2', {
         method: 'POST',
         headers: {
@@ -33,7 +34,7 @@ export class Fast2SmsProvider implements SmsProvider {
         body: JSON.stringify({
           variables_values: otpCode,
           route: 'otp',
-          numbers: mobileNumber,
+          numbers: cleanMobile,
         }),
       });
 

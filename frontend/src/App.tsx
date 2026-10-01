@@ -238,23 +238,19 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
   }, [currentPath]);
 
   // Enforce session check & dynamic hierarchy level availability on protected role routes:
-  // If user navigates to a role route without a valid session or if that hierarchy level is disabled, redirect to login flow (/roles)
   useEffect(() => {
     if (currentRouteRole) {
-      const requiredLevel = roleLevelMap[currentRouteRole];
-      if (requiredLevel && !enabledLevels.includes(requiredLevel)) {
-        // Hierarchy level is disabled for this party application
+      if (!activeSession) {
         window.location.hash = '/roles';
         return;
       }
 
-      if (!activeSession) {
-        window.location.hash = '/roles';
-      } else if (activeSession.role !== currentRouteRole) {
+      if (activeSession.role !== currentRouteRole) {
         window.location.hash = ROUTE_BY_ROLE[activeSession.role] || '/roles';
+        return;
       }
     }
-  }, [currentRouteRole, activeSession, enabledLevels]);
+  }, [currentRouteRole, activeSession]);
 
   const isLandingRoute = currentPath === '/' || currentPath === '' || currentPath === '/landing';
   const isRolesRoute = currentPath === '/app' || currentPath === '/app/' || currentPath === '/roles';
@@ -304,8 +300,12 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
   const handleLoginSuccess = (session: UserSession, token: string) => {
     setAuthToken(token);
     setActiveSession(session);
+    localStorage.setItem('kdp_active_session', JSON.stringify(session));
+    localStorage.removeItem('kdp_logged_out');
     setSelectedRole(null);
-    window.location.hash = ROUTE_BY_ROLE[session.role];
+    const targetRoute = ROUTE_BY_ROLE[session.role] || '/roles';
+    setCurrentPath(targetRoute);
+    window.location.hash = targetRoute;
   };
 
   const handleLogout = async () => {

@@ -1,3 +1,4 @@
+process.env.NODE_ENV = 'test';
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
@@ -416,4 +417,72 @@ describe('Production Authentication & SMS OTP Suite', () => {
     assert.equal(json.success, false);
     assert.equal(json.error.code, 'UNAUTHORIZED');
   });
+
+  it('12. In-App Dev Mode: 1-click instant login provisions new user and authenticates successfully', async () => {
+    const devMobile = '9199887766';
+    await prisma.user.deleteMany({ where: { mobileNumber: { endsWith: '99887766' } } });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/demo-login',
+      payload: {
+        role: RoleType.VILLAGE_INCHARGE,
+        mobileNumber: devMobile,
+        name: 'Dev Village Leader',
+      },
+    });
+
+    assert.equal(res.statusCode, 200, `Expected 200, got ${res.statusCode}: ${res.body}`);
+    const json = JSON.parse(res.body);
+    assert.equal(json.success, true);
+    assert.ok(json.data.token, 'Must return JWT token');
+    assert.equal(json.data.user.role, RoleType.VILLAGE_INCHARGE);
+    assert.equal(json.data.user.mobileNumber, '9199887766');
+
+    // Confirm user was created in the database and active
+    const dbUser = await prisma.user.findFirst({
+      where: { mobileNumber: { endsWith: '99887766' } },
+    });
+    assert.ok(dbUser);
+    assert.equal(dbUser.accountStatus, 'ACTIVE');
+  });
+
+  it('13. In-App Dev Mode: OTP request auto-provisions new user and returns devOtp for instant verification', async () => {
+    const devMobile = '9188776655';
+    await prisma.user.deleteMany({ where: { mobileNumber: { endsWith: '88776655' } } });
+
+    const reqRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/request-otp',
+      payload: {
+        role: RoleType.BOOTH_PRESIDENT,
+        mobileNumber: devMobile,
+        devMode: true,
+        name: 'Dev Booth Captain',
+      },
+    });
+
+    assert.equal(reqRes.statusCode, 200);
+    const reqJson = JSON.parse(reqRes.body);
+    assert.equal(reqJson.success, true);
+    assert.ok(reqJson.data.devOtp, 'In-App Dev Mode must return devOtp');
+    assert.ok(reqJson.data.requestId);
+
+    // Verify OTP using the returned devOtp
+    const verifyRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/verify-otp',
+      payload: {
+        requestId: reqJson.data.requestId,
+        otpCode: reqJson.data.devOtp,
+      },
+    });
+
+    assert.equal(verifyRes.statusCode, 200);
+    const verifyJson = JSON.parse(verifyRes.body);
+    assert.equal(verifyJson.success, true);
+    assert.ok(verifyJson.data.token);
+    assert.equal(verifyJson.data.user.role, RoleType.BOOTH_PRESIDENT);
+  });
 });
+

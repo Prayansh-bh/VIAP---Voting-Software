@@ -119,6 +119,7 @@ export function normalizeHierarchyLabels(raw: unknown): Record<string, string> {
 }
 
 export type CmsConfigInput = {
+  configKey?: string;
   organisationId?: string | null;
   organisationName?: string;
   headerTitle?: string;
@@ -176,8 +177,10 @@ export function serializeCmsConfig(row: any, extras: { constituencies?: any[]; p
 }
 
 export async function persistCmsConfig(input: CmsConfigInput) {
+  const targetKey = (input.configKey || 'default').toLowerCase();
+
   const existing = await prisma.cMSConfiguration.findUnique({
-    where: { configKey: 'default' },
+    where: { configKey: targetKey },
   });
 
   const nextFeatureToggles = input.featureToggles
@@ -199,7 +202,7 @@ export async function persistCmsConfig(input: CmsConfigInput) {
       : DEFAULT_HIERARCHY_LABELS;
 
   const data: Prisma.CMSConfigurationUncheckedCreateInput = {
-    configKey: 'default',
+    configKey: targetKey,
     organisationId: input.organisationId ?? existing?.organisationId ?? undefined,
     organisationName: input.organisationName || existing?.organisationName || 'Political Connect',
     stateName: input.stateName || existing?.stateName || 'Andhra Pradesh',
@@ -226,12 +229,26 @@ export async function persistCmsConfig(input: CmsConfigInput) {
     aiEnabled: input.aiEnabled ?? existing?.aiEnabled ?? true,
   };
 
-  return prisma.cMSConfiguration.upsert({
-    where: { configKey: 'default' },
+  const saved = await prisma.cMSConfiguration.upsert({
+    where: { configKey: targetKey },
     update: data,
     create: data,
     include: { organisation: true },
   });
+
+  if (targetKey !== 'default') {
+    const hasDefault = await prisma.cMSConfiguration.findUnique({ where: { configKey: 'default' } });
+    if (!hasDefault) {
+      await prisma.cMSConfiguration.create({
+        data: {
+          ...data,
+          configKey: 'default',
+        },
+      });
+    }
+  }
+
+  return saved;
 }
 
 export async function loadCmsBundle() {

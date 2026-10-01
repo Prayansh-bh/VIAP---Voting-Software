@@ -29,6 +29,12 @@ const envSchema = z.object({
   MSG91_TEMPLATE_ID: z.string().optional(),
   SMS_SENDER_ID: z.string().default('KNDTDP'),
 
+  // WhatsApp Cloud Gateway Configuration (Meta Graph API)
+  WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+  WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+  WHATSAPP_OTP_TEMPLATE: z.string().default('auth_otp_code'),
+  WHATSAPP_LANG: z.string().default('en_US'),
+
   // Cache & Message Broker (Redis)
   REDIS_URL: z.string().optional(),
 

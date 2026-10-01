@@ -109,7 +109,7 @@ const buildApplicationSchema = z.object({
   accentColor: z.string().default('#3b82f6'),
   activePartyCode: z.string().default('TDP'),
   appScope: z.enum(['SINGLE_MLA', 'PARLIAMENT_MP', 'ZONE', 'STATE']).default('SINGLE_MLA'),
-  activeHierarchyLevels: z.array(z.string()).default(['VOTER_GROUP', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY']),
+  activeHierarchyLevels: z.array(z.string()).default(['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP']),
   parliamentName: z.string().optional(),
   parliamentCode: z.string().optional(),
   constituencies: z.array(z.object({
@@ -124,8 +124,10 @@ const buildApplicationSchema = z.object({
     candidateEmail: z.string().optional(),
   })).default([]),
   candidateName: z.string().optional(),
+  candidateMobile: z.string().optional(),
   candidateEmail: z.string().optional(),
   password: z.string().optional(),
+  tenantCode: z.string().optional(),
   politicalParties: z.array(z.object({
     name: z.string().min(1),
     code: z.string().min(1),
@@ -229,19 +231,38 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/build-application',
     {
-      preHandler: [optionalAuthenticate],
+      preHandler: [authenticate],
       preValidation: [validateBody(buildApplicationSchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as z.infer<typeof buildApplicationSchema>;
 
-      // 1. Ensure Organisation exists or update it
-      let org = await prisma.organisation.findFirst();
+      // 1. Ensure distinct Organisation exists or create new isolated tenant
+      const rawCode = (body.tenantCode || body.appKey || `${body.activePartyCode || 'APP'}-${body.appName || 'DEFAULT'}`)
+        .replace(/[^A-Za-z0-9]/g, '-')
+        .toUpperCase()
+        .slice(0, 15);
+
+      let org = await prisma.organisation.findFirst({
+        where: {
+          OR: [
+            { code: rawCode },
+            { name: { equals: body.organisationName || body.appName, mode: 'insensitive' } },
+          ],
+        },
+      });
+
       if (!org) {
+        let uniqueCode = rawCode;
+        const codeCollision = await prisma.organisation.findUnique({ where: { code: uniqueCode } });
+        if (codeCollision) {
+          uniqueCode = `${rawCode.slice(0, 10)}-${Date.now().toString().slice(-4)}`;
+        }
+
         org = await prisma.organisation.create({
           data: {
             name: body.organisationName || body.appName,
-            code: (body.appName || 'APP').replace(/\s+/g, '-').toUpperCase().slice(0, 10),
+            code: uniqueCode,
             logoUrl: body.logoUrl,
             isActive: true,
           },
@@ -451,7 +472,9 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         ...(body.hierarchyLabels || {}),
       };
 
+      const tenantConfigKey = (body.appKey || body.tenantCode || org.code).toLowerCase();
       const updatedConfig = await persistCmsConfig({
+        configKey: tenantConfigKey,
         organisationId: org.id,
         organisationName: body.organisationName || body.appName,
         headerTitle: body.headerTitle || body.appName,
@@ -472,7 +495,8 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         activeHierarchyLevels: body.activeHierarchyLevels,
       });
 
-      // 8. Provision Incharge Accounts & Dispatch Brevo Credentials Email
+      // 8. Provision Incharge Accounts & Candidate Credentials
+      const candidateMobile = (body as any).candidateMobile?.trim() || '9848012345';
       const candidateEmail = (body as any).candidateEmail?.trim().toLowerCase() || `candidate@${(body.appName || 'party').toLowerCase().replace(/[^a-z0-9]/g, '')}.org`;
       const candidateName = (body as any).candidateName?.trim() || 'Key Candidate';
       const initialPassword = (body as any).password?.trim() || 'Kondapi@2026';
@@ -511,7 +535,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
 
       // Upsert primary candidate user in database
       await prisma.user.upsert({
-        where: { mobileNumber: '9848012345' },
+        where: { mobileNumber: candidateMobile },
         update: {
           name: candidateName,
           email: candidateEmail,
@@ -520,12 +544,13 @@ export async function cmsRoutes(fastify: FastifyInstance) {
           accountStatus: 'ACTIVE',
           organisationId: org.id,
           unitId: primaryUnitId,
+          isVerified: true,
         },
         create: {
           organisationId: org.id,
-          userCode: `LEADER-${primaryRole.slice(0, 3)}-${Date.now().toString().slice(-4)}`,
+          userCode: `LEADER-${primaryRole.slice(0, 3)}-${candidateMobile.slice(-4)}`,
           name: candidateName,
-          mobileNumber: '9848012345',
+          mobileNumber: candidateMobile,
           email: candidateEmail,
           passwordHash,
           role: primaryRole,
@@ -595,6 +620,8 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         successResponse({
           application: {
             appKey: body.appKey || `app_${Date.now()}`,
+            tenantCode: org.code,
+            organisationId: org.id,
             appName: body.appName,
             organisationName: body.organisationName,
             headerTitle: body.headerTitle || body.appName,
@@ -608,8 +635,18 @@ export async function cmsRoutes(fastify: FastifyInstance) {
             appScope: body.appScope,
             activeHierarchyLevels: body.activeHierarchyLevels,
             parliamentName: parliament.name,
+            candidateName,
+            candidateMobile,
+            candidateRole: primaryRole,
+            initialPassword,
             constituencies: createdConstituencies,
             parties: allParties,
+          },
+          credentials: {
+            mobileNumber: candidateMobile,
+            role: primaryRole,
+            password: initialPassword,
+            tenantCode: org.code,
           },
           constituencies: createdConstituencies,
           parties: allParties,

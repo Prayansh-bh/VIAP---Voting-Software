@@ -4,7 +4,10 @@ export interface TwilioConfig {
   accountSid: string;
   authToken: string;
   fromNumber?: string;
+  whatsappNumber?: string;
   serviceSid?: string;
+  contentSid?: string;
+  isWhatsApp?: boolean;
 }
 
 export class TwilioSmsProvider implements SmsProvider {
@@ -16,35 +19,53 @@ export class TwilioSmsProvider implements SmsProvider {
   }
 
   async sendOtp(mobileNumber: string, otpCode: string, options?: SmsOptions): Promise<SmsSendResult> {
+    const isWhatsApp = this.config.isWhatsApp || (options as any)?.channel?.toUpperCase() === 'WHATSAPP';
     const message = `Your Kondapi TDP Connect verification code is ${otpCode}. Valid for 5 minutes.`;
-    return this.sendTransactional(mobileNumber, message, options);
+    return this.sendTransactional(mobileNumber, message, { ...(options || {}), channel: isWhatsApp ? 'WHATSAPP' : 'SMS', otpCode } as any);
   }
 
-  async sendTransactional(mobileNumber: string, message: string, _options?: SmsOptions): Promise<SmsSendResult> {
-    const hasSender = Boolean(this.config.fromNumber || this.config.serviceSid);
-    if (!this.config.accountSid || !this.config.authToken || !hasSender) {
+  async sendTransactional(mobileNumber: string, message: string, options?: SmsOptions): Promise<SmsSendResult> {
+    const isWhatsApp = this.config.isWhatsApp || (options as any)?.channel?.toUpperCase() === 'WHATSAPP';
+    const defaultSender = isWhatsApp ? (this.config.whatsappNumber || '+17372508034') : (this.config.fromNumber || this.config.serviceSid);
+    
+    if (!this.config.accountSid || !this.config.authToken || !defaultSender) {
       return {
         success: false,
         provider: this.name,
-        error: 'Twilio credentials not configured (Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_FROM_NUMBER or TWILIO_SERVICE_SID)',
+        error: 'Twilio credentials not configured (Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_FROM_NUMBER or TWILIO_WHATSAPP_NUMBER)',
         timestamp: new Date(),
       };
     }
 
     try {
-      const formattedTo = mobileNumber.startsWith('+') ? mobileNumber : `+91${mobileNumber}`;
+      const cleanDigits = mobileNumber.replace(/\D/g, '').slice(-10);
+      const rawTo = `+91${cleanDigits}`;
+      const formattedTo = isWhatsApp ? `whatsapp:${rawTo}` : rawTo;
+
       const url = `https://api.twilio.com/2010-04-01/Accounts/${this.config.accountSid}/Messages.json`;
       const auth = Buffer.from(`${this.config.accountSid}:${this.config.authToken}`).toString('base64');
 
       const paramsObj: Record<string, string> = {
         To: formattedTo,
-        Body: message,
       };
 
-      if (this.config.serviceSid) {
+      const otpCode = (options as any)?.otpCode;
+      if (isWhatsApp && this.config.contentSid) {
+        paramsObj.ContentSid = this.config.contentSid;
+        paramsObj.ContentVariables = JSON.stringify({ '1': otpCode || '123456' });
+      } else {
+        paramsObj.Body = message;
+      }
+
+      if (!isWhatsApp && this.config.serviceSid) {
         paramsObj.MessagingServiceSid = this.config.serviceSid;
-      } else if (this.config.fromNumber) {
-        paramsObj.From = this.config.fromNumber;
+      } else {
+        const rawSender = isWhatsApp
+          ? (this.config.whatsappNumber || '+17372508034')
+          : (this.config.fromNumber || '+17372508034');
+        paramsObj.From = isWhatsApp && !rawSender.startsWith('whatsapp:')
+          ? `whatsapp:${rawSender}`
+          : rawSender;
       }
 
       const params = new URLSearchParams(paramsObj);
