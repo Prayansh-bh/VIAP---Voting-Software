@@ -76,7 +76,7 @@ export default function LandingPage({
     if (onGetStarted) {
       onGetStarted();
     } else {
-      window.location.hash = '/cms';
+      window.location.hash = '/roles';
     }
   };
 
@@ -215,7 +215,7 @@ export default function LandingPage({
       step: '01',
       title: 'Configure Application',
       subtitle: 'Setup identity, branding, and political party baseline',
-      description: 'Define application parameters, visual identity, primary/secondary brand colors, and permanent party configurations within CMS Studio.',
+      description: 'Define application parameters, visual identity, primary/secondary brand colors, and permanent party configurations within Platform Administration.',
       icon: Sliders,
       badge: 'Step 1: Setup',
     },
@@ -372,16 +372,6 @@ export default function LandingPage({
               <LogIn className="w-3.5 h-3.5 text-yellow-400" />
               <span>Sign In</span>
             </button>
-            <button
-              onClick={() => {
-                window.location.hash = '/cms';
-              }}
-              id="landing-btn-cms-studio"
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 text-xs font-black transition-all shadow-md shadow-amber-500/20 active:scale-95 flex items-center gap-2 cursor-pointer"
-            >
-              <Sliders className="w-3.5 h-3.5 text-slate-950" />
-              <span>CMS Studio</span>
-            </button>
             {isPartyCreated && onResetParty && (
               <button
                 onClick={onResetParty}
@@ -401,14 +391,6 @@ export default function LandingPage({
             >
               <LogIn className="w-3 h-3 text-yellow-400" />
               <span>Sign In</span>
-            </button>
-            <button
-              onClick={() => {
-                window.location.hash = '/cms';
-              }}
-              className="px-3 py-1.5 rounded-lg text-xs font-black bg-amber-400 text-slate-950"
-            >
-              CMS Studio
             </button>
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -458,19 +440,10 @@ export default function LandingPage({
                   setMobileMenuOpen(false);
                   handleLogin();
                 }}
-                className="flex-1 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs text-center cursor-pointer border border-slate-700 flex items-center justify-center gap-1.5"
+                className="w-full py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs text-center cursor-pointer border border-slate-700 flex items-center justify-center gap-1.5"
               >
                 <LogIn className="w-3.5 h-3.5 text-yellow-400" />
                 <span>Sign In</span>
-              </button>
-              <button
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  window.location.hash = '/cms';
-                }}
-                className="flex-1 py-2.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs text-center cursor-pointer"
-              >
-                CMS Studio
               </button>
             </div>
           </div>
@@ -524,16 +497,6 @@ export default function LandingPage({
                   <span>Enter Application / Sign In</span>
                   <ArrowRight className="w-5 h-5" />
                 </button>
-                <button
-                  onClick={() => {
-                    window.location.hash = '/cms';
-                  }}
-                  id="hero-btn-cms-studio"
-                  className="px-6 py-4 rounded-2xl bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white font-bold text-sm transition-all border border-slate-700/80 active:scale-95 flex items-center gap-2.5 cursor-pointer shadow-lg"
-                >
-                  <Sliders className="w-4 h-4 text-amber-400" />
-                  <span>CMS Studio (Campaign Builder)</span>
-                </button>
                 {isPartyCreated && onResetParty && (
                   <button
                     onClick={onResetParty}
@@ -547,7 +510,7 @@ export default function LandingPage({
               </div>
               <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-900/80 border border-slate-800 text-slate-400 text-xs font-medium">
                 <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                <span>Direct login available for all 8 hierarchy command tiers • CMS Studio for rebranding & hierarchy configuration</span>
+                <span>Direct login available for all 8 hierarchy command tiers</span>
               </div>
             </div>
 
@@ -910,10 +873,10 @@ export default function LandingPage({
 
             {/* Dynamic Pipeline Flow Card */}
             <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-3">
-              <div className="text-xs font-bold text-slate-300 mb-2">CMS Provisioning & Build Pipeline</div>
+              <div className="text-xs font-bold text-slate-300 mb-2">Platform Provisioning & Build Pipeline</div>
               <div className="space-y-2 font-mono text-xs">
                 {[
-                  { step: '01', title: 'CMS Studio Setup', desc: 'Define Application Identity & Branding' },
+                  { step: '01', title: 'Platform Admin Setup', desc: 'Define Application Identity & Branding' },
                   { step: '02', title: 'Political Party Configuration', desc: 'Draft → Review → Published → Locked' },
                   { step: '03', title: 'Hierarchy & Geography', desc: 'Select Active Tiers & Parliamentary ACs' },
                   { step: '04', title: 'Data Assignment Engine', desc: 'Import Voter Roll with Column Mapping' },
@@ -1098,7 +1061,7 @@ export default function LandingPage({
               Interactive Multi-Level Hierarchy
             </h2>
             <p className="text-xs sm:text-sm text-slate-300">
-              Illustrative topology model. The actual operational hierarchy is dynamic and configured via CMS Studio.
+              Illustrative topology model. The actual operational hierarchy is dynamic and configured via Platform Administration.
             </p>
           </div>
 
@@ -1243,13 +1206,6 @@ export default function LandingPage({
               <LogIn className="w-4 h-4 text-slate-950" />
               <span>Enter Application / Sign In</span>
               <ArrowRight className="w-4 h-4" />
-            </button>
-            <button
-              onClick={handleStart}
-              className="px-7 py-3.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-white font-bold text-sm transition-all border border-slate-700 active:scale-95 flex items-center gap-2 cursor-pointer shadow-lg"
-            >
-              <Sliders className="w-4 h-4 text-amber-400" />
-              <span>Launch CMS Studio</span>
             </button>
           </div>
         </div>

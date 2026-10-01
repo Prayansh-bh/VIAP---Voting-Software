@@ -478,6 +478,21 @@ export async function cmsRoutes(fastify: FastifyInstance) {
       const initialPassword = (body as any).password?.trim() || 'Kondapi@2026';
       const passwordHash = await bcrypt.hash(initialPassword, 10);
 
+      const stateUnitRecord = await prisma.organizationUnit.findFirst({
+        where: { name: state.name, level: OrgHierarchyLevel.STATE },
+      });
+      const zoneUnitRecord = await prisma.organizationUnit.findFirst({
+        where: { name: zone.name, level: OrgHierarchyLevel.ZONE },
+      });
+      const parUnitRecord = await prisma.organizationUnit.findFirst({
+        where: { name: parliament.name, level: OrgHierarchyLevel.PARLIAMENT },
+      });
+      const constUnitRecord = createdConstituencies[0]
+        ? await prisma.organizationUnit.findFirst({
+            where: { name: createdConstituencies[0].name, level: OrgHierarchyLevel.CONSTITUENCY },
+          })
+        : null;
+
       const primaryRole = body.appScope === 'STATE'
         ? RoleType.STATE_ADMIN
         : body.appScope === 'ZONE'
@@ -487,12 +502,12 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         : RoleType.CONSTITUENCY_INCHARGE;
 
       const primaryUnitId = body.appScope === 'STATE'
-        ? state.id
+        ? stateUnitRecord?.id
         : body.appScope === 'ZONE'
-        ? zone.id
+        ? zoneUnitRecord?.id
         : body.appScope === 'PARLIAMENT_MP'
-        ? parliament.id
-        : createdConstituencies[0]?.id;
+        ? parUnitRecord?.id
+        : constUnitRecord?.id || null;
 
       // Upsert primary candidate user in database
       await prisma.user.upsert({
@@ -523,9 +538,9 @@ export async function cmsRoutes(fastify: FastifyInstance) {
       // Also ensure standard role accounts exist in DB for each hierarchy tier
       const standardRoles = [
         { role: RoleType.SUPER_ADMIN, email: 'superadmin@politicalconnect.in', mobile: '9848099999', name: 'Super Administrator', unitId: null },
-        { role: RoleType.STATE_ADMIN, email: 'stateincharge@politicalconnect.in', mobile: '9848088888', name: `${state.name} State Incharge`, unitId: state.id },
-        { role: RoleType.ZONE_INCHARGE, email: 'zone@politicalconnect.in', mobile: '9848099998', name: `${zone.name} Coordinator`, unitId: zone.id },
-        { role: RoleType.PARLIAMENT_INCHARGE, email: 'mp@politicalconnect.in', mobile: '9848088887', name: `${parliament.name} Incharge`, unitId: parliament.id },
+        { role: RoleType.STATE_ADMIN, email: 'stateincharge@politicalconnect.in', mobile: '9848088888', name: `${state.name} State Incharge`, unitId: stateUnitRecord?.id || null },
+        { role: RoleType.ZONE_INCHARGE, email: 'zone@politicalconnect.in', mobile: '9848099998', name: `${zone.name} Coordinator`, unitId: zoneUnitRecord?.id || null },
+        { role: RoleType.PARLIAMENT_INCHARGE, email: 'mp@politicalconnect.in', mobile: '9848088887', name: `${parliament.name} Incharge`, unitId: parUnitRecord?.id || null },
         { role: RoleType.MANDAL_INCHARGE, email: 'mandal@politicalconnect.in', mobile: '9848077777', name: 'Mandal President', unitId: null },
         { role: RoleType.BOOTH_PRESIDENT, email: 'booth@politicalconnect.in', mobile: '9848010002', name: 'Booth President', unitId: null },
         { role: RoleType.VOTER_100_INCHARGE, email: 'voter100@politicalconnect.in', mobile: '9848010003', name: '100 Voter Incharge', unitId: null },

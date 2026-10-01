@@ -1,5 +1,5 @@
-import { AppInstance, InchargeRecord, ApprovalRecord } from '../types';
-import { getAdminToken } from './auth';
+import { AppInstance, InchargeRecord, ApprovalRecord, AdminUser, ApplicationSummary } from '../types';
+import { getAdminToken, setAdminToken, setAdminSession } from './auth';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
@@ -30,137 +30,212 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   if (!res.ok) {
-    const errorMsg = data?.error || data?.message || `Request failed with status ${res.status}`;
+    const errorMsg = data?.error?.message || data?.error || data?.message || `Request failed with status ${res.status}`;
     throw new Error(errorMsg);
   }
 
   return (data?.data !== undefined ? data.data : data) as T;
 }
 
+// ── Admin Authentication (Real JWT via Backend) ──
+export async function authenticateAdminRole(role: 'SUPER_ADMIN' | 'ORGANISER' = 'SUPER_ADMIN'): Promise<AdminUser> {
+  const backendRole = role === 'ORGANISER' ? 'STATE_ADMIN' : 'SUPER_ADMIN';
+  const res: any = await request('/auth/demo-login', {
+    method: 'POST',
+    body: JSON.stringify({
+      role: backendRole,
+      deviceId: 'cms-admin-console-session',
+      deviceName: 'Platform CMS & Admin Console',
+    }),
+  });
+
+  const token = res?.token;
+  if (!token) {
+    throw new Error('No JWT token returned from backend auth.');
+  }
+
+  setAdminToken(token);
+
+  const u = res.user || {};
+  const adminUser: AdminUser = {
+    id: u.id || 'admin-super',
+    name: u.name || (role === 'SUPER_ADMIN' ? 'State War Room Director' : 'Chief Party Organiser'),
+    email: u.email || 'admin@politicalconnect.in',
+    role: role,
+    token: token,
+  };
+
+  setAdminSession(adminUser);
+  return adminUser;
+}
+
+export async function authenticateAdminCredentials(mobileNumber: string, passcode?: string): Promise<AdminUser> {
+  const res: any = await request('/auth/admin-login', {
+    method: 'POST',
+    body: JSON.stringify({
+      mobileNumber,
+      passcode,
+      password: passcode,
+      deviceId: `admin-device-${mobileNumber.replace(/\D/g, '').slice(-4) || 'master'}`,
+      deviceName: `CMS Admin Terminal (${mobileNumber})`,
+    }),
+  });
+
+  const token = res?.token;
+  if (!token) {
+    throw new Error('Authentication failed. No token returned.');
+  }
+
+  setAdminToken(token);
+
+  const u = res.user || {};
+  const adminUser: AdminUser = {
+    id: u.id || 'admin-master',
+    name: u.name || 'Party Super Admin',
+    email: u.email || `${mobileNumber}@politicalconnect.in`,
+    role: u.role || 'SUPER_ADMIN',
+    token: token,
+  };
+
+  setAdminSession(adminUser);
+  return adminUser;
+}
+
 // ── Applications (Multi-Party Engine) ──
 export async function fetchApplications(): Promise<AppInstance[]> {
   try {
-    const res = await request<any[]>('/applications');
-    if (Array.isArray(res) && res.length > 0) {
-      return res.map((c) => ({
+    const rawRes = await request<any>('/applications');
+    const res = Array.isArray(rawRes) ? rawRes : rawRes ? [rawRes] : [];
+    if (res.length > 0) {
+      return res.map((c: any) => ({
         id: c.id,
-        name: c.appName || c.organisationName,
-        party: c.parties?.[0]?.name || 'National Democratic Front',
-        partyCode: c.parties?.[0]?.code || 'NDF',
-        leaderName: c.candidateName || 'Party President',
-        jurisdiction: `${c.appName || 'State'} (${c.constituenciesCount || 1} Constituencies)`,
-        description: `Application for ${c.appName || 'Jurisdiction'}, ${c.stateName || 'Apex'}`,
-        primaryColor: c.primaryColor || '#F59E0B',
+        name: c.appName || c.organisationName || 'Party Connect',
+        party: c.parties?.[0]?.name || c.organisationName || c.appName || 'Party Alliance',
+        partyCode: c.activePartyCode || c.parties?.[0]?.code || 'APP',
+        leaderName: c.candidateName || 'Party Leadership',
+        jurisdiction: c.parliamentName ? `${c.parliamentName} (${c.constituenciesCount || 1} Constituencies)` : `${c.appName || 'Assembly'} (Segment)`,
+        description: `Operational Tenant for ${c.appName || 'Party'}, ${c.stateName || 'Apex'}`,
+        primaryColor: c.primaryColor || c.parties?.[0]?.primaryColor || '#F59E0B',
         secondaryColor: c.secondaryColor || '#DC2626',
         accentColor: c.accentColor || '#0F172A',
-        totalVoters: c.votersCount || 240000,
-        turnoutPercent: 74.5,
+        totalVoters: typeof c.votersCount === 'number' ? c.votersCount : 0,
+        turnoutPercent: typeof c.turnoutPercent === 'number' ? c.turnoutPercent : 0,
         isActive: true,
         isDefault: c.isDefault || false,
-        createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-IN') : 'Just now',
-        activeHierarchyLevels: c.activeHierarchyLevels || ['100_VOTER', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY'],
+        createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-IN') : 'Active',
+        activeHierarchyLevels: c.activeHierarchyLevels || ['VOTER_GROUP', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY'],
       }));
     }
   } catch (err) {
-    console.warn('Backend /applications offline or empty, using stored/default tenants:', err);
+    console.warn('Backend /applications offline or empty:', err);
   }
 
-  // Fallback stored or seeded apps
-  const stored = localStorage.getItem('kdp_custom_parties');
-  if (stored) {
-    try {
-      const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    } catch {}
-  }
-
-  return [
-    {
-      id: 'app-default-1',
-      name: 'Telangana Congress Connect',
-      party: 'Indian National Congress',
-      partyCode: 'INC',
-      leaderName: 'A. Revanth Reddy',
-      jurisdiction: 'Telangana State (119 Constituencies)',
-      description: 'Integrated Voter Management & Cadre Governance Command Center',
-      primaryColor: '#FF6600',
-      secondaryColor: '#138808',
-      accentColor: '#0038A8',
-      totalVoters: 33517327,
-      turnoutPercent: 68.4,
-      isActive: true,
-      isDefault: true,
-      createdAt: '01/01/2025',
-      activeHierarchyLevels: ['VOTER_GROUP', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY', 'DISTRICT', 'STATE'],
-    },
-    {
-      id: 'app-default-2',
-      name: 'Kondapi TDP Connect',
-      party: 'Telugu Desam Party',
-      partyCode: 'TDP',
-      leaderName: 'Dr. Dola Sree Bala Veeranjaneya Swamy',
-      jurisdiction: 'Kondapi Assembly Constituency',
-      description: 'MLA Ground Command & Micro-Targeted Booth Mobilization',
-      primaryColor: '#F59E0B',
-      secondaryColor: '#DC2626',
-      accentColor: '#0F172A',
-      totalVoters: 228410,
-      turnoutPercent: 81.2,
-      isActive: true,
-      isDefault: false,
-      createdAt: '15/01/2025',
-      activeHierarchyLevels: ['VOTER_GROUP', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY'],
-    },
-  ];
+  return [];
 }
 
-export async function createApplication(payload: any): Promise<any> {
+// ── Live KPI Summary Rollup from PostgreSQL ──
+export async function fetchApplicationSummary(appId: string = 'default'): Promise<ApplicationSummary | null> {
   try {
-    return await request('/applications', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    const res = await request<ApplicationSummary>(`/applications/${appId}/summary`);
+    return res;
   } catch (err) {
-    console.warn('Backend create application failed, saving locally:', err);
-    return {
-      id: `app-${Date.now()}`,
-      ...payload,
-      createdAt: new Date().toISOString(),
-    };
+    console.warn('Backend /summary fetch note:', err);
+    return null;
   }
+}
+
+export async function createApplication(formData: any): Promise<AppInstance> {
+  const partyCode = (formData.partyCode || 'APP').trim().toUpperCase();
+  const partyName = formData.party || formData.name;
+  const appName = formData.name;
+  const levels = formData.activeHierarchyLevels && formData.activeHierarchyLevels.length > 0
+    ? formData.activeHierarchyLevels
+    : ['VOTER_GROUP', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY'];
+
+  const backendPayload = {
+    appName,
+    organisationName: partyName,
+    headerTitle: appName,
+    slogan: formData.description || `Platform tenant for ${appName}`,
+    primaryColor: formData.primaryColor || '#F59E0B',
+    secondaryColor: formData.secondaryColor || '#DC2626',
+    accentColor: formData.accentColor || '#0F172A',
+    activePartyCode: partyCode,
+    appScope: 'SINGLE_MLA',
+    stateName: formData.stateName || 'Andhra Pradesh',
+    candidateName: formData.leaderName || 'Party Candidate',
+    activeHierarchyLevels: levels,
+    politicalParties: [
+      {
+        name: partyName,
+        code: partyCode,
+        shortName: partyCode,
+        primaryColor: formData.primaryColor || '#F59E0B',
+        secondaryColor: formData.secondaryColor || '#DC2626',
+        accentColor: formData.accentColor || '#0F172A',
+        isActive: true,
+      },
+    ],
+    constituencies: [
+      {
+        name: formData.jurisdiction || appName,
+        code: `AC-${partyCode}-01`,
+        totalVoters: 240000,
+        mlaName: formData.leaderName || 'Party Candidate',
+      },
+    ],
+  };
+
+  const res: any = await request('/cms/build-application', {
+    method: 'POST',
+    body: JSON.stringify(backendPayload),
+  });
+
+  const app = res?.application || res;
+  return {
+    id: app.id || app.appKey || `app-${Date.now()}`,
+    name: app.appName || appName,
+    party: partyName,
+    partyCode: partyCode,
+    leaderName: formData.leaderName || 'Party Candidate',
+    jurisdiction: formData.jurisdiction || `${appName} Assembly`,
+    description: formData.description || `Application for ${appName}`,
+    primaryColor: app.primaryColor || formData.primaryColor || '#F59E0B',
+    secondaryColor: app.secondaryColor || formData.secondaryColor || '#DC2626',
+    accentColor: app.accentColor || formData.accentColor || '#0F172A',
+    totalVoters: 240000,
+    turnoutPercent: 74.5,
+    isActive: true,
+    isDefault: false,
+    createdAt: new Date().toLocaleDateString('en-IN'),
+    activeHierarchyLevels: app.activeHierarchyLevels || levels,
+  };
 }
 
 // ── Incharge Lifecycle & Management ──
 export async function fetchIncharges(appId?: string): Promise<InchargeRecord[]> {
   try {
-    if (appId) {
-      const res = await request<any[]>(`/applications/${appId}/incharges`);
-      if (Array.isArray(res) && res.length > 0) {
-        return res.map((i) => ({
-          id: i.id,
-          name: i.name || i.userName || 'Party Cadre',
-          phone: i.phone || i.mobileNumber || '9876543210',
-          role: i.role || 'INCHARGE',
-          level: i.level || 'BOOTH',
-          jurisdiction: i.jurisdiction || i.unitName || 'Sector 1',
-          status: i.status || (i.accountStatus === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE'),
-          assignedVoters: i.assignedVoters || 450,
-          coverageRate: i.coverageRate || 78,
-          appointedAt: i.appointedAt || '2025-01-10',
-        }));
-      }
+    const targetId = appId || 'default';
+    const res = await request<any[]>(`/applications/${targetId}/incharges`);
+    if (Array.isArray(res)) {
+      return res.map((i) => ({
+        id: i.id,
+        name: i.name || i.userName || 'Party Cadre',
+        phone: i.phone || i.mobileNumber || '9876543210',
+        role: i.role || 'INCHARGE',
+        level: i.level || i.jurisdictionType || 'BOOTH',
+        jurisdiction: i.jurisdiction || i.jurisdictionName || i.unitName || 'Sector 1',
+        status: i.status || (i.accountStatus === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE'),
+        assignedVoters: typeof i.assignedVoters === 'number' ? i.assignedVoters : 0,
+        coverageRate: typeof i.coverageRate === 'number' ? i.coverageRate : 0,
+        appointedAt: i.appointedAt || (i.assignedAt ? new Date(i.assignedAt).toLocaleDateString('en-IN') : 'Active'),
+      }));
     }
   } catch (err) {
-    console.warn('Backend incharges fetch failed, using default registry:', err);
+    console.warn('Backend incharges fetch failed:', err);
   }
 
-  return [
-    { id: 'inc-1', name: 'K. Ramesh Reddy', phone: '9848011223', role: 'CONSTITUENCY_INCHARGE', level: 'CONSTITUENCY', jurisdiction: 'Kondapi Assembly', status: 'ACTIVE', assignedVoters: 228410, coverageRate: 88, appointedAt: '2024-11-01' },
-    { id: 'inc-2', name: 'M. Venkat Rao', phone: '9848022334', role: 'MANDAL_INCHARGE', level: 'MANDAL', jurisdiction: 'Singarayakonda Mandal', status: 'ACTIVE', assignedVoters: 42100, coverageRate: 84, appointedAt: '2024-11-10' },
-    { id: 'inc-3', name: 'S. Lakshmi Narayana', phone: '9848033445', role: 'VILLAGE_INCHARGE', level: 'VILLAGE', jurisdiction: 'Pakala Gram Panchayat', status: 'ACTIVE', assignedVoters: 3420, coverageRate: 91, appointedAt: '2024-12-01' },
-    { id: 'inc-4', name: 'P. Subba Rao', phone: '9848044556', role: 'BOOTH_PRESIDENT', level: 'BOOTH', jurisdiction: 'Booth 104 - ZPHS School', status: 'ACTIVE', assignedVoters: 980, coverageRate: 76, appointedAt: '2025-01-05' },
-    { id: 'inc-5', name: 'B. Krishna Murthy', phone: '9848055667', role: 'VOTER_100_INCHARGE', level: 'VOTER_GROUP', jurisdiction: 'Cluster 104-B (Voters 101-200)', status: 'ACTIVE', assignedVoters: 100, coverageRate: 94, appointedAt: '2025-01-15' },
-  ];
+  return [];
 }
 
 export async function transferIncharge(appId: string, id: string, targetJurisdiction: string, targetLevel: string): Promise<any> {
@@ -198,60 +273,14 @@ export async function fetchApprovals(params?: { type?: string; status?: string; 
     if (params?.status && params.status !== 'ALL') q.set('status', params.status);
     if (params?.search) q.set('search', params.search);
 
-    const res = await request<ApprovalRecord[]>(`/approvals?${q.toString()}`);
+    const res: any = await request(`/approvals?${q.toString()}`);
     if (Array.isArray(res)) return res;
+    if (Array.isArray(res?.items)) return res.items;
   } catch (err) {
-    console.warn('Backend /approvals failed, using default requests:', err);
+    console.warn('Backend /approvals failed:', err);
   }
 
-  return [
-    {
-      id: 'appr-1',
-      type: 'USER_REGISTRATION',
-      title: 'New Booth Agent Registration',
-      applicantName: 'T. Srinivasulu',
-      applicantPhone: '9849123456',
-      jurisdiction: 'Booth 102 - Pakala Village',
-      requestedRole: 'BOOTH_PRESIDENT',
-      status: 'PENDING',
-      submittedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-      details: { epicNumber: 'ABC1234567', aadhaarLast4: '8892', address: 'Bazaar Street, Pakala' },
-    },
-    {
-      id: 'appr-2',
-      type: 'INCHARGE_REQUEST',
-      title: '100-Voter Cluster Assignment Request',
-      applicantName: 'M. Padmavathi',
-      applicantPhone: '9849234567',
-      jurisdiction: 'Cluster 42 - Kondapi Town',
-      requestedRole: 'VOTER_100_INCHARGE',
-      status: 'PENDING',
-      submittedAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-      details: { previousExperience: 'Ward Volunteer 2019-2024', voterCount: 104 },
-    },
-    {
-      id: 'appr-3',
-      type: 'DATA_CORRECTION',
-      title: 'Voter Family Head & Phone Number Correction',
-      applicantName: 'K. Subba Rao (Cadre)',
-      applicantPhone: '9849345678',
-      jurisdiction: 'Booth 105 - Singarayakonda',
-      status: 'PENDING',
-      submittedAt: new Date(Date.now() - 3600000 * 8).toISOString(),
-      details: { voterName: 'D. Venkateswarlu', epicNumber: 'XYZ9876543', oldPhone: '9000000000', newPhone: '9848123456' },
-    },
-    {
-      id: 'appr-4',
-      type: 'SURVEY_APPROVAL',
-      title: 'Door-to-Door Sentiment & Beneficiary Survey Roll',
-      applicantName: 'B. Anjaneyulu (Cadre Lead)',
-      applicantPhone: '9849456789',
-      jurisdiction: 'Mandal 04 - Jarugumalli',
-      status: 'PENDING',
-      submittedAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-      details: { totalSurveysSubmitted: 320, positiveTurnoutPercent: 78.4, verifiedByGPS: true },
-    },
-  ];
+  return [];
 }
 
 export async function approveRequest(id: string, reviewerNote?: string): Promise<any> {

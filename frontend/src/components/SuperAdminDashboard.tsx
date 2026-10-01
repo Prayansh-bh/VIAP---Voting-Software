@@ -31,7 +31,7 @@ import {
 import { UserSession } from '../types';
 import { useCms } from '../context/CmsContext';
 import { apiFetch } from '../lib/api';
-import CmsStudio from './cms/CmsStudio';
+import Pagination from './common/Pagination';
 
 interface SuperAdminDashboardProps {
   session: UserSession;
@@ -41,12 +41,17 @@ interface SuperAdminDashboardProps {
 export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDashboardProps) {
   const { config, parties } = useCms();
   const [activeTab, setActiveTab] = useState<'overview' | 'orgs' | 'parties' | 'ai' | 'storage' | 'audit' | 'health'>('overview');
-  const [isCmsOpen, setIsCmsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const handleOpenAdminConsole = () => {
+    window.open('http://localhost:3001', '_blank');
+  };
   
   // Data states
   const [orgs, setOrgs] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditPageSize, setAuditPageSize] = useState(10);
   const [healthStatus, setHealthStatus] = useState<any>(null);
   const [aiStats, setAiStats] = useState<any>({
     status: 'ACTIVE',
@@ -61,7 +66,7 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
     try {
       const [orgsRes, auditRes, healthRes] = await Promise.all([
         apiFetch<any[]>('/api/organisations').catch(() => []),
-        apiFetch<any[]>('/api/audit?limit=25').catch(() => []),
+        apiFetch<any[]>('/api/audit?limit=100').catch(() => []),
         apiFetch<any>('/api/health').catch(() => ({ status: 'UP', database: 'healthy' })),
       ]);
       setOrgs(Array.isArray(orgsRes) ? orgsRes : []);
@@ -77,6 +82,11 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
   useEffect(() => {
     loadData();
   }, []);
+
+  const paginatedAuditLogs = React.useMemo(() => {
+    const start = (auditPage - 1) * auditPageSize;
+    return auditLogs.slice(start, start + auditPageSize);
+  }, [auditLogs, auditPage, auditPageSize]);
 
   return (
     <div className="w-full h-screen overflow-hidden flex flex-col md:flex-row bg-[#F8FAFC] text-slate-900 font-sans antialiased" id="superadmin-dashboard-root">
@@ -334,10 +344,10 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
                   </p>
                 </div>
                 <button
-                  onClick={() => setIsCmsOpen(true)}
+                  onClick={handleOpenAdminConsole}
                   className="px-5 py-3 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black rounded-xl text-xs flex items-center gap-2 shadow-md shadow-amber-400/20 transition cursor-pointer shrink-0"
                 >
-                  Launch Studio <ArrowRight className="w-4 h-4" />
+                  Launch Admin Console (Port 3001) <ExternalLink className="w-4 h-4" />
                 </button>
               </div>
 
@@ -392,7 +402,7 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
                   <p className="text-xs text-slate-500">Multi-tenant tenants with isolated hierarchy scopes</p>
                 </div>
                 <button
-                  onClick={() => setIsCmsOpen(true)}
+                  onClick={handleOpenAdminConsole}
                   className="px-3.5 py-1.5 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black rounded-lg text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" /> Add Organisation
@@ -415,7 +425,7 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
                       ACTIVE TENANT
                     </span>
                     <button
-                      onClick={() => setIsCmsOpen(true)}
+                      onClick={handleOpenAdminConsole}
                       className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg text-xs font-semibold transition cursor-pointer"
                     >
                       Configure
@@ -435,7 +445,7 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
                   <p className="text-xs text-slate-500">Dynamic themes and symbols used across tenant instances</p>
                 </div>
                 <button
-                  onClick={() => setIsCmsOpen(true)}
+                  onClick={handleOpenAdminConsole}
                   className="px-3.5 py-1.5 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black rounded-lg text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" /> Configure Party
@@ -581,7 +591,7 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
-                    {auditLogs.map((log, idx) => (
+                    {paginatedAuditLogs.map((log, idx) => (
                       <tr key={log.id || idx} className="hover:bg-slate-50/80">
                         <td className="py-2.5 px-3 text-slate-500">
                           {log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Recent'}
@@ -604,6 +614,20 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
                   </tbody>
                 </table>
               </div>
+
+              <Pagination
+                currentPage={auditPage}
+                pageSize={auditPageSize}
+                totalItems={auditLogs.length}
+                onPageChange={setAuditPage}
+                onPageSizeChange={(newSize) => {
+                  setAuditPageSize(newSize);
+                  setAuditPage(1);
+                }}
+                pageSizeOptions={[10, 20, 50, 100]}
+                itemName="events"
+                accentColor="amber"
+              />
             </div>
           )}
 
@@ -643,17 +667,6 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
           )}
         </div>
       </main>
-
-      {isCmsOpen && (
-        <div className="fixed inset-0 z-50 overflow-auto bg-white">
-          <CmsStudio
-            isOpen={true}
-            mode="editor"
-            onClose={() => setIsCmsOpen(false)}
-            onOpenRoleModules={() => setIsCmsOpen(false)}
-          />
-        </div>
-      )}
     </div>
   );
 }

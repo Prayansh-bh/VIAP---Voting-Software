@@ -6,15 +6,19 @@ import DataIngestion from './components/DataIngestion';
 import InchargeManagement from './components/InchargeManagement';
 import ApprovalEngine from './components/ApprovalEngine';
 import AdminLogin from './components/AdminLogin';
+import CmsBrandStudio from './components/CmsBrandStudio';
+import CmsStudio from './components/CmsStudio';
 import {
   AppInstance,
   InchargeRecord,
   ApprovalRecord,
   AdminUser,
+  ApplicationSummary,
 } from './types';
 import {
   fetchApplications,
   createApplication,
+  fetchApplicationSummary,
   fetchIncharges,
   transferIncharge,
   replaceIncharge,
@@ -34,6 +38,7 @@ import { Shield, Radio, Server, ExternalLink } from 'lucide-react';
 export default function App() {
   const [adminUser, setAdminUser] = useState<AdminUser | null>(() => getAdminSession());
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [isCreateAppModalOpen, setIsCreateAppModalOpen] = useState(false);
 
   // Multi-party state
   const [apps, setApps] = useState<AppInstance[]>([]);
@@ -42,6 +47,7 @@ export default function App() {
   // Incharges and Approvals state
   const [incharges, setIncharges] = useState<InchargeRecord[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
+  const [summary, setSummary] = useState<ApplicationSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Load initial data from Postgres backend
@@ -54,12 +60,14 @@ export default function App() {
         const defaultApp = loadedApps.find((a) => a.isDefault) || loadedApps[0] || null;
         setSelectedApp(defaultApp);
 
-        const [loadedIncharges, loadedApprovals] = await Promise.all([
+        const [loadedIncharges, loadedApprovals, loadedSummary] = await Promise.all([
           fetchIncharges(defaultApp?.id),
           fetchApprovals(),
+          fetchApplicationSummary(defaultApp?.id || 'default'),
         ]);
         setIncharges(loadedIncharges);
         setApprovals(loadedApprovals);
+        setSummary(loadedSummary);
       } catch (err) {
         console.error('Failed to load initial data:', err);
       } finally {
@@ -71,6 +79,24 @@ export default function App() {
       loadData();
     }
   }, [adminUser]);
+
+  // Dynamically refresh incharges and summary when active application changes
+  useEffect(() => {
+    if (!selectedApp?.id) return;
+    async function refreshActiveAppData() {
+      try {
+        const [loadedIncharges, loadedSummary] = await Promise.all([
+          fetchIncharges(selectedApp!.id),
+          fetchApplicationSummary(selectedApp!.id),
+        ]);
+        setIncharges(loadedIncharges);
+        setSummary(loadedSummary);
+      } catch (err) {
+        console.error('Failed to refresh active app data:', err);
+      }
+    }
+    refreshActiveAppData();
+  }, [selectedApp?.id]);
 
   const handleLoginSuccess = (user: AdminUser) => {
     setAdminUser(user);
@@ -84,15 +110,14 @@ export default function App() {
 
   const handleCreateApp = async (formData: Partial<AppInstance>) => {
     const created = await createApplication(formData);
-    const updated = [...apps, created];
-    setApps(updated);
-    localStorage.setItem('kdp_custom_parties', JSON.stringify(updated));
+    const refreshed = await fetchApplications();
+    setApps(refreshed);
+    setSelectedApp(created);
   };
 
   const handleDeleteApp = (id: string) => {
     const updated = apps.filter((a) => a.id !== id);
     setApps(updated);
-    localStorage.setItem('kdp_custom_parties', JSON.stringify(updated));
     if (selectedApp?.id === id) {
       setSelectedApp(updated[0] || null);
     }
@@ -103,7 +128,6 @@ export default function App() {
     setApps(updated);
     const target = updated.find((a) => a.id === id) || null;
     setSelectedApp(target);
-    localStorage.setItem('kdp_custom_parties', JSON.stringify(updated));
   };
 
   const handleTransferIncharge = async (inchargeId: string, targetJurisdiction: string, targetLevel: string) => {
@@ -202,8 +226,14 @@ export default function App() {
           {activeTab === 'dashboard' && (
             <DashboardOverview
               apps={apps}
+              incharges={incharges}
+              summary={summary}
               pendingApprovals={approvals}
               onNavigateTab={setActiveTab}
+              onCreateNewApp={() => {
+                setActiveTab('applications');
+                setIsCreateAppModalOpen(true);
+              }}
               onSelectApp={(app) => {
                 setSelectedApp(app);
                 setActiveTab('applications');
@@ -219,7 +249,25 @@ export default function App() {
               onCreateApp={handleCreateApp}
               onDeleteApp={handleDeleteApp}
               onSetDefault={handleSetDefault}
+              isCreateModalOpen={isCreateAppModalOpen}
+              onOpenCreateModal={() => setIsCreateAppModalOpen(true)}
+              onCloseCreateModal={() => setIsCreateAppModalOpen(false)}
             />
+          )}
+
+          {activeTab === 'cms' && (
+            <div className="bg-slate-900/90 rounded-3xl overflow-hidden shadow-2xl border border-slate-800 text-slate-100">
+              <CmsStudio
+                isOpen={true}
+                mode="editor"
+                onClose={() => setActiveTab('dashboard')}
+                onOpenRoleModules={async () => {
+                  const loaded = await fetchApplications();
+                  setApps(loaded);
+                  setActiveTab('applications');
+                }}
+              />
+            </div>
           )}
 
           {activeTab === 'data' && (
@@ -276,6 +324,22 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {isCreateAppModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+          <CmsStudio
+            isOpen={true}
+            mode="setup"
+            onClose={() => setIsCreateAppModalOpen(false)}
+            onOpenRoleModules={async () => {
+              const loaded = await fetchApplications();
+              setApps(loaded);
+              setIsCreateAppModalOpen(false);
+              setActiveTab('applications');
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

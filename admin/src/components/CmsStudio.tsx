@@ -31,8 +31,9 @@ import {
   FileUp,
   Mail,
 } from 'lucide-react';
-import { useCms } from '../../context/CmsContext';
-import { AppScope, CmsParty, ConstituencyItem } from '../../lib/cms';
+import { useCms } from '../context/CmsContext';
+import { useNotification } from '../context/NotificationContext';
+import { AppScope, CmsParty, ConstituencyItem } from '../lib/cms';
 
 interface CmsStudioProps {
   isOpen: boolean;
@@ -178,12 +179,9 @@ const PRESET_THEMES = [
 
 export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = 'setup' }: CmsStudioProps) {
   const { config, parties: existingParties, buildApplication, updateParties } = useCms();
+  const { notify } = useNotification();
 
-  React.useEffect(() => {
-    if (mode === 'setup' && localStorage.getItem('kdp_party_created') === 'true') {
-      window.location.hash = '/app';
-    }
-  }, [mode]);
+  // In Admin Panel, CmsStudio remains accessible at all times without forced redirection
 
   // 1. Title
   const [title, setTitle] = useState(config.organisationName || 'Kondapi Connect');
@@ -584,7 +582,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
 
     // Check duplicate code
     if (partyList.some((p) => p.code === cleanCode)) {
-      alert(`A political party with code "${cleanCode}" already exists.`);
+      notify.warning(`A political party with code "${cleanCode}" already exists.`, 'Duplicate Party Code');
       return;
     }
 
@@ -606,7 +604,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
   // Remove Party handler
   const handleRemoveParty = (codeToRemove: string) => {
     if (partyList.length <= 1) {
-      alert('At least one political party is required.');
+      notify.warning('At least one political party must remain registered in the system.', 'Party Required');
       return;
     }
     setPartyList(partyList.filter((p) => p.code !== codeToRemove));
@@ -622,12 +620,12 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
   // SUBMIT / BUILD APPLICATION HANDLER
   const handleSubmitBuildApplication = async () => {
     if (!title.trim()) {
-      alert('Please enter an application title.');
+      notify.warning('Please enter an application title.', 'Title Required');
       return;
     }
 
     if (selectedHierarchyLevels.length === 0) {
-      alert('Please select at least one hierarchy level.');
+      notify.warning('Please select at least one hierarchy level.', 'Hierarchy Tier Required');
       return;
     }
 
@@ -748,6 +746,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
 
       setBuildSuccess(true);
 
+      notify.success('Application branding and configuration successfully updated!', 'Configuration Saved');
       setTimeout(() => {
         setIsBuilding(false);
         if (onOpenRoleModules) {
@@ -761,16 +760,16 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
     } catch (err) {
       console.error('Failed to build application:', err);
       setIsBuilding(false);
-      alert(err instanceof Error ? err.message : 'Failed to save CMS configuration. Please try again.');
+      notify.error(err instanceof Error ? err.message : 'Failed to save CMS configuration. Please try again.', 'Configuration Failed');
     }
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 selection:bg-amber-100 py-6 sm:py-8 px-4 sm:px-6 lg:px-8 xl:px-10">
+    <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-amber-400 selection:text-slate-950 py-6 sm:py-8 px-4 sm:px-6 lg:px-8 xl:px-10">
       {/* Top Bar with Navigation and Status */}
-      <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 border-b border-slate-200">
+      <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 border-b border-slate-800">
         <div className="flex items-center gap-3">
           <div
             className="w-11 h-11 rounded-2xl flex items-center justify-center text-white shadow-xs font-black text-base"
@@ -780,14 +779,14 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">
+              <h1 className="text-xl md:text-2xl font-black text-white tracking-tight">
                 CMS Studio
               </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-400/10 text-amber-300 border border-amber-400/30">
                 {mode === 'editor' ? 'Live Configuration' : 'One-Time Party Setup'}
               </span>
             </div>
-            <p className="text-xs text-slate-500 font-medium">
+            <p className="text-xs text-slate-400 font-medium">
               Create your party application below. Once created, CMS Studio will lock and the role modules will be generated.
             </p>
           </div>
@@ -798,13 +797,13 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
             <button
               type="button"
               onClick={onClose}
-              className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-bold hover:bg-slate-50"
+              className="px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-800 text-slate-200 text-xs font-bold hover:bg-slate-700 cursor-pointer"
             >
               Close
             </button>
           )}
-          <span className="px-3.5 py-1.5 rounded-xl bg-amber-100/80 border border-amber-300 text-amber-950 text-xs font-black tracking-wide flex items-center gap-1.5 shadow-2xs">
-            <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+          <span className="px-3.5 py-1.5 rounded-xl bg-amber-400/10 border border-amber-400/30 text-amber-300 text-xs font-black tracking-wide flex items-center gap-1.5 shadow-2xs">
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
             <span>Single Party Creation Phase</span>
           </span>
         </div>
@@ -815,19 +814,19 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
         {/* ============================================================== */}
         {/* LEFT COLUMN: THE CONFIGURATION FORM */}
         {/* ============================================================== */}
-        <div className="lg:col-span-8 bg-white rounded-3xl border border-slate-200 shadow-xl p-6 sm:p-8 space-y-8">
+        <div className="lg:col-span-8 bg-slate-900/90 rounded-3xl border border-slate-800 shadow-2xl p-6 sm:p-8 space-y-8">
           {/* ============================================================ */}
           {/* 1. APPLICATION TITLE */}
           {/* ============================================================ */}
           <section className="space-y-2">
-            <div className="flex items-center gap-2 pb-1 border-b border-slate-100">
-              <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-900 text-xs font-black flex items-center justify-center">
+            <div className="flex items-center gap-2 pb-1 border-b border-slate-800">
+              <span className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black flex items-center justify-center">
                 1
               </span>
-              <label className="text-sm font-black text-slate-900">Application Title</label>
-              <span className="text-[11px] text-rose-500 font-bold">*Required</span>
+              <label className="text-sm font-black text-white">Application Title</label>
+              <span className="text-[11px] text-rose-400 font-bold">*Required</span>
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-400">
               Enter the main headline title for this application (displayed on header, splash, and reports).
             </p>
             <input
@@ -835,7 +834,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Kondapi TDP Connect or Telangana Congress Connect"
-              className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 rounded-xl text-slate-900 text-sm font-semibold focus:border-amber-500 focus:outline-none transition-all"
+              className="w-full px-4 py-2.5 bg-slate-950 hover:bg-slate-900 focus:bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 text-sm font-semibold focus:border-amber-400 focus:outline-none transition-all"
             />
           </section>
 
@@ -843,13 +842,13 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
           {/* 2. APPLICATION TAGLINE */}
           {/* ============================================================ */}
           <section className="space-y-2">
-            <div className="flex items-center gap-2 pb-1 border-b border-slate-100">
-              <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-900 text-xs font-black flex items-center justify-center">
+            <div className="flex items-center gap-2 pb-1 border-b border-slate-800">
+              <span className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black flex items-center justify-center">
                 2
               </span>
-              <label className="text-sm font-black text-slate-900">Application Tagline / Slogan</label>
+              <label className="text-sm font-black text-white">Application Tagline / Slogan</label>
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-400">
               Enter the mission tagline or subtitle displayed under the application title.
             </p>
             <input
@@ -857,7 +856,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
               value={tagline}
               onChange={(e) => setTagline(e.target.value)}
               placeholder="e.g. Integrated Voter Management & Cadre Command Center"
-              className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 rounded-xl text-slate-900 text-sm font-semibold focus:border-amber-500 focus:outline-none transition-all"
+              className="w-full px-4 py-2.5 bg-slate-950 hover:bg-slate-900 focus:bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 text-sm font-semibold focus:border-amber-400 focus:outline-none transition-all"
             />
           </section>
 
@@ -865,25 +864,25 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
           {/* 3. APPLICATION LOGO */}
           {/* ============================================================ */}
           <section className="space-y-3">
-            <div className="flex items-center gap-2 pb-1 border-b border-slate-100">
-              <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-900 text-xs font-black flex items-center justify-center">
+            <div className="flex items-center gap-2 pb-1 border-b border-slate-800">
+              <span className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black flex items-center justify-center">
                 3
               </span>
-              <label className="text-sm font-black text-slate-900">Application Logo</label>
+              <label className="text-sm font-black text-white">Application Logo</label>
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-400">
               Upload a logo image file directly or paste an image URL.
             </p>
 
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
               {/* Logo Preview box */}
-              <div className="w-20 h-20 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden shrink-0 shadow-2xs relative group">
+              <div className="w-20 h-20 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-center overflow-hidden shrink-0 shadow-2xs relative group">
                 {logoUrl ? (
                   <>
                     <img src={logoUrl} alt="Logo Preview" className="w-full h-full object-contain p-1" />
                     <button
                       onClick={() => setLogoUrl('')}
-                      className="absolute inset-0 bg-slate-900/60 text-white opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs font-bold cursor-pointer"
+                      className="absolute inset-0 bg-slate-950/80 text-white opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs font-bold cursor-pointer"
                       title="Remove Logo"
                     >
                       <X className="w-4 h-4" />
@@ -902,8 +901,8 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
               {/* Upload file + URL input */}
               <div className="flex-1 space-y-2.5 w-full">
                 <div className="flex items-center gap-3">
-                  <label className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer transition-all shadow-2xs">
-                    <Upload className="w-3.5 h-3.5 text-slate-600" />
+                  <label className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer transition-all shadow-2xs">
+                    <Upload className="w-3.5 h-3.5 text-slate-400" />
                     <span>Upload Logo Image</span>
                     <input
                       type="file"
@@ -915,7 +914,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                   {logoUrl && (
                     <button
                       onClick={() => setLogoUrl('')}
-                      className="text-xs text-rose-600 hover:text-rose-700 font-bold cursor-pointer"
+                      className="text-xs text-rose-400 hover:text-rose-300 font-bold cursor-pointer"
                     >
                       Clear Logo
                     </button>
@@ -927,7 +926,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                   value={logoUrl}
                   onChange={(e) => setLogoUrl(e.target.value)}
                   placeholder="Or paste an image web URL (https://...)"
-                  className="w-full px-3 py-2 bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 rounded-xl text-slate-800 text-xs font-medium focus:border-amber-500 focus:outline-none transition-all"
+                  className="w-full px-3 py-2 bg-slate-950 hover:bg-slate-900 focus:bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 text-xs font-medium focus:border-amber-400 focus:outline-none transition-all"
                 />
               </div>
             </div>
@@ -937,12 +936,12 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
           {/* 4. HIERARCHY LEVELS (CHECKBOXES) */}
           {/* ============================================================ */}
           <section className="space-y-3">
-            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-800">
               <div className="flex items-center gap-2">
-                <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-900 text-xs font-black flex items-center justify-center">
+                <span className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black flex items-center justify-center">
                   4
                 </span>
-                <label className="text-sm font-black text-slate-900">
+                <label className="text-sm font-black text-white">
                   Hierarchy Levels ({selectedHierarchyLevels.length} of {ALL_HIERARCHY_TIERS.length} Selected)
                 </label>
               </div>
@@ -951,23 +950,23 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                 <button
                   type="button"
                   onClick={handleSelectAllHierarchy}
-                  className="text-xs text-amber-700 hover:text-amber-800 font-bold cursor-pointer"
+                  className="text-xs text-amber-400 hover:text-amber-300 font-bold cursor-pointer"
                 >
                   Select All
                 </button>
-                <span className="text-slate-300">•</span>
+                <span className="text-slate-600">•</span>
                 <button
                   type="button"
                   onClick={handleSelectStandardHierarchy}
-                  className="text-xs text-slate-600 hover:text-slate-900 font-bold cursor-pointer"
+                  className="text-xs text-slate-400 hover:text-white font-bold cursor-pointer"
                 >
                   Standard 4 Tiers
                 </button>
               </div>
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-400">
               Select the required hierarchy levels using the checkboxes.
-              <strong className="text-slate-800">
+              <strong className="text-slate-200">
                 {' '}Only the selected levels will be generated as active role cards
               </strong>{' '}
               on the role-based module page!
@@ -984,36 +983,36 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                     onClick={() => handleToggleHierarchy(tier.key)}
                     className={`p-3.5 rounded-2xl border transition-all cursor-pointer select-none flex items-start gap-3 ${
                       isSelected
-                        ? 'border-amber-500 bg-amber-50/40 ring-1 ring-amber-500 shadow-2xs'
-                        : 'border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300'
+                        ? 'border-amber-400/80 bg-amber-400/10 ring-1 ring-amber-400/40 shadow-xs'
+                        : 'border-slate-800 bg-slate-950 hover:bg-slate-900 hover:border-slate-700 text-slate-300'
                     }`}
                   >
                     <div className="pt-0.5">
                       {isSelected ? (
-                        <CheckSquare className="w-4 h-4 text-amber-600 fill-amber-50" />
+                        <CheckSquare className="w-4 h-4 text-amber-400 fill-amber-400/20" />
                       ) : (
-                        <Square className="w-4 h-4 text-slate-300" />
+                        <Square className="w-4 h-4 text-slate-600" />
                       )}
                     </div>
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1">
-                        <span className="text-xs font-black text-slate-900 flex items-center gap-1.5 truncate">
-                          <TierIcon className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                        <span className="text-xs font-black text-white flex items-center gap-1.5 truncate">
+                          <TierIcon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                           <span>{tier.name}</span>
                         </span>
                         <span
                           className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
-                            isSelected ? 'bg-amber-200/70 text-amber-900' : 'bg-slate-100 text-slate-500'
+                            isSelected ? 'bg-amber-400/20 text-amber-300' : 'bg-slate-800 text-slate-400'
                           }`}
                         >
                           {tier.levelBadge}
                         </span>
                       </div>
-                      <div className="text-[11px] font-bold text-amber-700 mt-0.5">
+                      <div className="text-[11px] font-bold text-amber-400 mt-0.5">
                         Card: {tier.roleName}
                       </div>
-                      <p className="text-[10px] text-slate-500 leading-tight mt-0.5 line-clamp-2">
+                      <p className="text-[10px] text-slate-400 leading-tight mt-0.5 line-clamp-2">
                         {tier.subtitle}
                       </p>
                     </div>
@@ -1027,19 +1026,19 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
           {/* 5. COLOR THEME */}
           {/* ============================================================ */}
           <section className="space-y-3">
-            <div className="flex items-center gap-2 pb-1 border-b border-slate-100">
-              <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-900 text-xs font-black flex items-center justify-center">
+            <div className="flex items-center gap-2 pb-1 border-b border-slate-800">
+              <span className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black flex items-center justify-center">
                 5
               </span>
-              <label className="text-sm font-black text-slate-900">Color Theme & Palette</label>
+              <label className="text-sm font-black text-white">Color Theme & Palette</label>
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-400">
               Select custom colors or pick a curated party palette to theme headers, buttons, and badges.
             </p>
 
             {/* Quick 1-Click Themes */}
             <div className="space-y-1.5">
-              <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                 Preset Palettes:
               </span>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -1048,13 +1047,13 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                     key={theme.id}
                     type="button"
                     onClick={() => handleApplyPresetTheme(theme)}
-                    className="p-2 rounded-xl border border-slate-200 hover:border-slate-400 bg-slate-50 hover:bg-white text-left transition-all cursor-pointer flex items-center gap-2.5 shadow-2xs"
+                    className="p-2 rounded-xl border border-slate-800 hover:border-slate-600 bg-slate-950 hover:bg-slate-900 text-left transition-all cursor-pointer flex items-center gap-2.5 shadow-2xs"
                   >
                     <div className="flex -space-x-1 shrink-0">
-                      <div className="w-4 h-4 rounded-full border border-white" style={{ backgroundColor: theme.primary }} />
-                      <div className="w-4 h-4 rounded-full border border-white" style={{ backgroundColor: theme.secondary }} />
+                      <div className="w-4 h-4 rounded-full border border-slate-900" style={{ backgroundColor: theme.primary }} />
+                      <div className="w-4 h-4 rounded-full border border-slate-900" style={{ backgroundColor: theme.secondary }} />
                     </div>
-                    <span className="text-xs font-bold text-slate-800 truncate">{theme.name}</span>
+                    <span className="text-xs font-bold text-slate-200 truncate">{theme.name}</span>
                   </button>
                 ))}
               </div>
@@ -1062,56 +1061,56 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
 
             {/* Custom Color Pickers */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-              <div className="space-y-1 p-3 rounded-2xl bg-slate-50 border border-slate-200">
-                <label className="text-[11px] font-black text-slate-700 block">Primary Brand Color</label>
+              <div className="space-y-1 p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                <label className="text-[11px] font-black text-slate-300 block">Primary Brand Color</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
                     value={primaryColor}
                     onChange={(e) => setPrimaryColor(e.target.value)}
-                    className="w-8 h-8 rounded-lg border border-slate-300 cursor-pointer p-0 bg-transparent"
+                    className="w-8 h-8 rounded-lg border border-slate-700 cursor-pointer p-0 bg-transparent"
                   />
                   <input
                     type="text"
                     value={primaryColor}
                     onChange={(e) => setPrimaryColor(e.target.value)}
-                    className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 uppercase"
+                    className="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono font-bold text-slate-200 uppercase"
                   />
                 </div>
               </div>
 
-              <div className="space-y-1 p-3 rounded-2xl bg-slate-50 border border-slate-200">
-                <label className="text-[11px] font-black text-slate-700 block">Secondary Accent</label>
+              <div className="space-y-1 p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                <label className="text-[11px] font-black text-slate-300 block">Secondary Accent</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
                     value={secondaryColor}
                     onChange={(e) => setSecondaryColor(e.target.value)}
-                    className="w-8 h-8 rounded-lg border border-slate-300 cursor-pointer p-0 bg-transparent"
+                    className="w-8 h-8 rounded-lg border border-slate-700 cursor-pointer p-0 bg-transparent"
                   />
                   <input
                     type="text"
                     value={secondaryColor}
                     onChange={(e) => setSecondaryColor(e.target.value)}
-                    className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 uppercase"
+                    className="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono font-bold text-slate-200 uppercase"
                   />
                 </div>
               </div>
 
-              <div className="space-y-1 p-3 rounded-2xl bg-slate-50 border border-slate-200">
-                <label className="text-[11px] font-black text-slate-700 block">Neutral Accent</label>
+              <div className="space-y-1 p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                <label className="text-[11px] font-black text-slate-300 block">Neutral Accent</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
                     value={accentColor}
                     onChange={(e) => setAccentColor(e.target.value)}
-                    className="w-8 h-8 rounded-lg border border-slate-300 cursor-pointer p-0 bg-transparent"
+                    className="w-8 h-8 rounded-lg border border-slate-700 cursor-pointer p-0 bg-transparent"
                   />
                   <input
                     type="text"
                     value={accentColor}
                     onChange={(e) => setAccentColor(e.target.value)}
-                    className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 uppercase"
+                    className="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono font-bold text-slate-200 uppercase"
                   />
                 </div>
               </div>
@@ -1122,27 +1121,27 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
           {/* 6. POLITICAL PARTIES (MANUAL & DYNAMIC ENTRY) */}
           {/* ============================================================ */}
           <section className="space-y-3">
-            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-800">
               <div className="flex items-center gap-2">
-                <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-900 text-xs font-black flex items-center justify-center">
+                <span className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black flex items-center justify-center">
                   6
                 </span>
-                <label className="text-sm font-black text-slate-900">
+                <label className="text-sm font-black text-white">
                   Political Parties ({partyList.length} Active)
                 </label>
               </div>
-              <span className="text-[11px] text-slate-500 font-medium">
+              <span className="text-[11px] text-slate-400 font-medium">
                 Parties available in voter telemetry & surveys
               </span>
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-400">
               Manually enter the names of the political parties that should be available in this application.
             </p>
 
             {/* Add Party Form */}
-            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <Plus className="w-3.5 h-3.5 text-amber-600" />
+            <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+              <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                <Plus className="w-3.5 h-3.5 text-amber-400" />
                 <span>Add Political Party to this Application</span>
               </span>
 
@@ -1153,7 +1152,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                     value={newPartyName}
                     onChange={(e) => setNewPartyName(e.target.value)}
                     placeholder="Party Name (e.g. Samajwadi Party)"
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:border-amber-500 focus:outline-none"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
                   />
                 </div>
 
@@ -1164,12 +1163,12 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                     onChange={(e) => setNewPartyCode(e.target.value)}
                     placeholder="Code (e.g. SP)"
                     maxLength={6}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 uppercase focus:border-amber-500 focus:outline-none"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white uppercase placeholder-slate-500 focus:border-amber-400 focus:outline-none"
                   />
                 </div>
 
                 <div className="sm:col-span-3 flex items-center gap-2">
-                  <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl px-2 py-1">
+                  <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1">
                     <input
                       type="color"
                       value={newPartyColor}
@@ -1181,7 +1180,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                   <button
                     type="button"
                     onClick={handleAddParty}
-                    className="flex-1 px-3 py-2 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black rounded-xl text-xs transition-all shadow-2xs cursor-pointer flex items-center justify-center gap-1 active:scale-95"
+                    className="flex-1 px-3 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-xl text-xs transition-all shadow-2xs cursor-pointer flex items-center justify-center gap-1 active:scale-95"
                   >
                     <Plus className="w-3 h-3" />
                     <span>Add</span>
@@ -1195,18 +1194,18 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
               {partyList.map((party) => (
                 <div
                   key={party.code}
-                  className="p-3 rounded-xl bg-white border border-slate-200 flex items-center justify-between gap-2 shadow-2xs hover:border-slate-300 transition-all"
+                  className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2 shadow-2xs hover:border-slate-700 transition-all"
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div
-                      className="w-5 h-5 rounded-lg shrink-0 border border-black/10 shadow-2xs"
+                      className="w-5 h-5 rounded-lg shrink-0 border border-black/20 shadow-2xs"
                       style={{ backgroundColor: party.primaryColor }}
                     />
                     <div className="min-w-0">
-                      <div className="text-xs font-black text-slate-900 truncate">
+                      <div className="text-xs font-black text-white truncate">
                         {party.name}
                       </div>
-                      <span className="font-mono text-[10px] text-slate-500 font-bold">
+                      <span className="font-mono text-[10px] text-slate-400 font-bold">
                         {party.code}
                       </span>
                     </div>
@@ -1215,7 +1214,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                   <button
                     type="button"
                     onClick={() => handleRemoveParty(party.code)}
-                    className="p-1 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                    className="p-1 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors cursor-pointer"
                     title="Remove Party"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -1229,85 +1228,85 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
           {/* 7. OTHER REQUIRED INFORMATION */}
           {/* ============================================================ */}
           <section className="space-y-3">
-            <div className="flex items-center gap-2 pb-1 border-b border-slate-100">
-              <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-900 text-xs font-black flex items-center justify-center">
+            <div className="flex items-center gap-2 pb-1 border-b border-slate-800">
+              <span className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black flex items-center justify-center">
                 7
               </span>
-              <label className="text-sm font-black text-slate-900">Other Required Information</label>
+              <label className="text-sm font-black text-white">Other Required Information</label>
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-400">
               Configure jurisdiction, territorial scope, and candidate details for this deployment.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* State / Region */}
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">State / Region</label>
+                <label className="text-xs font-bold text-slate-300">State / Region</label>
                 <select
                   value={stateName}
                   onChange={(e) => setStateName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:border-amber-500 focus:outline-none"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-semibold text-white focus:border-amber-400 focus:outline-none"
                 >
-                  <option value="Andhra Pradesh">Andhra Pradesh</option>
-                  <option value="Telangana">Telangana</option>
-                  <option value="Karnataka">Karnataka</option>
-                  <option value="Tamil Nadu">Tamil Nadu</option>
-                  <option value="Maharashtra">Maharashtra</option>
-                  <option value="Delhi NCT">Delhi NCT</option>
-                  <option value="National Command">National Command</option>
+                  <option value="Andhra Pradesh" className="bg-slate-900">Andhra Pradesh</option>
+                  <option value="Telangana" className="bg-slate-900">Telangana</option>
+                  <option value="Karnataka" className="bg-slate-900">Karnataka</option>
+                  <option value="Tamil Nadu" className="bg-slate-900">Tamil Nadu</option>
+                  <option value="Maharashtra" className="bg-slate-900">Maharashtra</option>
+                  <option value="Delhi NCT" className="bg-slate-900">Delhi NCT</option>
+                  <option value="National Command" className="bg-slate-900">National Command</option>
                 </select>
               </div>
 
               {/* Application Scope */}
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">Territorial Scope</label>
+                <label className="text-xs font-bold text-slate-300">Territorial Scope</label>
                 <select
                   value={appScope}
                   onChange={(e) => setAppScope(e.target.value as AppScope)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:border-amber-500 focus:outline-none"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-semibold text-white focus:border-amber-400 focus:outline-none"
                 >
-                  <option value="SINGLE_MLA">Single MLA (1 Assembly Constituency)</option>
-                  <option value="PARLIAMENT_MP">Parliament MP (1 Lok Sabha Seat, ~7 MLAs)</option>
-                  <option value="ZONE">Regional Zone (~3 MPs, 21 MLAs)</option>
-                  <option value="STATE">Statewide Command</option>
+                  <option value="SINGLE_MLA" className="bg-slate-900">Single MLA (1 Assembly Constituency)</option>
+                  <option value="PARLIAMENT_MP" className="bg-slate-900">Parliament MP (1 Lok Sabha Seat, ~7 MLAs)</option>
+                  <option value="ZONE" className="bg-slate-900">Regional Zone (~3 MPs, 21 MLAs)</option>
+                  <option value="STATE" className="bg-slate-900">Statewide Command</option>
                 </select>
               </div>
             </div>
 
             {/* A. SINGLE MLA SCOPE */}
             {appScope === 'SINGLE_MLA' && (
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Key Leader / Candidate Name</label>
+                    <label className="text-xs font-bold text-slate-300">Key Leader / Candidate Name</label>
                     <input
                       type="text"
                       value={candidateName}
                       onChange={(e) => setCandidateName(e.target.value)}
                       placeholder="e.g. Dr. Dola Sree Bala Veeranjaneya Swamy"
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:border-amber-500 focus:outline-none"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Assembly Constituency Name</label>
+                    <label className="text-xs font-bold text-slate-300">Assembly Constituency Name</label>
                     <input
                       type="text"
                       value={constituencyName}
                       onChange={(e) => setConstituencyName(e.target.value)}
                       placeholder="e.g. Kondapi (SC)"
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:border-amber-500 focus:outline-none"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
                     />
                   </div>
                 </div>
 
-                <div className="space-y-1 pt-2 border-t border-slate-200/60">
+                <div className="space-y-1 pt-2 border-t border-slate-800">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                      <Mail className="w-3.5 h-3.5 text-amber-600" />
+                    <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                      <Mail className="w-3.5 h-3.5 text-amber-400" />
                       <span>Candidate / Incharge Email Address</span>
                     </label>
-                    <span className="text-[10px] text-amber-800 bg-amber-100 font-bold px-2 py-0.5 rounded-full">
+                    <span className="text-[10px] text-amber-300 bg-amber-400/10 border border-amber-400/20 font-bold px-2 py-0.5 rounded-full">
                       Brevo Dispatch (Free Credentials)
                     </span>
                   </div>
@@ -1316,7 +1315,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                     value={candidateEmail}
                     onChange={(e) => setCandidateEmail(e.target.value)}
                     placeholder="e.g. incharge@telanganacongress.in"
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:border-amber-500 focus:outline-none"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
                   />
                   <p className="text-[10px] text-slate-500">
                     Generated login password and command center access instructions will be delivered to this email address.
@@ -1327,15 +1326,15 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
 
             {/* B. PARLIAMENT MP SCOPE (7 MLAs) */}
             {appScope === 'PARLIAMENT_MP' && (
-              <div className="space-y-4 p-4 rounded-2xl bg-amber-50/40 border border-amber-200/80">
-                <div className="flex items-center justify-between pb-2 border-b border-amber-200/60">
+              <div className="space-y-4 p-4 rounded-2xl bg-slate-950 border border-slate-800">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                   <div className="flex items-center gap-2">
-                    <Crown className="w-4 h-4 text-amber-600" />
-                    <span className="text-xs font-black text-slate-900">
+                    <Crown className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-black text-white">
                       Parliament MP & 7 Assembly Segments Configuration
                     </span>
                   </div>
-                  <span className="text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
+                  <span className="text-[11px] font-bold text-amber-300 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full">
                     1 Lok Sabha • 7 MLAs
                   </span>
                 </div>
@@ -1343,30 +1342,30 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                 {/* Parliament MP Meta Header */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-700">Parliament Seat (Lok Sabha)</label>
+                    <label className="text-[11px] font-bold text-slate-300">Parliament Seat (Lok Sabha)</label>
                     <input
                       type="text"
                       value={parliamentName}
                       onChange={(e) => setParliamentName(e.target.value)}
                       placeholder="e.g. Ongole Lok Sabha Seat"
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:border-amber-500 focus:outline-none"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-700">MP Candidate / Incharge Name</label>
+                    <label className="text-[11px] font-bold text-slate-300">MP Candidate / Incharge Name</label>
                     <input
                       type="text"
                       value={mpCandidateName}
                       onChange={(e) => setMpCandidateName(e.target.value)}
                       placeholder="e.g. Magunta Sreenivasulu Reddy"
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:border-amber-500 focus:outline-none"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
                     />
                   </div>
                 </div>
 
                 {/* 7 MLAs Section */}
                 <div className="space-y-2 pt-2">
-                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-300">
                     <span>Assembly Constituencies (7 MLAs under this Parliament Seat):</span>
                     <span className="text-[10px] text-slate-500 font-medium">All 7 segments will be synchronized</span>
                   </div>
@@ -1375,31 +1374,31 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                     {parliamentMlas.map((mla, idx) => (
                       <div
                         key={idx}
-                        className="grid grid-cols-1 sm:grid-cols-12 gap-2 p-2.5 bg-white border border-slate-200/80 rounded-xl shadow-2xs items-center"
+                        className="grid grid-cols-1 sm:grid-cols-12 gap-2 p-2.5 bg-slate-900 border border-slate-800 rounded-xl shadow-2xs items-center"
                       >
                         <div className="sm:col-span-1 flex items-center justify-center">
-                          <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-900 text-[11px] font-black flex items-center justify-center">
+                          <span className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[11px] font-black flex items-center justify-center">
                             #{idx + 1}
                           </span>
                         </div>
                         <div className="sm:col-span-6 space-y-0.5">
-                          <label className="text-[10px] font-bold text-slate-500">Assembly Constituency Name</label>
+                          <label className="text-[10px] font-bold text-slate-400">Assembly Constituency Name</label>
                           <input
                             type="text"
                             value={mla.constituencyName}
                             onChange={(e) => handleParliamentMlaChange(idx, 'constituencyName', e.target.value)}
                             placeholder={`e.g. Constituency ${idx + 1}`}
-                            className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:border-amber-500 focus:bg-white focus:outline-none"
+                            className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs font-medium text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
                           />
                         </div>
                         <div className="sm:col-span-5 space-y-0.5">
-                          <label className="text-[10px] font-bold text-slate-500">MLA Candidate / Person Name</label>
+                          <label className="text-[10px] font-bold text-slate-400">MLA Candidate / Person Name</label>
                           <input
                             type="text"
                             value={mla.candidateName}
                             onChange={(e) => handleParliamentMlaChange(idx, 'candidateName', e.target.value)}
                             placeholder="Person / Incharge Name"
-                            className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:border-amber-500 focus:bg-white focus:outline-none"
+                            className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs font-medium text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
                           />
                         </div>
                       </div>
@@ -1411,23 +1410,23 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
 
             {/* C. ZONE LEVEL SCOPE (N MPs * 7 MLAs Algorithm) */}
             {appScope === 'ZONE' && (
-              <div className="space-y-4 p-4 rounded-2xl bg-indigo-50/40 border border-indigo-200/80">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-indigo-200/50">
+              <div className="space-y-4 p-4 rounded-2xl bg-slate-950 border border-slate-800">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800">
                   <div className="flex items-center gap-2">
-                    <Building className="w-4 h-4 text-indigo-600" />
+                    <Building className="w-4 h-4 text-indigo-400" />
                     <div>
-                      <span className="text-xs font-black text-slate-900">
+                      <span className="text-xs font-black text-white">
                         Zone Level Multi-Parliament Algorithm
                       </span>
-                      <p className="text-[10px] text-slate-500">
+                      <p className="text-[10px] text-slate-400">
                         Dynamic calculation: Each Parliament seat contains 7 MLA Assembly segments
                       </p>
                     </div>
                   </div>
                   {/* Calculation Formula Badge */}
-                  <div className="px-3 py-1 bg-indigo-100/90 border border-indigo-200 rounded-xl text-xs font-black text-indigo-950 flex items-center gap-1.5 self-start sm:self-auto">
+                  <div className="px-3 py-1 bg-indigo-950/60 border border-indigo-800/80 rounded-xl text-xs font-black text-indigo-200 flex items-center gap-1.5 self-start sm:self-auto">
                     <span>Algorithm:</span>
-                    <span className="text-indigo-700 font-mono">{zoneParliamentsCount} MPs × 7 MLAs =</span>
+                    <span className="text-indigo-300 font-mono">{zoneParliamentsCount} MPs × 7 MLAs =</span>
                     <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded text-[11px] font-mono">
                       {zoneParliamentsCount * 7} Inputs
                     </span>
@@ -1435,12 +1434,12 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                 </div>
 
                 {/* Counter Control */}
-                <div className="p-3 bg-white rounded-xl border border-indigo-100 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-2xs">
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-2xs">
                   <div>
-                    <span className="text-xs font-bold text-slate-800">
+                    <span className="text-xs font-bold text-slate-200">
                       Number of Parliament MP Seats in this Zone:
                     </span>
-                    <p className="text-[10px] text-slate-500">
+                    <p className="text-[10px] text-slate-400">
                       Selecting {zoneParliamentsCount} Parliament seats automatically generates {zoneParliamentsCount * 7} Assembly input fields
                     </p>
                   </div>
@@ -1454,30 +1453,30 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                         className={`w-8 h-8 rounded-lg text-xs font-black transition-all cursor-pointer ${
                           zoneParliamentsCount === cnt
                             ? 'bg-indigo-600 text-white shadow-xs scale-105'
-                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                         }`}
                       >
                         {cnt}
                       </button>
                     ))}
-                    <div className="h-4 w-px bg-slate-200 mx-1" />
+                    <div className="h-4 w-px bg-slate-800 mx-1" />
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
                         onClick={() => handleZoneParliamentsCountChange(zoneParliamentsCount - 1)}
                         disabled={zoneParliamentsCount <= 1}
-                        className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs disabled:opacity-40 cursor-pointer"
+                        className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold flex items-center justify-center text-xs disabled:opacity-40 cursor-pointer"
                       >
                         -
                       </button>
-                      <span className="w-8 text-center text-xs font-black text-indigo-900 font-mono">
+                      <span className="w-8 text-center text-xs font-black text-indigo-300 font-mono">
                         {zoneParliamentsCount}
                       </span>
                       <button
                         type="button"
                         onClick={() => handleZoneParliamentsCountChange(zoneParliamentsCount + 1)}
                         disabled={zoneParliamentsCount >= 10}
-                        className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs disabled:opacity-40 cursor-pointer"
+                        className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold flex items-center justify-center text-xs disabled:opacity-40 cursor-pointer"
                       >
                         +
                       </button>
@@ -1490,18 +1489,18 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                   {zoneParliaments.map((zp, pIdx) => (
                     <div
                       key={pIdx}
-                      className="p-3.5 bg-white border border-slate-200 rounded-2xl space-y-3 shadow-2xs"
+                      className="p-3.5 bg-slate-900 border border-slate-800 rounded-2xl space-y-3 shadow-2xs"
                     >
-                      <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                         <div className="flex items-center gap-2">
-                          <span className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-900 text-xs font-black flex items-center justify-center">
+                          <span className="w-6 h-6 rounded-lg bg-indigo-900/50 text-indigo-300 border border-indigo-700/60 text-xs font-black flex items-center justify-center">
                             P{pIdx + 1}
                           </span>
-                          <span className="text-xs font-black text-slate-900">
+                          <span className="text-xs font-black text-white">
                             Parliament Seat #{pIdx + 1}
                           </span>
                         </div>
-                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                        <span className="text-[10px] font-bold text-indigo-300 bg-indigo-950/60 px-2 py-0.5 rounded-full border border-indigo-800/80">
                           7 Assembly Inputs Generated
                         </span>
                       </div>
@@ -1509,39 +1508,39 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                       {/* Parliament Header Inputs */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         <div className="space-y-0.5">
-                          <label className="text-[10px] font-bold text-slate-600">Parliament Seat Name</label>
+                          <label className="text-[10px] font-bold text-slate-400">Parliament Seat Name</label>
                           <input
                             type="text"
                             value={zp.parliamentName}
                             onChange={(e) => handleZoneParliamentHeaderChange(pIdx, 'parliamentName', e.target.value)}
                             placeholder={`e.g. Parliament Seat ${pIdx + 1}`}
-                            className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-900 focus:border-indigo-500 focus:bg-white focus:outline-none"
+                            className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs font-semibold text-white placeholder-slate-500 focus:border-indigo-400 focus:outline-none"
                           />
                         </div>
                         <div className="space-y-0.5">
-                          <label className="text-[10px] font-bold text-slate-600">MP Candidate / Zone Leader</label>
+                          <label className="text-[10px] font-bold text-slate-400">MP Candidate / Zone Leader</label>
                           <input
                             type="text"
                             value={zp.mpCandidateName}
                             onChange={(e) => handleZoneParliamentHeaderChange(pIdx, 'mpCandidateName', e.target.value)}
                             placeholder="MP Incharge Name"
-                            className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-900 focus:border-indigo-500 focus:bg-white focus:outline-none"
+                            className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs font-semibold text-white placeholder-slate-500 focus:border-indigo-400 focus:outline-none"
                           />
                         </div>
                       </div>
 
                       {/* 7 MLAs for this Parliament */}
                       <div className="space-y-1.5 pt-1">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                           Assembly Segments ({zp.mlas.length} Inputs for P{pIdx + 1}):
                         </span>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           {zp.mlas.map((mla, mIdx) => (
                             <div
                               key={mIdx}
-                              className="p-2 bg-slate-50 border border-slate-200/70 rounded-xl space-y-1"
+                              className="p-2 bg-slate-950 border border-slate-800 rounded-xl space-y-1"
                             >
-                              <div className="flex items-center justify-between text-[10px] font-bold text-slate-500">
+                              <div className="flex items-center justify-between text-[10px] font-bold text-slate-400">
                                 <span>Segment {pIdx + 1}.{mIdx + 1}</span>
                               </div>
                               <input
@@ -1549,14 +1548,14 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                                 value={mla.constituencyName}
                                 onChange={(e) => handleZoneMlaChange(pIdx, mIdx, 'constituencyName', e.target.value)}
                                 placeholder="Constituency Name"
-                                className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-xs font-medium text-slate-900 focus:border-indigo-500 focus:outline-none"
+                                className="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded text-xs font-medium text-white placeholder-slate-500 focus:border-indigo-400 focus:outline-none"
                               />
                               <input
                                 type="text"
                                 value={mla.candidateName}
                                 onChange={(e) => handleZoneMlaChange(pIdx, mIdx, 'candidateName', e.target.value)}
                                 placeholder="MLA / Person Name"
-                                className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-xs font-medium text-slate-900 focus:border-indigo-500 focus:outline-none"
+                                className="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded text-xs font-medium text-white placeholder-slate-500 focus:border-indigo-400 focus:outline-none"
                               />
                             </div>
                           ))}
@@ -1570,29 +1569,29 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
 
             {/* D. STATE LEVEL / HQ SCOPE (Excel Upload + Manual Table) */}
             {appScope === 'STATE' && (
-              <div className="space-y-4 p-4 rounded-2xl bg-emerald-50/40 border border-emerald-200/80">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-emerald-200/50">
+              <div className="space-y-4 p-4 rounded-2xl bg-slate-950 border border-slate-800">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800">
                   <div className="flex items-center gap-2">
-                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
                     <div>
-                      <span className="text-xs font-black text-slate-900">
+                      <span className="text-xs font-black text-white">
                         State Level Electoral Mapping & Excel Parser
                       </span>
-                      <p className="text-[10px] text-slate-500">
+                      <p className="text-[10px] text-slate-400">
                         Upload spreadsheet to auto-populate all MLA/MP seats or input manually
                       </p>
                     </div>
                   </div>
 
                   {/* Mode Selector Tabs */}
-                  <div className="flex items-center bg-white border border-emerald-200 rounded-xl p-0.5 shadow-2xs self-start sm:self-auto">
+                  <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-0.5 shadow-2xs self-start sm:self-auto">
                     <button
                       type="button"
                       onClick={() => setStateInputMode('upload')}
                       className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                         stateInputMode === 'upload'
                           ? 'bg-emerald-600 text-white shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900'
+                          : 'text-slate-400 hover:text-white'
                       }`}
                     >
                       <Upload className="w-3 h-3" />
@@ -1604,7 +1603,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                       className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                         stateInputMode === 'manual'
                           ? 'bg-emerald-600 text-white shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900'
+                          : 'text-slate-400 hover:text-white'
                       }`}
                     >
                       <Table className="w-3 h-3" />
@@ -1616,21 +1615,21 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                 {/* Upload Section */}
                 {stateInputMode === 'upload' && (
                   <div className="space-y-3">
-                    <div className="p-4 bg-white border-2 border-dashed border-emerald-300 rounded-2xl text-center space-y-3 hover:border-emerald-400 transition-colors">
-                      <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
+                    <div className="p-4 bg-slate-900 border-2 border-dashed border-emerald-500/40 rounded-2xl text-center space-y-3 hover:border-emerald-500 transition-colors">
+                      <div className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center mx-auto">
                         <FileUp className="w-5 h-5" />
                       </div>
                       <div>
-                        <span className="text-xs font-black text-slate-900 block">
+                        <span className="text-xs font-black text-white block">
                           Upload Excel (.xlsx, .xls) or CSV Sheet
                         </span>
-                        <p className="text-[11px] text-slate-500 max-w-md mx-auto mt-0.5">
+                        <p className="text-[11px] text-slate-400 max-w-md mx-auto mt-0.5">
                           Accurate, open-source SheetJS parser extracts Parliament Name, Assembly Constituency Name, and Candidate/Person Name to auto-fill the system.
                         </p>
                       </div>
 
                       <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
-                        <label className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition-all shadow-xs cursor-pointer flex items-center gap-2 active:scale-95">
+                        <label className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black transition-all shadow-xs cursor-pointer flex items-center gap-2 active:scale-95">
                           <Upload className="w-3.5 h-3.5" />
                           <span>Select Excel File</span>
                           <input
@@ -1644,7 +1643,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                         <button
                           type="button"
                           onClick={handleDownloadSampleTemplate}
-                          className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
                         >
                           <Download className="w-3.5 h-3.5" />
                           <span>Download Sample Template (.xlsx)</span>
@@ -1654,22 +1653,22 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
 
                     {/* Parser Status Feedback */}
                     {isParsingExcel && (
-                      <div className="p-3 bg-emerald-50 text-emerald-800 text-xs font-bold rounded-xl flex items-center gap-2 animate-pulse">
-                        <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" />
+                      <div className="p-3 bg-emerald-950/60 text-emerald-300 text-xs font-bold rounded-xl flex items-center gap-2 animate-pulse border border-emerald-800/80">
+                        <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
                         <span>Extracting electoral seats from sheet...</span>
                       </div>
                     )}
 
                     {uploadSuccess && (
-                      <div className="p-3 bg-emerald-100/80 border border-emerald-300 text-emerald-900 text-xs font-bold rounded-xl flex items-center justify-between gap-2">
+                      <div className="p-3 bg-emerald-950/80 border border-emerald-700 text-emerald-200 text-xs font-bold rounded-xl flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <Check className="w-4 h-4 text-emerald-600" />
+                          <Check className="w-4 h-4 text-emerald-400" />
                           <span>{uploadSuccess}</span>
                         </div>
                         <button
                           type="button"
                           onClick={() => setStateInputMode('manual')}
-                          className="text-[11px] underline font-black text-emerald-950 cursor-pointer"
+                          className="text-[11px] underline font-black text-emerald-300 cursor-pointer"
                         >
                           View Extracted Data →
                         </button>
@@ -1677,8 +1676,8 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                     )}
 
                     {uploadError && (
-                      <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold rounded-xl flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <div className="p-3 bg-rose-950/60 border border-rose-800 text-rose-300 text-xs font-semibold rounded-xl flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
                         <span>{uploadError}</span>
                       </div>
                     )}
@@ -1688,32 +1687,32 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                 {/* Manual Inputs Section */}
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                      <Table className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                      <Table className="w-3.5 h-3.5 text-emerald-400" />
                       <span>Configured Seats ({stateConstituencies.length} Constituencies)</span>
                     </span>
                     <button
                       type="button"
                       onClick={handleAddStateRow}
-                      className="px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold rounded-lg shadow-2xs cursor-pointer flex items-center gap-1"
+                      className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold rounded-lg shadow-2xs cursor-pointer flex items-center gap-1"
                     >
-                      <Plus className="w-3 h-3 text-emerald-600" />
+                      <Plus className="w-3 h-3 text-emerald-400" />
                       <span>Add Row Manually</span>
                     </button>
                   </div>
 
-                  <div className="max-h-72 overflow-y-auto space-y-2 pr-1 border border-slate-200/80 rounded-xl p-2 bg-white">
+                  <div className="max-h-72 overflow-y-auto space-y-2 pr-1 border border-slate-800 rounded-xl p-2 bg-slate-950">
                     {stateConstituencies.length === 0 ? (
-                      <div className="py-8 text-center text-xs text-slate-400">
+                      <div className="py-8 text-center text-xs text-slate-500">
                         No constituencies added yet. Upload an Excel sheet above or click "Add Row Manually".
                       </div>
                     ) : (
                       stateConstituencies.map((row, idx) => (
                         <div
                           key={idx}
-                          className="grid grid-cols-1 sm:grid-cols-12 gap-2 p-2 bg-slate-50 border border-slate-200/60 rounded-lg items-center"
+                          className="grid grid-cols-1 sm:grid-cols-12 gap-2 p-2 bg-slate-900 border border-slate-800 rounded-lg items-center"
                         >
-                          <div className="sm:col-span-1 text-center font-mono text-[10px] font-bold text-slate-400">
+                          <div className="sm:col-span-1 text-center font-mono text-[10px] font-bold text-slate-500">
                             #{idx + 1}
                           </div>
                           <div className="sm:col-span-3">
@@ -1722,7 +1721,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                               value={row.parliamentName}
                               onChange={(e) => handleUpdateStateRow(idx, 'parliamentName', e.target.value)}
                               placeholder="Parliament / Lok Sabha"
-                              className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-xs font-medium text-slate-900 focus:border-emerald-500 focus:outline-none"
+                              className="w-full px-2 py-1 bg-slate-950 border border-slate-800 rounded text-xs font-medium text-white placeholder-slate-500 focus:border-emerald-400 focus:outline-none"
                             />
                           </div>
                           <div className="sm:col-span-4">
@@ -1731,7 +1730,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                               value={row.constituencyName}
                               onChange={(e) => handleUpdateStateRow(idx, 'constituencyName', e.target.value)}
                               placeholder="Assembly Constituency"
-                              className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-xs font-medium text-slate-900 focus:border-emerald-500 focus:outline-none"
+                              className="w-full px-2 py-1 bg-slate-950 border border-slate-800 rounded text-xs font-medium text-white placeholder-slate-500 focus:border-emerald-400 focus:outline-none"
                             />
                           </div>
                           <div className="sm:col-span-3">
@@ -1740,14 +1739,14 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                               value={row.candidateName}
                               onChange={(e) => handleUpdateStateRow(idx, 'candidateName', e.target.value)}
                               placeholder="MLA / Candidate Name"
-                              className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-xs font-medium text-slate-900 focus:border-emerald-500 focus:outline-none"
+                              className="w-full px-2 py-1 bg-slate-950 border border-slate-800 rounded text-xs font-medium text-white placeholder-slate-500 focus:border-emerald-400 focus:outline-none"
                             />
                           </div>
                           <div className="sm:col-span-1 flex justify-center">
                             <button
                               type="button"
                               onClick={() => handleRemoveStateRow(idx)}
-                              className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-50 cursor-pointer"
+                              className="p-1 text-slate-500 hover:text-rose-400 rounded hover:bg-rose-500/10 cursor-pointer"
                               title="Delete Row"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -1765,12 +1764,12 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
           {/* ============================================================ */}
           {/* SUBMIT / BUILD APPLICATION BUTTON */}
           {/* ============================================================ */}
-          <div className="pt-4 border-t border-slate-200">
+          <div className="pt-4 border-t border-slate-800">
             <button
               type="button"
               disabled={isBuilding}
               onClick={handleSubmitBuildApplication}
-              className="w-full py-4 px-6 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-2xl font-black text-base shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-3 cursor-pointer active:scale-98 disabled:opacity-60"
+              className="w-full py-4 px-6 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-2xl font-black text-base shadow-lg shadow-amber-400/20 hover:shadow-xl transition-all flex items-center justify-center gap-3 cursor-pointer active:scale-98 disabled:opacity-60"
             >
               {isBuilding ? (
                 <>
@@ -1790,7 +1789,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                 </>
               )}
             </button>
-            <p className="text-center text-xs text-slate-500 font-medium mt-2">
+            <p className="text-center text-xs text-slate-400 font-medium mt-2">
               Automatically builds the application and redirects to the role-based module page with only your configured hierarchy levels.
             </p>
           </div>
@@ -1800,24 +1799,24 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
         {/* RIGHT COLUMN: STICKY REAL-TIME APPLICATION PREVIEW */}
         {/* ============================================================== */}
         <div className="lg:col-span-4 sticky top-6 space-y-4">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-xl p-5 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <span className="text-xs font-black uppercase tracking-wider text-slate-500">
+          <div className="bg-slate-900/90 rounded-3xl border border-slate-800 shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <span className="text-xs font-black uppercase tracking-wider text-slate-400">
                 Live App Preview
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-100 text-emerald-800">
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                 Live
               </span>
             </div>
 
             {/* Mockup Card */}
-            <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white shadow-2xs">
+            <div className="rounded-2xl border border-slate-800 overflow-hidden bg-slate-950 shadow-2xs">
               {/* Header color accent */}
               <div className="h-2 w-full" style={{ backgroundColor: primaryColor }} />
 
               <div className="p-4 space-y-3 text-center">
                 {/* Logo / Monogram */}
-                <div className="mx-auto w-14 h-14 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center overflow-hidden shadow-xs">
+                <div className="mx-auto w-14 h-14 rounded-full border-2 border-slate-800 bg-slate-900 flex items-center justify-center overflow-hidden shadow-xs">
                   {logoUrl ? (
                     <img src={logoUrl} alt="Logo" className="w-full h-full object-contain p-0.5" />
                   ) : (
@@ -1832,17 +1831,17 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
 
                 {/* Title & Tagline */}
                 <div>
-                  <h3 className="font-black text-slate-900 text-sm md:text-base leading-tight">
+                  <h3 className="font-black text-white text-sm md:text-base leading-tight">
                     {title || 'Untitled Application'}
                   </h3>
-                  <p className="text-[11px] text-slate-500 font-medium mt-1 leading-snug">
+                  <p className="text-[11px] text-slate-400 font-medium mt-1 leading-snug">
                     {tagline || 'Integrated Voter Command'}
                   </p>
                 </div>
 
                 {/* Location & Scope */}
-                <div className="py-1 px-2.5 rounded-lg bg-slate-50 border border-slate-100 text-[10px] text-slate-600 font-bold flex items-center justify-center gap-1.5">
-                  <MapPin className="w-3 h-3 text-amber-500 shrink-0" />
+                <div className="py-1 px-2.5 rounded-lg bg-slate-900 border border-slate-800 text-[10px] text-slate-300 font-bold flex items-center justify-center gap-1.5">
+                  <MapPin className="w-3 h-3 text-amber-400 shrink-0" />
                   <span className="truncate">
                     {appScope === 'SINGLE_MLA' && `${constituencyName || 'Single MLA'} • ${stateName}`}
                     {appScope === 'PARLIAMENT_MP' && `${parliamentName || 'Parliament MP'} (7 MLAs) • ${stateName}`}
@@ -1852,10 +1851,10 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                 </div>
 
                 {/* Scope & Seat Breakdown Preview */}
-                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-left space-y-1.5">
-                  <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-left space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                     <span>Configured Scope</span>
-                    <span className="font-mono text-amber-700 font-black">
+                    <span className="font-mono text-amber-400 font-black">
                       {appScope === 'SINGLE_MLA' && '1 Assembly Seat'}
                       {appScope === 'PARLIAMENT_MP' && '1 Lok Sabha • 7 MLAs'}
                       {appScope === 'ZONE' && `${zoneParliamentsCount} MPs • ${zoneParliamentsCount * 7} MLAs`}
@@ -1866,7 +1865,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                   {/* Seat Preview Pills */}
                   <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pt-0.5">
                     {appScope === 'SINGLE_MLA' && (
-                      <span className="px-2 py-0.5 bg-white border border-slate-200 rounded text-[9px] font-bold text-slate-700 truncate">
+                      <span className="px-2 py-0.5 bg-slate-950 border border-slate-800 rounded text-[9px] font-bold text-slate-200 truncate">
                         {constituencyName || 'Kondapi (SC)'}
                       </span>
                     )}
@@ -1874,7 +1873,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                       parliamentMlas.map((mla, i) => (
                         <span
                           key={i}
-                          className="px-1.5 py-0.5 bg-amber-50 border border-amber-200 rounded text-[9px] font-bold text-amber-900 truncate max-w-[120px]"
+                          className="px-1.5 py-0.5 bg-amber-400/10 border border-amber-400/20 rounded text-[9px] font-bold text-amber-300 truncate max-w-[120px]"
                           title={`${mla.constituencyName}: ${mla.candidateName}`}
                         >
                           {mla.constituencyName || `MLA #${i + 1}`}
@@ -1885,7 +1884,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                         zp.mlas.map((mla, mIdx) => (
                           <span
                             key={`${pIdx}-${mIdx}`}
-                            className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-200 rounded text-[9px] font-bold text-indigo-900 truncate max-w-[120px]"
+                            className="px-1.5 py-0.5 bg-indigo-950/60 border border-indigo-800/80 rounded text-[9px] font-bold text-indigo-300 truncate max-w-[120px]"
                             title={`P${pIdx + 1}: ${mla.constituencyName} (${mla.candidateName})`}
                           >
                             {mla.constituencyName || `P${pIdx + 1}.${mIdx + 1}`}
@@ -1896,14 +1895,14 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                       stateConstituencies.slice(0, 10).map((c, i) => (
                         <span
                           key={i}
-                          className="px-1.5 py-0.5 bg-emerald-50 border border-emerald-200 rounded text-[9px] font-bold text-emerald-900 truncate max-w-[120px]"
+                          className="px-1.5 py-0.5 bg-emerald-950/60 border border-emerald-800/80 rounded text-[9px] font-bold text-emerald-300 truncate max-w-[120px]"
                           title={`${c.constituencyName} (${c.parliamentName})`}
                         >
                           {c.constituencyName || `Seat #${i + 1}`}
                         </span>
                       ))}
                     {appScope === 'STATE' && stateConstituencies.length > 10 && (
-                      <span className="px-1.5 py-0.5 bg-slate-100 rounded text-[9px] font-bold text-slate-500">
+                      <span className="px-1.5 py-0.5 bg-slate-800 rounded text-[9px] font-bold text-slate-400">
                         +{stateConstituencies.length - 10} more
                       </span>
                     )}
@@ -1929,19 +1928,19 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                 </div>
 
                 {/* Enabled Role Cards Preview */}
-                <div className="pt-2 border-t border-slate-100 text-left">
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                <div className="pt-2 border-t border-slate-800 text-left">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
                     <span>Generated Roles</span>
-                    <span className="text-amber-600 font-black">{selectedHierarchyLevels.length} Cards</span>
+                    <span className="text-amber-400 font-black">{selectedHierarchyLevels.length} Cards</span>
                   </div>
                   <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
                     {ALL_HIERARCHY_TIERS.filter((t) => selectedHierarchyLevels.includes(t.key)).map((t) => (
                       <div
                         key={t.key}
-                        className="px-2 py-1 rounded-lg bg-slate-50 border border-slate-200/60 text-[10px] font-bold text-slate-700 flex items-center justify-between"
+                        className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-bold text-slate-300 flex items-center justify-between"
                       >
                         <span>{t.roleName}</span>
-                        <span className="text-[9px] text-slate-400 font-mono">{t.levelBadge}</span>
+                        <span className="text-[9px] text-slate-500 font-mono">{t.levelBadge}</span>
                       </div>
                     ))}
                   </div>
@@ -1954,9 +1953,9 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
               type="button"
               disabled={isBuilding}
               onClick={handleSubmitBuildApplication}
-              className="w-full py-2.5 px-3 bg-slate-950 hover:bg-slate-800 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-60"
+              className="w-full py-2.5 px-3 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-60 shadow-lg shadow-amber-400/20"
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
               <span>Submit / Build Application</span>
             </button>
           </div>

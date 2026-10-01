@@ -62,6 +62,8 @@ import {
   updateTrainingProgress,
 } from '../lib/api';
 import { createRealtimeSocket, RealtimeVoteEvent } from '../lib/realtime';
+import Pagination from './common/Pagination';
+import { useNotification } from '../context/NotificationContext';
 
 interface VillageInchargeDashboardProps {
   session: UserSession;
@@ -119,6 +121,7 @@ const PARTY_BG_COLORS: Record<VoterPreference, string> = {
 };
 
 export default function VillageInchargeDashboard({ session, onLogout }: VillageInchargeDashboardProps) {
+  const { notify } = useNotification();
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [cadreActiveTab, setCadreActiveTab] = useState<'booth' | 'voter'>('booth');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -130,6 +133,19 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
   const [preferenceFilter, setPreferenceFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [locationFilter, setLocationFilter] = useState('All'); // Local vs Migrated
+  
+  // Pagination states
+  const [voterCurrentPage, setVoterCurrentPage] = useState(1);
+  const [voterPageSize, setVoterPageSize] = useState(25);
+  const [fakeVotersPage, setFakeVotersPage] = useState(1);
+  const [fakeVotersPageSize, setFakeVotersPageSize] = useState(15);
+  const [cadrePage, setCadrePage] = useState(1);
+  const [cadrePageSize, setCadrePageSize] = useState(12);
+
+  // Auto reset page on filter change
+  useEffect(() => {
+    setVoterCurrentPage(1);
+  }, [searchQuery, boothFilter, preferenceFilter, statusFilter, locationFilter]);
   
   // Voter Edit modal state
   const [editingVoter, setEditingVoter] = useState<Voter | null>(null);
@@ -572,7 +588,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
 
     setNewTaskTitle('');
     setNewTaskInstructions('');
-    alert(`Task assigned successfully to ${assigneeName}!`);
+    notify.success(`Task assigned successfully to ${assigneeName}!`, 'Task Delegated');
   };
 
   // Filtered Voters for Voter List View
@@ -606,6 +622,12 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
       return matchesSearch && matchesBooth && matchesPref && matchesStatus && matchesLocation;
     });
   }, [voters, searchQuery, boothFilter, preferenceFilter, statusFilter, locationFilter]);
+
+  // Paginated Voters for Table
+  const paginatedVoters = useMemo(() => {
+    const start = (voterCurrentPage - 1) * voterPageSize;
+    return filteredVoters.slice(start, start + voterPageSize);
+  }, [filteredVoters, voterCurrentPage, voterPageSize]);
 
   // Live Voter Tracking metrics
   const liveTrackStats = useMemo(() => {
@@ -658,6 +680,11 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
   const fakeVotersList = useMemo(() => {
     return voters.filter(v => v.voterStatus === 'Fake' || v.voterStatus === 'Duplicate' || v.voterStatus === 'Doubtful');
   }, [voters]);
+
+  const paginatedFakeVoters = useMemo(() => {
+    const start = (fakeVotersPage - 1) * fakeVotersPageSize;
+    return fakeVotersList.slice(start, start + fakeVotersPageSize);
+  }, [fakeVotersList, fakeVotersPage, fakeVotersPageSize]);
 
   // Caste / Demographics Analytics Datasets
   const casteChartsData = useMemo(() => {
@@ -762,6 +789,11 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
       };
     });
   }, [voters]);
+
+  const paginatedCadres = useMemo(() => {
+    const start = (cadrePage - 1) * cadrePageSize;
+    return cadreNetworkList.slice(start, start + cadrePageSize);
+  }, [cadreNetworkList, cadrePage, cadrePageSize]);
 
   // Booth Incharges Computations (3 prominent leaders)
   const boothInchargesData = useMemo(() => {
@@ -1417,10 +1449,10 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                       </td>
                     </tr>
                   ) : (
-                    filteredVoters.map((voter, index) => (
+                    paginatedVoters.map((voter, index) => (
                       <tr key={voter.id} className="hover:bg-slate-50/50">
                         <td className="py-4 px-3 text-center text-slate-400 font-mono">
-                          {index + 1}
+                          {(voterCurrentPage - 1) * voterPageSize + index + 1}
                         </td>
                         <td className="py-4 px-3">
                           <p className="font-bold text-slate-900">{voter.name}</p>
@@ -1478,6 +1510,20 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                 </tbody>
               </table>
             </div>
+
+            <Pagination
+              currentPage={voterCurrentPage}
+              pageSize={voterPageSize}
+              totalItems={filteredVoters.length}
+              onPageChange={setVoterCurrentPage}
+              onPageSizeChange={(newSize) => {
+                setVoterPageSize(newSize);
+                setVoterCurrentPage(1);
+              }}
+              pageSizeOptions={[10, 25, 50, 100]}
+              itemName="voters"
+              accentColor="amber"
+            />
 
           </div>
         )}
@@ -1651,7 +1697,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                       </td>
                     </tr>
                   ) : (
-                    fakeVotersList.map((v) => (
+                    paginatedFakeVoters.map((v) => (
                       <tr key={v.id} className="hover:bg-slate-50/50">
                         <td className="py-3 px-3">
                           <p className="font-bold text-slate-900">{v.name}</p>
@@ -1682,6 +1728,20 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                 </tbody>
               </table>
             </div>
+
+            <Pagination
+              currentPage={fakeVotersPage}
+              pageSize={fakeVotersPageSize}
+              totalItems={fakeVotersList.length}
+              onPageChange={setFakeVotersPage}
+              onPageSizeChange={(newSize) => {
+                setFakeVotersPageSize(newSize);
+                setFakeVotersPage(1);
+              }}
+              pageSizeOptions={[10, 15, 25, 50]}
+              itemName="flagged records"
+              accentColor="amber"
+            />
 
           </div>
         )}
@@ -2131,9 +2191,10 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
 
             {/* TAB 2 CONTENT: 100 VOTER INCHARGES (37) */}
             {cadreActiveTab === 'voter' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 animate-fade-in" id="voter-incharges-grid">
-                {cadreNetworkList.map((cadre, index) => {
-                  const serialNum = `#${String(index + 1).padStart(3, '0')}`;
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 animate-fade-in" id="voter-incharges-grid">
+                  {paginatedCadres.map((cadre, index) => {
+                    const serialNum = `#${String((cadrePage - 1) * cadrePageSize + index + 1).padStart(3, '0')}`;
                   const hasSupporters = cadre.votersCount > 0;
                   
                   return (
@@ -2210,6 +2271,21 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                   );
                 })}
               </div>
+
+              <Pagination
+                currentPage={cadrePage}
+                pageSize={cadrePageSize}
+                totalItems={cadreNetworkList.length}
+                onPageChange={setCadrePage}
+                onPageSizeChange={(newSize) => {
+                  setCadrePageSize(newSize);
+                  setCadrePage(1);
+                }}
+                pageSizeOptions={[6, 12, 24, 48]}
+                itemName="incharges"
+                accentColor="amber"
+              />
+            </div>
             )}
 
           </div>

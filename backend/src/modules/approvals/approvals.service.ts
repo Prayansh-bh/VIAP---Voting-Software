@@ -46,16 +46,13 @@ export class ApprovalsService {
           rejection_reason TEXT,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           updated_at TIMESTAMPTZ DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_approval_party_status ON approval_requests(party_id, status);
-        CREATE INDEX IF NOT EXISTS idx_approval_type ON approval_requests(type);
+        )
       `);
-
-      // Check if seeded; if empty, seed realistic approval items matching specifications
-      const countResult: any[] = await prisma.$queryRawUnsafe(`SELECT COUNT(*)::int as count FROM approval_requests`);
-      const count = countResult?.[0]?.count ?? 0;
-      if (count === 0) {
-        await this.seedInitialApprovals();
+      try {
+        await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS idx_approval_party_status ON approval_requests(party_id, status)`);
+        await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS idx_approval_type ON approval_requests(type)`);
+      } catch (idxErr) {
+        // Indices are optional optimizations
       }
 
       this.tableInitialized = true;

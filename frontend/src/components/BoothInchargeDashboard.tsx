@@ -35,6 +35,7 @@ import {
   Play
 } from 'lucide-react';
 import { UserSession, Voter, VoterPreference, VoterStatus, SurveyStatus, VoterTask, TrainingVideo, GroundReport } from '../types';
+import Pagination from './common/Pagination';
 import {
   createReport,
   createTask,
@@ -399,6 +400,19 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
     });
   }, [voters, voterSearch, voterGroupFilter, voterPrefFilter, voterStatusFilter, voterGenderFilter]);
 
+  // Pagination for Voter Registry Table
+  const [voterPage, setVoterPage] = useState<number>(1);
+  const [voterPageSize, setVoterPageSize] = useState<number>(25);
+
+  const paginatedVoters = useMemo(() => {
+    const start = (voterPage - 1) * voterPageSize;
+    return filteredVoters.slice(start, start + voterPageSize);
+  }, [filteredVoters, voterPage, voterPageSize]);
+
+  useEffect(() => {
+    setVoterPage(1);
+  }, [voterSearch, voterGroupFilter, voterPrefFilter, voterStatusFilter, voterGenderFilter]);
+
   // --------------------------------------------------------
   // EDITING MODAL STATE
   // --------------------------------------------------------
@@ -419,6 +433,10 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   const [liveSearch, setLiveSearch] = useState('');
   const [liveFilter, setLiveFilter] = useState<'ALL' | 'DONE' | 'NOT_VOTED'>('ALL');
   const [liveTeamFilter, setLiveTeamFilter] = useState('ALL');
+  const [liveTrackPage, setLiveTrackPage] = useState<number>(1);
+  const [liveTrackPageSize, setLiveTrackPageSize] = useState<number>(25);
+  const [fakePage, setFakePage] = useState<number>(1);
+  const [fakePageSize, setFakePageSize] = useState<number>(25);
 
   const voteDoneCount = voters.filter(v => v.voteStatus === 'VOTE DONE').length;
   const yetToVoteCount = totalVoters - voteDoneCount;
@@ -469,6 +487,15 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
       return matchSearch && matchVoteStatus && matchTeam;
     });
   }, [voters, liveSearch, liveFilter, liveTeamFilter]);
+
+  const paginatedLiveTrackVoters = useMemo(() => {
+    const start = (liveTrackPage - 1) * liveTrackPageSize;
+    return liveTrackVoters.slice(start, start + liveTrackPageSize);
+  }, [liveTrackVoters, liveTrackPage, liveTrackPageSize]);
+
+  useEffect(() => {
+    setLiveTrackPage(1);
+  }, [liveSearch, liveFilter, liveTeamFilter]);
 
   // --------------------------------------------------------
   // TAB 5: TASK DELEGATION
@@ -1429,7 +1456,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
 
                 {/* Results Counter */}
                 <div className="ml-auto text-slate-400 uppercase tracking-wider text-[10px] font-black">
-                  Found: <span className="text-slate-800 font-extrabold">{filteredVoters.length}</span> / 1,247
+                  Found: <span className="text-slate-800 font-extrabold">{filteredVoters.length}</span> / {voters.length}
                 </div>
               </div>
             </div>
@@ -1456,7 +1483,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                       </td>
                     </tr>
                   ) : (
-                    filteredVoters.map((v) => {
+                    paginatedVoters.map((v) => {
                       return (
                         <tr key={v.id} className="hover:bg-slate-50/70 transition-colors">
                           {/* S.NO */}
@@ -1594,6 +1621,15 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                   )}
                 </tbody>
               </table>
+              <Pagination
+                currentPage={voterPage}
+                totalItems={filteredVoters.length}
+                pageSize={voterPageSize}
+                onPageChange={setVoterPage}
+                onPageSizeChange={setVoterPageSize}
+                pageSizeOptions={[15, 25, 50, 100]}
+                itemLabel="voters"
+              />
             </div>
 
           </div>
@@ -1729,7 +1765,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                       </td>
                     </tr>
                   ) : (
-                    liveTrackVoters.map((v) => {
+                    paginatedLiveTrackVoters.map((v) => {
                       const isVoted = v.voteStatus === 'VOTE DONE';
                       
                       return (
@@ -1818,6 +1854,15 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                   )}
                 </tbody>
               </table>
+              <Pagination
+                currentPage={liveTrackPage}
+                totalItems={liveTrackVoters.length}
+                pageSize={liveTrackPageSize}
+                onPageChange={setLiveTrackPage}
+                onPageSizeChange={setLiveTrackPageSize}
+                pageSizeOptions={[15, 25, 50, 100]}
+                itemLabel="voters"
+              />
             </div>
 
           </div>
@@ -1828,6 +1873,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
            -------------------------------------------------------- */}
         {activeTab === 'fake-votes' && (() => {
           const fakeVotersList = voters.filter(v => v.voterStatus === 'Fake' || v.voterStatus === 'Doubtful');
+          const paginatedFakeVoters = fakeVotersList.slice((fakePage - 1) * fakePageSize, fakePage * fakePageSize);
           return (
             <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-6" id="fake-doubtful-view">
               
@@ -1878,7 +1924,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                         </td>
                       </tr>
                     ) : (
-                      fakeVotersList.map((v) => {
+                      paginatedFakeVoters.map((v) => {
                         return (
                           <tr key={v.id} className="hover:bg-slate-50/80 transition-colors">
                             <td className="px-4 py-4 text-center font-mono text-slate-400 font-bold">
@@ -1919,6 +1965,15 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                     )}
                   </tbody>
                 </table>
+                <Pagination
+                  currentPage={fakePage}
+                  totalItems={fakeVotersList.length}
+                  pageSize={fakePageSize}
+                  onPageChange={setFakePage}
+                  onPageSizeChange={setFakePageSize}
+                  pageSizeOptions={[15, 25, 50, 100]}
+                  itemLabel="flagged voters"
+                />
               </div>
 
             </div>

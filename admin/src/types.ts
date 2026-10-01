@@ -9,6 +9,8 @@ export type HierarchyLevelKey =
   | 'BOOTH'
   | 'VOTER_GROUP';
 
+export type VoterPreference = 'TDP' | 'YSRCP' | 'JSP' | 'BJP' | 'INC' | 'Neutral' | 'OTH';
+
 export interface HierarchyTierConfig {
   id: HierarchyLevelKey;
   label: string;
@@ -70,4 +72,17 @@ export interface AdminUser {
   email: string;
   role: 'SUPER_ADMIN' | 'ORGANISER' | 'SYSTEM_ADMIN';
   token?: string;
+}
+
+export interface ApplicationSummary {
+  applicationId: string;
+  appName: string;
+  stateName: string;
+  totalVoters: number;
+  verifiedCount: number;
+  verificationRate: number;
+  totalBooths: number;
+  totalGroups: number;
+  totalIncharges: number;
+  totalTasks: number;
 }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Shield, Lock, Phone, ArrowRight, Sparkles, KeyRound } from 'lucide-react';
+import { Shield, Phone, ArrowRight, KeyRound, Loader2 } from 'lucide-react';
 import { AdminUser } from '../types';
+import { authenticateAdminCredentials, authenticateAdminRole } from '../lib/api';
 
 interface AdminLoginProps {
   onLoginSuccess: (user: AdminUser) => void;
@@ -10,34 +11,38 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
   const [mobile, setMobile] = useState('');
   const [passcode, setPasscode] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!mobile || !passcode) {
       setError('Please provide phone number and security passcode.');
       return;
     }
 
-    // Default Super Admin credentials
-    const adminUser: AdminUser = {
-      id: 'admin-1',
-      name: 'Dr. Balaji (Party Organiser)',
-      email: 'organiser@politicalconnect.in',
-      role: 'SUPER_ADMIN',
-      token: 'admin-super-jwt-token-active',
-    };
-    onLoginSuccess(adminUser);
+    setLoading(true);
+    setError('');
+    try {
+      const user = await authenticateAdminCredentials(mobile, passcode);
+      onLoginSuccess(user);
+    } catch (err: any) {
+      setError(err.message || 'Authentication failed. Please verify credentials.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleDemoLogin = (role: 'SUPER_ADMIN' | 'ORGANISER') => {
-    const adminUser: AdminUser = {
-      id: 'admin-demo',
-      name: role === 'SUPER_ADMIN' ? 'State War Room Director' : 'Chief Party Organiser',
-      email: 'admin@platform.gov',
-      role: role,
-      token: 'demo-admin-jwt-token',
-    };
-    onLoginSuccess(adminUser);
+  const handleDemoLogin = async (role: 'SUPER_ADMIN' | 'ORGANISER') => {
+    setLoading(true);
+    setError('');
+    try {
+      const user = await authenticateAdminRole(role);
+      onLoginSuccess(user);
+    } catch (err: any) {
+      setError(err.message || 'Authentication failed.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -101,32 +106,58 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
 
           <button
             type="submit"
-            className="w-full py-3 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs shadow-lg shadow-amber-400/20 transition flex items-center justify-center gap-2 cursor-pointer"
+            disabled={loading}
+            className="w-full py-3 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-60 text-slate-950 font-bold text-xs shadow-lg shadow-amber-400/20 transition flex items-center justify-center gap-2 cursor-pointer"
           >
-            <span>Authenticate into CMS</span>
-            <ArrowRight className="w-4 h-4" />
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Verifying Credentials...</span>
+              </>
+            ) : (
+              <>
+                <span>Authenticate into CMS</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </form>
 
-        {/* Demo Fast Access Buttons */}
-        <div className="pt-4 border-t border-slate-800/80 space-y-2">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 text-center">
-            One-Click Developer & Organiser Access
+        {/* Security Notice & Default Authoritative Credentials */}
+        <div className="pt-4 border-t border-slate-800/80 space-y-2.5">
+          <div className="p-3 rounded-2xl bg-slate-950/80 border border-slate-800/90 text-left space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                Authoritative Credentials
+              </span>
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                PostgreSQL & Bcrypt
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-300 font-mono flex items-center justify-between">
+              <span>Mobile / ID:</span>
+              <button
+                type="button"
+                onClick={() => setMobile('9848099999')}
+                className="text-amber-300 hover:underline cursor-pointer"
+              >
+                9848099999
+              </button>
+            </div>
+            <div className="text-[11px] text-slate-300 font-mono flex items-center justify-between">
+              <span>Security Passcode:</span>
+              <button
+                type="button"
+                onClick={() => setPasscode('Kondapi@2026')}
+                className="text-amber-300 hover:underline cursor-pointer"
+              >
+                Kondapi@2026
+              </button>
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => handleDemoLogin('SUPER_ADMIN')}
-              className="p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-xs font-bold text-amber-400 transition"
-            >
-              Super Admin Mode
-            </button>
-            <button
-              onClick={() => handleDemoLogin('ORGANISER')}
-              className="p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-xs font-bold text-slate-300 transition"
-            >
-              Party Organiser Mode
-            </button>
-          </div>
+          <p className="text-[10px] text-slate-500 text-center">
+            Strict password verification is enforced. Unauthorized passcodes are rejected with 401 Unauthorized.
+          </p>
         </div>
       </div>
     </div>

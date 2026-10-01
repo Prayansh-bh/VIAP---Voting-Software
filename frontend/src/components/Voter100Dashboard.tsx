@@ -37,6 +37,7 @@ import {
   Phone,
   Pencil
 } from 'lucide-react';
+import Pagination from './common/Pagination';
 import { 
   UserSession, 
   Voter, 
@@ -676,6 +677,19 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
     });
   }, [voters, searchQuery, prefFilter, voterStatusFilter, locationFilter]);
 
+  // Pagination for Voter Registry Table
+  const [voterPage, setVoterPage] = useState<number>(1);
+  const [voterPageSize, setVoterPageSize] = useState<number>(20);
+
+  const paginatedVoters = useMemo(() => {
+    const start = (voterPage - 1) * voterPageSize;
+    return filteredVoters.slice(start, start + voterPageSize);
+  }, [filteredVoters, voterPage, voterPageSize]);
+
+  useEffect(() => {
+    setVoterPage(1);
+  }, [searchQuery, prefFilter, voterStatusFilter, locationFilter]);
+
   const localCount = useMemo(() => voters.filter(v => v.voterLocationStatus === 'Local' || !v.voterLocationStatus).length, [voters]);
   const migratedCount = useMemo(() => voters.filter(v => v.voterLocationStatus === 'Migrated').length, [voters]);
   const totalCount = voters.length;
@@ -696,6 +710,10 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
     return counts;
   }, [voters]);
 
+  // Live Voter Track Pagination
+  const [livePage, setLivePage] = useState<number>(1);
+  const [livePageSize, setLivePageSize] = useState<number>(20);
+
   const liveFilteredVoters = useMemo(() => {
     return voters.filter(v => {
       const query = liveSearchQuery.trim().toLowerCase();
@@ -714,6 +732,15 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
       return matchSearch;
     });
   }, [voters, liveSearchQuery, liveFilter]);
+
+  const paginatedLiveVoters = useMemo(() => {
+    const start = (livePage - 1) * livePageSize;
+    return liveFilteredVoters.slice(start, start + livePageSize);
+  }, [liveFilteredVoters, livePage, livePageSize]);
+
+  useEffect(() => {
+    setLivePage(1);
+  }, [liveSearchQuery, liveFilter]);
 
   // Video watch modal state
   const [watchingVideo, setWatchingVideo] = useState<TrainingVideo | null>(null);
@@ -1253,7 +1280,7 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                       </td>
                     </tr>
                   ) : (
-                    filteredVoters.map((v) => {
+                    paginatedVoters.map((v) => {
                       return (
                         <tr key={v.id} className="hover:bg-slate-50/70 transition-colors">
                           {/* S.NO */}
@@ -1384,6 +1411,15 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                   )}
                 </tbody>
               </table>
+              <Pagination
+                currentPage={voterPage}
+                totalItems={filteredVoters.length}
+                pageSize={voterPageSize}
+                onPageChange={setVoterPage}
+                onPageSizeChange={setVoterPageSize}
+                pageSizeOptions={[10, 20, 50, 100]}
+                itemLabel="voters"
+              />
             </div>
 
           </div>
@@ -1533,7 +1569,7 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                         </td>
                       </tr>
                     ) : (
-                      liveFilteredVoters.map((v) => {
+                      paginatedLiveVoters.map((v) => {
                         const isVoted = v.voteStatus === 'VOTE DONE';
                         
                         return (
@@ -1668,6 +1704,15 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                     )}
                   </tbody>
                 </table>
+                <Pagination
+                  currentPage={livePage}
+                  totalItems={liveFilteredVoters.length}
+                  pageSize={livePageSize}
+                  onPageChange={setLivePage}
+                  onPageSizeChange={setLivePageSize}
+                  pageSizeOptions={[10, 20, 50, 100]}
+                  itemLabel="voters"
+                />
               </div>
 
               {/* Real-time sync ticker module */}

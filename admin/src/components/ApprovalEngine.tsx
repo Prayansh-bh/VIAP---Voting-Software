@@ -15,6 +15,8 @@ import {
   Phone,
 } from 'lucide-react';
 import { ApprovalRecord } from '../types';
+import Pagination from './Pagination';
+import { useNotification } from '../context/NotificationContext';
 
 interface ApprovalEngineProps {
   approvals: ApprovalRecord[];
@@ -27,9 +29,12 @@ export default function ApprovalEngine({
   onApprove,
   onReject,
 }: ApprovalEngineProps) {
+  const { notify } = useNotification();
   const [activeTab, setActiveTab] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL'>('PENDING');
   const [search, setSearch] = useState('');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
 
   // Modals
   const [inspectItem, setInspectItem] = useState<ApprovalRecord | null>(null);
@@ -57,6 +62,10 @@ export default function ApprovalEngine({
     return matchType && matchStatus && matchSearch;
   });
 
+  const totalPages = Math.max(1, Math.ceil(filteredApprovals.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedApprovals = filteredApprovals.slice((safePage - 1) * pageSize, safePage * pageSize);
+
   const handleExecuteApprove = async (item: ApprovalRecord) => {
     setActionLoading(true);
     try {
@@ -72,17 +81,19 @@ export default function ApprovalEngine({
 
   const handleExecuteReject = async (item: ApprovalRecord) => {
     if (!rejectReason.trim()) {
-      alert('Please state a reason for rejection.');
+      notify.warning('Please state an audit reason for rejecting this request.', 'Rejection Reason Required');
       return;
     }
     setActionLoading(true);
     try {
       await onReject(item.id, rejectReason.trim());
+      notify.success(`Rejected request "${item.title}".`, 'Request Rejected');
       setFeedback({ message: `Rejected "${item.title}".`, type: 'success' });
       setIsRejecting(false);
       setRejectReason('');
       setInspectItem(null);
     } catch (err: any) {
+      notify.error(err.message || 'Rejection failed', 'Rejection Error');
       setFeedback({ message: err.message || 'Rejection failed', type: 'error' });
     } finally {
       setActionLoading(false);
@@ -187,7 +198,10 @@ export default function ApprovalEngine({
             type="text"
             placeholder="Search request, applicant, unit..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setCurrentPage(1);
+            }}
             className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-amber-400 outline-none"
           />
         </div>
@@ -198,7 +212,10 @@ export default function ApprovalEngine({
             {(['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const).map((s) => (
               <button
                 key={s}
-                onClick={() => setStatusFilter(s)}
+                onClick={() => {
+                  setStatusFilter(s);
+                  setCurrentPage(1);
+                }}
                 className={`px-3 py-1 rounded-lg transition cursor-pointer ${
                   statusFilter === s ? 'bg-amber-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
                 }`}
@@ -210,8 +227,11 @@ export default function ApprovalEngine({
 
           {activeTab !== 'ALL' && (
             <button
-              onClick={() => setActiveTab('ALL')}
-              className="text-xs text-slate-400 hover:text-white font-bold underline px-2"
+              onClick={() => {
+                setActiveTab('ALL');
+                setCurrentPage(1);
+              }}
+              className="text-xs text-slate-400 hover:text-white font-bold underline px-2 cursor-pointer"
             >
               Reset Category
             </button>
@@ -228,7 +248,7 @@ export default function ApprovalEngine({
             <p className="text-xs text-slate-500">All submissions in this category are up to date.</p>
           </div>
         ) : (
-          filteredApprovals.map((item) => (
+          paginatedApprovals.map((item) => (
             <div
               key={item.id}
               className="p-5 rounded-3xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition flex flex-col sm:flex-row sm:items-center justify-between gap-4"
@@ -305,6 +325,18 @@ export default function ApprovalEngine({
             </div>
           ))
         )}
+
+        {/* Dynamic Pagination Controls */}
+        <Pagination
+          currentPage={safePage}
+          totalItems={filteredApprovals.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          pageSizeOptions={[5, 10, 20, 50]}
+          itemLabel="approval requests"
+          themeColor="amber"
+        />
       </div>
 
       {/* Inspect / Review Modal */}

@@ -276,7 +276,7 @@ export class ApplicationsService {
     const constituenciesCount = await prisma.constituency.count();
     const votersCount = await prisma.voter.count();
 
-    return configs.map((c) => ({
+    const appsList: any[] = configs.map((c) => ({
       id: c.id,
       configKey: c.configKey,
       appName: c.organisationName,
@@ -299,6 +299,42 @@ export class ApplicationsService {
         primaryColor: p.primaryColor,
       })),
     }));
+
+    // Include other distinct political parties registered in DB as applications
+    for (const p of activeParties) {
+      const alreadyIncluded = appsList.some(
+        (a) => a.parties?.[0]?.code === p.code || a.appName === p.name || a.id === p.id
+      );
+      if (!alreadyIncluded) {
+        appsList.push({
+          id: p.id,
+          configKey: p.code.toLowerCase(),
+          appName: p.name,
+          stateName: configs[0]?.stateName || 'Andhra Pradesh',
+          appScope: configs[0]?.appScope || 'SINGLE_MLA',
+          parliamentName: '',
+          defaultLanguage: 'en',
+          hierarchyLabels: configs[0]?.hierarchyLabels || {},
+          featureToggles: configs[0]?.featureToggles || {},
+          aiEnabled: true,
+          isDefault: false,
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+          constituenciesCount: 1,
+          votersCount: p.code === (configs[0]?.activePartyCode || 'TPF') ? votersCount : 0,
+          partiesCount: 1,
+          parties: [
+            {
+              name: p.name,
+              code: p.code,
+              primaryColor: p.primaryColor,
+            },
+          ],
+        });
+      }
+    }
+
+    return appsList;
   }
 
   /**
@@ -2039,7 +2075,13 @@ export class ApplicationsService {
   /**
    * Query assigned incharges with jurisdiction metadata
    */
-  static async getIncharges(appId: string, level?: string, jurisdictionId?: string, scope?: UserHierarchyScope) {
+  static async getIncharges(
+    appId: string,
+    level?: string,
+    jurisdictionId?: string,
+    scope?: UserHierarchyScope,
+    pagination?: { page?: number; limit?: number }
+  ) {
     const config = await this.resolveApplication(appId);
     const upperLevel = level?.toUpperCase();
 
@@ -2067,6 +2109,9 @@ export class ApplicationsService {
       }
     }
 
+    const limit = pagination?.limit ? Math.min(Math.max(1, pagination.limit), 5000) : 5000;
+    const skip = pagination?.page && pagination.page > 1 ? (pagination.page - 1) * limit : 0;
+
     const assignments = await prisma.userHierarchyAssignment.findMany({
       where,
       include: {
@@ -2081,7 +2126,8 @@ export class ApplicationsService {
         voterGroup: true,
       },
       orderBy: { assignedAt: 'desc' },
-      take: 200,
+      skip,
+      take: limit,
     });
 
     return assignments.map((a) => {

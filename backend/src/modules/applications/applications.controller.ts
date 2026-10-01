@@ -163,8 +163,16 @@ export class ApplicationsController {
 
   static async getIncharges(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId } = req.params as { applicationId: string };
-    const query = req.query as { level?: string; jurisdictionId?: string };
-    const data = await ApplicationsService.getIncharges(applicationId, query?.level, query?.jurisdictionId, req.hierarchyScope);
+    const query = req.query as { level?: string; jurisdictionId?: string; page?: string; limit?: string };
+    const page = query?.page ? parseInt(query.page, 10) : undefined;
+    const limit = query?.limit ? parseInt(query.limit, 10) : undefined;
+    const data = await ApplicationsService.getIncharges(
+      applicationId,
+      query?.level,
+      query?.jurisdictionId,
+      req.hierarchyScope,
+      page || limit ? { page, limit } : undefined
+    );
     return reply.send(successResponse(data));
   }
 

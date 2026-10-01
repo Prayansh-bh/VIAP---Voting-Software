@@ -21,6 +21,18 @@ const ADMIN_DATA_ROLES = [
 export async function applicationsRoutes(fastify: FastifyInstance) {
   // 1. Applications List & Configuration
   fastify.get('/', { preHandler: [authenticate] }, ApplicationsController.getApplications);
+  fastify.post('/', { preHandler: [authenticate] }, async (req, reply) => {
+    const res = await fastify.inject({
+      method: 'POST',
+      url: '/api/cms/build-application',
+      headers: {
+        authorization: req.headers.authorization || '',
+        'content-type': 'application/json',
+      },
+      payload: req.body as any,
+    });
+    return reply.status(res.statusCode).send(JSON.parse(res.payload));
+  });
   fastify.get('/:applicationId/configuration', { preHandler: [authenticate] }, ApplicationsController.getConfiguration);
 
   // 2. Hierarchy & Structure Endpoints
@@ -171,6 +183,11 @@ export async function applicationsRoutes(fastify: FastifyInstance) {
   // 7. Reports & Summary KPIs
   fastify.get(
     '/:applicationId/reports/summary',
+    { preHandler: [authenticate, populateHierarchyScope] },
+    ApplicationsController.getSummary,
+  );
+  fastify.get(
+    '/:applicationId/summary',
     { preHandler: [authenticate, populateHierarchyScope] },
     ApplicationsController.getSummary,
   );

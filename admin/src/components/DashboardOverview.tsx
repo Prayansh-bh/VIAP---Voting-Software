@@ -13,23 +13,30 @@ import {
   CheckCircle2,
   ExternalLink,
 } from 'lucide-react';
-import { AppInstance, ApprovalRecord } from '../types';
+import { AppInstance, ApprovalRecord, InchargeRecord, ApplicationSummary } from '../types';
 
 interface DashboardOverviewProps {
   apps: AppInstance[];
   pendingApprovals: ApprovalRecord[];
+  incharges?: InchargeRecord[];
+  summary?: ApplicationSummary | null;
   onNavigateTab: (tab: string) => void;
   onSelectApp: (app: AppInstance) => void;
+  onCreateNewApp?: () => void;
 }
 
 export default function DashboardOverview({
   apps,
   pendingApprovals,
+  incharges = [],
+  summary,
   onNavigateTab,
   onSelectApp,
+  onCreateNewApp,
 }: DashboardOverviewProps) {
-  const totalVoters = apps.reduce((acc, a) => acc + (a.totalVoters || 0), 0);
+  const totalVoters = summary ? summary.totalVoters : apps.reduce((acc, a) => acc + (a.totalVoters || 0), 0);
   const activeTenants = apps.filter((a) => a.isActive).length;
+  const inchargesCount = summary?.totalIncharges ?? incharges.length;
 
   return (
     <div className="space-y-6">
@@ -54,7 +61,13 @@ export default function DashboardOverview({
 
           <div className="flex flex-wrap items-center gap-3">
             <button
-              onClick={() => onNavigateTab('applications')}
+              onClick={() => {
+                if (onCreateNewApp) {
+                  onCreateNewApp();
+                } else {
+                  onNavigateTab('applications');
+                }
+              }}
               className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs shadow-lg shadow-amber-400/20 transition flex items-center gap-1.5 cursor-pointer"
             >
               <Layers className="w-4 h-4" />
@@ -104,8 +117,10 @@ export default function DashboardOverview({
             <span className="text-xs font-bold uppercase tracking-wider">Deployed Incharges</span>
             <UserCheck className="w-5 h-5 text-emerald-400" />
           </div>
-          <div className="text-3xl font-black text-white">1,480</div>
-          <div className="text-xs text-emerald-400 font-semibold mt-1">88.4% Hierarchy Saturation</div>
+          <div className="text-3xl font-black text-white">{inchargesCount.toLocaleString('en-IN')}</div>
+          <div className="text-xs text-emerald-400 font-semibold mt-1">
+            {inchargesCount > 0 ? `${inchargesCount} Cadres in Database` : '0 Cadres Assigned'}
+          </div>
         </div>
 
         {/* KPI 4 */}
@@ -119,7 +134,7 @@ export default function DashboardOverview({
           </div>
           <div className="text-3xl font-black text-amber-400">{pendingApprovals.length}</div>
           <div className="text-xs text-amber-300 font-semibold mt-1 flex items-center gap-1">
-            <span>Awaiting Super Admin Review</span>
+            <span>{pendingApprovals.length > 0 ? 'Awaiting Super Admin Review' : 'Queue Clear (0 Pending)'}</span>
             <ArrowUpRight className="w-3.5 h-3.5" />
           </div>
         </div>

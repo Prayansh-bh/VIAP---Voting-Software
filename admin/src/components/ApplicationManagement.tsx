@@ -14,6 +14,8 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { AppInstance, HierarchyLevelKey, HierarchyTierConfig } from '../types';
+import Pagination from './Pagination';
+import { useNotification } from '../context/NotificationContext';
 
 interface ApplicationManagementProps {
   apps: AppInstance[];
@@ -22,6 +24,9 @@ interface ApplicationManagementProps {
   onCreateApp: (app: Partial<AppInstance>) => Promise<void>;
   onDeleteApp: (id: string) => void;
   onSetDefault: (id: string) => void;
+  isCreateModalOpen?: boolean;
+  onOpenCreateModal?: () => void;
+  onCloseCreateModal?: () => void;
 }
 
 const ALL_HIERARCHY_LEVELS: HierarchyTierConfig[] = [
@@ -43,8 +48,29 @@ export default function ApplicationManagement({
   onCreateApp,
   onDeleteApp,
   onSetDefault,
+  isCreateModalOpen,
+  onOpenCreateModal,
+  onCloseCreateModal,
 }: ApplicationManagementProps) {
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const { notify, confirmDialog } = useNotification();
+  const [internalModalOpen, setInternalModalOpen] = useState(false);
+  const showModal = isCreateModalOpen !== undefined ? isCreateModalOpen : internalModalOpen;
+
+  const setModalOpen = (val: boolean) => {
+    setInternalModalOpen(val);
+    if (val && onOpenCreateModal) onOpenCreateModal();
+    if (!val && onCloseCreateModal) onCloseCreateModal();
+  };
+
+  const [successBanner, setSuccessBanner] = useState<string | null>(null);
+  const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(6);
+
+  const totalPages = Math.max(1, Math.ceil(apps.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedApps = apps.slice((safePage - 1) * pageSize, safePage * pageSize);
+
   const [formData, setFormData] = useState({
     name: '',
     party: '',
@@ -64,7 +90,7 @@ export default function ApplicationManagement({
       const exists = prev.activeHierarchyLevels.includes(lvlId);
       if (exists) {
         if (prev.activeHierarchyLevels.length <= 1) {
-          alert('At least one hierarchy level must be enabled.');
+          notify.warning('At least one hierarchy level must remain enabled.', 'Validation Notice');
           return prev;
         }
         return {
@@ -83,13 +109,18 @@ export default function ApplicationManagement({
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.partyCode) {
-      alert('Application name and Party Code are required.');
+      notify.warning('Application name and Party Code are required.', 'Missing Fields');
       return;
     }
     setSaving(true);
     try {
       await onCreateApp(formData);
-      setShowCreateModal(false);
+      const appName = formData.name;
+      const partyCode = formData.partyCode;
+      setJustCreatedId(partyCode);
+      setModalOpen(false);
+      notify.success(`Party tenant "${appName}" (${partyCode}) has been successfully provisioned in PostgreSQL!`, 'Tenant Provisioned');
+      setSuccessBanner(`Party tenant "${appName}" (${partyCode}) has been successfully provisioned in PostgreSQL! Enabled tiers: ${formData.activeHierarchyLevels.join(' → ')}.`);
       setFormData({
         name: '',
         party: '',
@@ -102,8 +133,9 @@ export default function ApplicationManagement({
         accentColor: '#0F172A',
         activeHierarchyLevels: ['VOTER_GROUP', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY'],
       });
+      setTimeout(() => setSuccessBanner(null), 10000);
     } catch (err: any) {
-      alert(err.message || 'Failed to create application');
+      notify.error(err.message || 'Failed to create application', 'Provisioning Failed');
     } finally {
       setSaving(false);
     }
@@ -111,6 +143,25 @@ export default function ApplicationManagement({
 
   return (
     <div className="space-y-6">
+      {/* Success Notification Banner */}
+      {successBanner && (
+        <div className="p-4 rounded-3xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 flex items-center justify-between shadow-xl shadow-emerald-500/5">
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            <div>
+              <div className="font-bold text-emerald-200 text-xs">Tenant Created & Provisioned Successfully</div>
+              <div className="text-emerald-400/90 text-[11px] mt-0.5">{successBanner}</div>
+            </div>
+          </div>
+          <button
+            onClick={() => setSuccessBanner(null)}
+            className="text-emerald-400 hover:text-white text-xs font-bold px-2 py-1 rounded-lg hover:bg-emerald-500/20"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Title & Action Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-3xl bg-slate-900 border border-slate-800">
         <div>
@@ -124,7 +175,7 @@ export default function ApplicationManagement({
         </div>
 
         <button
-          onClick={() => setShowCreateModal(true)}
+          onClick={() => setModalOpen(true)}
           className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs shadow-lg shadow-amber-400/20 transition flex items-center gap-2 cursor-pointer self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
@@ -134,7 +185,7 @@ export default function ApplicationManagement({
 
       {/* Grid of Existing Applications */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {apps.map((app) => {
+        {paginatedApps.map((app) => {
           const isSelected = selectedApp?.id === app.id;
           const levels = app.activeHierarchyLevels || ['VOTER_GROUP', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY'];
 
@@ -161,11 +212,18 @@ export default function ApplicationManagement({
                     </div>
                   </div>
 
-                  {app.isDefault && (
-                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-amber-400/20 text-amber-300 border border-amber-400/30">
-                      DEFAULT
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {justCreatedId === app.partyCode && (
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-400/20 text-emerald-300 border border-emerald-400/40 animate-pulse">
+                        NEWLY CREATED
+                      </span>
+                    )}
+                    {app.isDefault && (
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                        DEFAULT
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <p className="text-xs text-slate-400 line-clamp-2 mb-3">{app.description}</p>
@@ -216,13 +274,21 @@ export default function ApplicationManagement({
                   </a>
                   {apps.length > 1 && (
                     <button
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.stopPropagation();
-                        if (confirm(`Delete party application "${app.name}"?`)) {
+                        const confirmed = await confirmDialog({
+                          title: 'Delete Party Application',
+                          message: `Are you sure you want to permanently delete "${app.name}" (${app.party})? All associated tenant hierarchy configuration will be purged.`,
+                          confirmText: 'Delete Application',
+                          danger: true,
+                          icon: 'trash',
+                        });
+                        if (confirmed) {
                           onDeleteApp(app.id);
+                          notify.success(`Application "${app.name}" has been deleted.`);
                         }
                       }}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
                       title="Delete application"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -235,8 +301,20 @@ export default function ApplicationManagement({
         })}
       </div>
 
+      {/* Dynamic Pagination Controls */}
+      <Pagination
+        currentPage={safePage}
+        totalItems={apps.length}
+        pageSize={pageSize}
+        onPageChange={setCurrentPage}
+        onPageSizeChange={setPageSize}
+        pageSizeOptions={[6, 9, 15, 30]}
+        itemLabel="party applications"
+        themeColor="amber"
+      />
+
       {/* Create New Party Modal */}
-      {showCreateModal && (
+      {showModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
           <div className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden my-8">
             <div className="p-6 border-b border-slate-800 flex items-center justify-between">
@@ -250,7 +328,7 @@ export default function ApplicationManagement({
                 </p>
               </div>
               <button
-                onClick={() => setShowCreateModal(false)}
+                onClick={() => setModalOpen(false)}
                 className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-sm font-bold"
               >
                 ✕
@@ -434,7 +512,7 @@ export default function ApplicationManagement({
               <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">
                 <button
                   type="button"
-                  onClick={() => setShowCreateModal(false)}
+                  onClick={() => setModalOpen(false)}
                   className="px-4 py-2.5 rounded-xl text-slate-400 hover:text-white text-xs font-bold transition"
                 >
                   Cancel

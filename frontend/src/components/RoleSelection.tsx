@@ -14,28 +14,10 @@ export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, 
   const { config, t } = useCms();
 
   const activeRoles = useMemo<CommandRole[]>(() => {
-    let enabledLevels: string[] | null = null;
-    if (Array.isArray(config.activeHierarchyLevels) && config.activeHierarchyLevels.length > 0) {
-      enabledLevels = config.activeHierarchyLevels;
-    } else {
-      try {
-        const saved = localStorage.getItem('kdp_cms_config');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed.activeHierarchyLevels) && parsed.activeHierarchyLevels.length > 0) {
-            enabledLevels = parsed.activeHierarchyLevels;
-          }
-        }
-      } catch {}
-    }
-
-    const safeLevels = enabledLevels || ['STATE', 'ZONE', 'PARLIAMENT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
-
-    const allRoles: (CommandRole & { levelKey: string })[] = [
+    const allRoles: CommandRole[] = [
       // 1. State Incharge
       {
         id: 'STATE_ADMIN',
-        levelKey: 'STATE',
         name: t('STATE', 'State Incharge'),
         subtitle: `${config.stateName || 'State'} Command`,
         description: 'Statewide command & majority telemetry.',
@@ -45,7 +27,6 @@ export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, 
       // 2. Zone Coordinator
       {
         id: 'ZONE_INCHARGE' as any,
-        levelKey: 'ZONE',
         name: t('ZONE', 'Zone Coordinator'),
         subtitle: 'Multi-Parliament Oversight',
         description: 'Multi-Parliament zone level coordination.',
@@ -55,27 +36,15 @@ export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, 
       // 3. Parliament Incharge
       {
         id: 'PARLIAMENT_INCHARGE' as any,
-        levelKey: 'PARLIAMENT',
         name: t('PARLIAMENT', 'Parliament Incharge'),
         subtitle: `${config.parliamentName || 'Lok Sabha'} MP Seat`,
         description: 'Parliament MP War Room Command.',
         path: '/parliament',
         iconName: 'Crown',
       },
-      // 4. District Incharge
-      {
-        id: 'CONSTITUENCY_INCHARGE' as any,
-        levelKey: 'DISTRICT',
-        name: t('DISTRICT', 'District Incharge'),
-        subtitle: `${config.stateName || 'District'} Zilla Command`,
-        description: 'District DCC committee & multi-constituency coordination.',
-        path: '/constituency',
-        iconName: 'Building',
-      },
-      // 5. Constituency Incharge
+      // 4. Constituency Incharge
       {
         id: 'CONSTITUENCY_INCHARGE',
-        levelKey: 'CONSTITUENCY',
         name: t('CONSTITUENCY', 'Constituency Incharge'),
         subtitle: `${config.constituencies?.[0]?.name || 'Assembly'} MLA Seat`,
         description: 'Assembly Constituency MLA operations.',
@@ -85,7 +54,6 @@ export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, 
       // 5. Mandal President
       {
         id: 'MANDAL_INCHARGE',
-        levelKey: 'MANDAL',
         name: t('MANDAL', 'Mandal President'),
         subtitle: 'Mandal & Block Division',
         description: 'Mandal level cadre & booth oversight.',
@@ -95,7 +63,6 @@ export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, 
       // 6. Village Incharge
       {
         id: 'VILLAGE_INCHARGE',
-        levelKey: 'VILLAGE',
         name: t('VILLAGE', 'Village Incharge'),
         subtitle: 'Gram Panchayat & Local Ward',
         description: 'Village ward & local community unit.',
@@ -105,7 +72,6 @@ export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, 
       // 7. Booth President
       {
         id: 'BOOTH_PRESIDENT',
-        levelKey: 'BOOTH',
         name: t('BOOTH', 'Booth President'),
         subtitle: 'Polling Booth Management',
         description: 'Polling booth command & voter turnout.',
@@ -115,7 +81,6 @@ export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, 
       // 8. 100 Voter Incharge
       {
         id: 'VOTER_100_INCHARGE',
-        levelKey: 'VOTER_GROUP',
         name: t('VOTER_GROUP', '100 Voters Incharge'),
         subtitle: 'Voter Family Cluster Committee',
         description: '100-voter cluster door-to-door outreach.',
@@ -124,7 +89,7 @@ export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, 
       },
     ];
 
-    return allRoles.filter((role) => enabledLevels.includes(role.levelKey));
+    return allRoles;
   }, [config, t]);
 
   const scopeLabel = useMemo(() => {

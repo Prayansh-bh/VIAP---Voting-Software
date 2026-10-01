@@ -56,6 +56,7 @@ import {
 } from 'lucide-react';
 import MandalInchargeDashboard from './MandalInchargeDashboard';
 import AIStrategicIntelligenceCenter from './AIStrategicIntelligenceCenter';
+import Pagination from './common/Pagination';
 
 function mapMandalRollup(item: ChildAnalyticsItem) {
   const prefs = item?.snapshot?.politicalPreference ?? {};
@@ -233,8 +234,17 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
             const villages: typeof villageRollups = [];
             let currentSNo = 1;
 
-            for (const mandal of mandalItems) {
-              const villagePayload = await fetchChildrenAnalytics(mandal.unitId);
+            const villagePayloads = await Promise.all(
+              mandalItems.map((mandal: any) =>
+                fetchChildrenAnalytics(mandal.unitId)
+                  .then((villagePayload) => ({ mandal, villagePayload }))
+                  .catch(() => ({ mandal, villagePayload: [] }))
+              )
+            );
+
+            if (!active) return;
+
+            for (const { mandal, villagePayload } of villagePayloads) {
               const rawVillageItems = Array.isArray(villagePayload) ? villagePayload : (villagePayload as any)?.items || [];
               rawVillageItems
                 .filter((item: any) => item.level === 'VILLAGE')
@@ -674,6 +684,23 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
     });
   }, [flaggedVoters, fakeSearch, fakeFilterStatus]);
 
+  // Pagination states
+  const [villagesPage, setVillagesPage] = useState(1);
+  const [villagesPageSize, setVillagesPageSize] = useState(15);
+  const [flaggedPage, setFlaggedPage] = useState(1);
+  const [flaggedPageSize, setFlaggedPageSize] = useState(15);
+  const [migratedPage, setMigratedPage] = useState(1);
+  const [migratedPageSize, setMigratedPageSize] = useState(15);
+
+  useEffect(() => {
+    setFlaggedPage(1);
+  }, [fakeSearch, fakeFilterStatus]);
+
+  const paginatedFlaggedVoters = useMemo(() => {
+    const start = (flaggedPage - 1) * flaggedPageSize;
+    return filteredFlaggedVoters.slice(start, start + flaggedPageSize);
+  }, [filteredFlaggedVoters, flaggedPage, flaggedPageSize]);
+
   // --- Strategic Intelligence ---
   const [isGeneratingAnalysis, setIsGeneratingAnalysis] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<boolean>(false);
@@ -686,6 +713,10 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
   const [villageSearch, setVillageSearch] = useState('');
   const [villageFilter, setVillageFilter] = useState<'ALL' | 'TDP WINNING' | 'YSRCP WINNING' | 'CLOSE CONTEST'>('ALL');
+
+  useEffect(() => {
+    setVillagesPage(1);
+  }, [villageSearch, villageFilter, selectedMandalInVillageList]);
 
   const filteredMandals = useMemo(() => {
     return mandalsData.filter(m => {
@@ -716,6 +747,11 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
       return true;
     });
   }, [villagesData, selectedMandalInVillageList, villageSearch, villageFilter]);
+
+  const paginatedVillages = useMemo(() => {
+    const start = (villagesPage - 1) * villagesPageSize;
+    return filteredVillages.slice(start, start + villagesPageSize);
+  }, [filteredVillages, villagesPage, villagesPageSize]);
 
   // --- Live Voter Tracking (Aggregate Only, No Individual Preferences Stored) ---
   const [liveSearchQuery, setLiveSearchQuery] = useState('');
@@ -795,6 +831,10 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
   const [migratedSearch, setMigratedSearch] = useState('');
   const [migratedMandalFilter, setMigratedMandalFilter] = useState('ALL');
   const [migratedStatusFilter, setMigratedStatusFilter] = useState('ALL');
+
+  useEffect(() => {
+    setMigratedPage(1);
+  }, [migratedSearch, migratedMandalFilter, migratedStatusFilter]);
   const [editingMigratedVoter, setEditingMigratedVoter] = useState<MigratedVoter | null>(null);
   const [newMigratedVoter, setNewMigratedVoter] = useState({
     name: '', epic: '', mandal: 'Singarayakonda', village: 'Kalikivaya', booth: 'Booth 224',
@@ -840,6 +880,11 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
       return matchSearch && matchMandal && matchStatus;
     });
   }, [migratedVotersList, migratedSearch, migratedMandalFilter, migratedStatusFilter]);
+
+  const paginatedMigratedVoters = useMemo(() => {
+    const start = (migratedPage - 1) * migratedPageSize;
+    return filteredMigratedVoters.slice(start, start + migratedPageSize);
+  }, [filteredMigratedVoters, migratedPage, migratedPageSize]);
 
   const handleUpdateMigratedVoter = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1547,7 +1592,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 bg-white">
-                        {filteredVillages.map((v, idx) => {
+                        {paginatedVillages.map((v, idx) => {
                           const statusColors = 
                             v.status === 'WINNING' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                             v.status === 'TRAILING' ? 'bg-rose-50 text-rose-700 border-rose-200' :
@@ -1555,7 +1600,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
                           return (
                             <tr key={v.name} className="hover:bg-slate-50 font-bold text-slate-700">
-                              <td className="py-3 px-4 text-center text-slate-400">{idx + 1}</td>
+                              <td className="py-3 px-4 text-center text-slate-400">{(villagesPage - 1) * villagesPageSize + idx + 1}</td>
                               <td className="py-3 px-4 font-black text-slate-900 uppercase">{v.name}</td>
                               <td className="py-3 px-4 uppercase text-slate-500">{v.mandal}</td>
                               <td className="py-3 px-4 text-right text-slate-900 font-extrabold text-sm">{v.voters.toLocaleString()}</td>
@@ -1595,6 +1640,20 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       </tbody>
                     </table>
                   </div>
+
+                  <Pagination
+                    currentPage={villagesPage}
+                    pageSize={villagesPageSize}
+                    totalItems={filteredVillages.length}
+                    onPageChange={setVillagesPage}
+                    onPageSizeChange={(newSize) => {
+                      setVillagesPageSize(newSize);
+                      setVillagesPage(1);
+                    }}
+                    pageSizeOptions={[10, 15, 25, 50]}
+                    itemName="villages"
+                    accentColor="amber"
+                  />
                 </div>
               )}
             </div>
@@ -2382,7 +2441,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {filteredFlaggedVoters.map((item, idx) => {
+                      {paginatedFlaggedVoters.map((item, idx) => {
                         const statusColors = 
                           item.status === 'RESOLVED' ? 'bg-emerald-100 text-emerald-800' :
                           item.status === 'VERIFIED ISSUE' ? 'bg-red-100 text-red-800' :
@@ -2391,7 +2450,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
                         return (
                           <tr key={item.sNo} className="hover:bg-slate-50 font-bold text-slate-700">
-                            <td className="py-3 px-4 text-center text-slate-400">{idx + 1}</td>
+                            <td className="py-3 px-4 text-center text-slate-400">{(flaggedPage - 1) * flaggedPageSize + idx + 1}</td>
                             <td className="py-3 px-4 font-black text-slate-900 uppercase">{item.name}</td>
                             <td className="py-3 px-4 font-mono text-slate-500">{item.epic}</td>
                             <td className="py-3 px-4 text-center text-slate-600">{item.age} / {item.gender[0]}</td>
@@ -2417,6 +2476,20 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                     </tbody>
                   </table>
                 </div>
+
+                <Pagination
+                  currentPage={flaggedPage}
+                  pageSize={flaggedPageSize}
+                  totalItems={filteredFlaggedVoters.length}
+                  onPageChange={setFlaggedPage}
+                  onPageSizeChange={(newSize) => {
+                    setFlaggedPageSize(newSize);
+                    setFlaggedPage(1);
+                  }}
+                  pageSizeOptions={[10, 15, 25, 50]}
+                  itemName="flagged voters"
+                  accentColor="amber"
+                />
 
               </div>
 
@@ -3357,7 +3430,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
-                        {filteredMigratedVoters.map((item, idx) => {
+                        {paginatedMigratedVoters.map((item, idx) => {
                           const statusColor = 
                             item.travelStatus === 'CONFIRMED' ? 'bg-emerald-100 text-emerald-800' :
                             item.travelStatus === 'TRAVEL_BOOKED' ? 'bg-green-100 text-green-800' :
@@ -3372,7 +3445,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
                           return (
                             <tr key={item.id} className="hover:bg-slate-50">
-                              <td className="py-3 px-4 text-center text-slate-400">{idx + 1}</td>
+                              <td className="py-3 px-4 text-center text-slate-400">{(migratedPage - 1) * migratedPageSize + idx + 1}</td>
                               <td className="py-3 px-4">
                                 <span className="block font-black text-slate-950 uppercase">{item.name}</span>
                                 <span className="text-[10px] text-slate-400 block font-mono">{item.contactNumber}</span>
@@ -3408,6 +3481,20 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       </tbody>
                     </table>
                   </div>
+
+                  <Pagination
+                    currentPage={migratedPage}
+                    pageSize={migratedPageSize}
+                    totalItems={filteredMigratedVoters.length}
+                    onPageChange={setMigratedPage}
+                    onPageSizeChange={(newSize) => {
+                      setMigratedPageSize(newSize);
+                      setMigratedPage(1);
+                    }}
+                    pageSizeOptions={[10, 15, 25, 50]}
+                    itemName="migrated voters"
+                    accentColor="amber"
+                  />
                 </div>
 
               </div>

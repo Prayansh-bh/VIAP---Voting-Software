@@ -2,6 +2,7 @@ import React from 'react';
 import {
   LayoutDashboard,
   Layers,
+  Palette,
   Database,
   UserCheck,
   ClipboardCheck,
@@ -44,6 +45,13 @@ export default function AdminSidebar({
       icon: Layers,
       badge: null,
       description: 'Tenants & hierarchy configuration',
+    },
+    {
+      id: 'cms',
+      label: 'CMS & Brand Studio',
+      icon: Palette,
+      badge: 'CONFIG',
+      description: 'Brand identity, themes & slogan',
     },
     {
       id: 'data',

@@ -5,30 +5,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, Suspense, lazy } from 'react';
 import Header from './components/Header';
 import RoleSelection from './components/RoleSelection';
-import OtpLoginModal from './components/OtpLoginModal';
-import DashboardPlaceholders from './components/DashboardPlaceholders';
-import Voter100Dashboard from './components/Voter100Dashboard';
-import BoothInchargeDashboard from './components/BoothInchargeDashboard';
-import VillageInchargeDashboard from './components/VillageInchargeDashboard';
-import MandalInchargeDashboard from './components/MandalInchargeDashboard';
-import ConstituencyInchargeDashboard from './components/ConstituencyInchargeDashboard';
-import SuperAdminDashboard from './components/SuperAdminDashboard';
-import StateDashboard from './components/StateDashboard';
-import ZoneParliamentDashboard from './components/ZoneParliamentDashboard';
 import Footer from './components/Footer';
-import CmsStudio from './components/cms/CmsStudio';
 import RoleQuickSwitcher from './components/RoleQuickSwitcher';
-import PlatformAdminPortal from './components/PlatformAdminPortal';
-import AssignDataModule from './components/cms/AssignDataModule';
-import AssignInchargesModule from './components/cms/AssignInchargesModule';
-import ApprovalManagementModule from './components/cms/ApprovalManagementModule';
 import AdminPanelHandoff from './components/AdminPanelHandoff';
 import LandingPage from './components/landing/LandingPage';
-import { Sliders } from 'lucide-react';
 import { CommandRole, RoleType, UserSession } from './types';
+
+// ── Lazy-loaded heavy dashboards and modals (Zero initial bundle lag) ──
+const OtpLoginModal = lazy(() => import('./components/OtpLoginModal'));
+const Voter100Dashboard = lazy(() => import('./components/Voter100Dashboard'));
+const BoothInchargeDashboard = lazy(() => import('./components/BoothInchargeDashboard'));
+const VillageInchargeDashboard = lazy(() => import('./components/VillageInchargeDashboard'));
+const MandalInchargeDashboard = lazy(() => import('./components/MandalInchargeDashboard'));
+const ConstituencyInchargeDashboard = lazy(() => import('./components/ConstituencyInchargeDashboard'));
+const SuperAdminDashboard = lazy(() => import('./components/SuperAdminDashboard'));
+const StateDashboard = lazy(() => import('./components/StateDashboard'));
+const ZoneParliamentDashboard = lazy(() => import('./components/ZoneParliamentDashboard'));
+const DashboardPlaceholders = lazy(() => import('./components/DashboardPlaceholders'));
 import {
   clearAuthToken,
   getAuthToken,
@@ -341,29 +337,46 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
       return renderRoleSelection();
     }
 
-    switch (activeSession.role) {
-      case 'SUPER_ADMIN':
-        return <SuperAdminDashboard session={activeSession} onLogout={handleLogout} />;
-      case 'STATE_ADMIN':
-        return <StateDashboard session={activeSession} onLogout={handleLogout} />;
-      case 'ZONE_INCHARGE':
-      case 'PARLIAMENT_INCHARGE':
-        return <ZoneParliamentDashboard session={activeSession} onLogout={handleLogout} />;
-      case 'CONSTITUENCY_INCHARGE':
-      case 'VIEWER':
-        return <ConstituencyInchargeDashboard session={activeSession} onLogout={handleLogout} />;
-      case 'MANDAL_INCHARGE':
-        return <MandalInchargeDashboard session={activeSession} onLogout={handleLogout} />;
-      case 'VILLAGE_INCHARGE':
-        return <VillageInchargeDashboard session={activeSession} onLogout={handleLogout} />;
-      case 'BOOTH_PRESIDENT':
-      case 'POLLING_AGENT':
-        return <BoothInchargeDashboard session={activeSession} onLogout={handleLogout} />;
-      case 'VOTER_100_INCHARGE':
-        return <Voter100Dashboard session={activeSession} onLogout={handleLogout} />;
-      default:
-        return <DashboardPlaceholders session={activeSession} onLogout={handleLogout} />;
-    }
+    const component = (() => {
+      switch (activeSession.role) {
+        case 'SUPER_ADMIN':
+          return <SuperAdminDashboard session={activeSession} onLogout={handleLogout} />;
+        case 'STATE_ADMIN':
+          return <StateDashboard session={activeSession} onLogout={handleLogout} />;
+        case 'ZONE_INCHARGE':
+        case 'PARLIAMENT_INCHARGE':
+          return <ZoneParliamentDashboard session={activeSession} onLogout={handleLogout} />;
+        case 'CONSTITUENCY_INCHARGE':
+        case 'VIEWER':
+          return <ConstituencyInchargeDashboard session={activeSession} onLogout={handleLogout} />;
+        case 'MANDAL_INCHARGE':
+          return <MandalInchargeDashboard session={activeSession} onLogout={handleLogout} />;
+        case 'VILLAGE_INCHARGE':
+          return <VillageInchargeDashboard session={activeSession} onLogout={handleLogout} />;
+        case 'BOOTH_PRESIDENT':
+        case 'POLLING_AGENT':
+          return <BoothInchargeDashboard session={activeSession} onLogout={handleLogout} />;
+        case 'VOTER_100_INCHARGE':
+          return <Voter100Dashboard session={activeSession} onLogout={handleLogout} />;
+        default:
+          return <DashboardPlaceholders session={activeSession} onLogout={handleLogout} />;
+      }
+    })();
+
+    return (
+      <Suspense
+        fallback={
+          <div className="h-full min-h-[50vh] w-full flex flex-col items-center justify-center gap-3">
+            <div className="w-8 h-8 rounded-full border-3 border-amber-400 border-t-transparent animate-spin" />
+            <span className="text-xs font-bold text-slate-500 tracking-wider uppercase">
+              Loading Command Station...
+            </span>
+          </div>
+        }
+      >
+        {component}
+      </Suspense>
+    );
   };
 
   const renderView = () => {
@@ -380,13 +393,13 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
             window.location.hash = '/roles';
           }}
           onGetStarted={() => {
-            window.location.hash = '/cms';
+            window.location.hash = '/roles';
           }}
         />
       );
     }
 
-    // 2. Dedicated CMS & Admin Panel Hand-off (running on http://localhost:3001)
+    // 2. Dedicated Platform Admin Panel Hand-off
     if (isCmsRoute) {
       return (
         <AdminPanelHandoff
@@ -429,11 +442,13 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
       {!isDashboardActive && !isLandingRoute && !isRolesRoute && currentPath !== '/cms' && <Footer />}
 
       {selectedRole && (
-        <OtpLoginModal
-          role={selectedRole}
-          onClose={() => setSelectedRole(null)}
-          onSuccess={handleLoginSuccess}
-        />
+        <Suspense fallback={null}>
+          <OtpLoginModal
+            role={selectedRole}
+            onClose={() => setSelectedRole(null)}
+            onSuccess={handleLoginSuccess}
+          />
+        </Suspense>
       )}
     </div>
   );

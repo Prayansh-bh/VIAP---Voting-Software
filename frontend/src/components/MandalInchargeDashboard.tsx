@@ -66,6 +66,7 @@ import {
   updateTrainingProgress,
 } from '../lib/api';
 import { createRealtimeSocket, RealtimeVoteEvent } from '../lib/realtime';
+import Pagination from './common/Pagination';
 
 interface MandalInchargeDashboardProps {
   session: UserSession;
@@ -208,6 +209,23 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   const [preferenceFilter, setPreferenceFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [locationFilter, setLocationFilter] = useState('All'); // Local vs Migrated
+  
+  // Pagination states
+  const [villageVotersPage, setVillageVotersPage] = useState(1);
+  const [villageVotersPageSize, setVillageVotersPageSize] = useState(25);
+  const [boothsPage, setBoothsPage] = useState(1);
+  const [boothsPageSize, setBoothsPageSize] = useState(12);
+  const [fakeVotersPage, setFakeVotersPage] = useState(1);
+  const [fakeVotersPageSize, setFakeVotersPageSize] = useState(15);
+
+  // Auto reset page on filter changes
+  useEffect(() => {
+    setVillageVotersPage(1);
+  }, [boothFilter, selectedVillageName]);
+
+  useEffect(() => {
+    setBoothsPage(1);
+  }, [boothSearchQuery, boothListActiveTab]);
   
   // Voter Edit modal state
   const [editingVoter, setEditingVoter] = useState<Voter | null>(null);
@@ -489,6 +507,11 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       return true;
     });
   }, [analyzedBooths, boothListActiveTab, boothSearchQuery]);
+
+  const paginatedBooths = useMemo(() => {
+    const start = (boothsPage - 1) * boothsPageSize;
+    return filteredBooths.slice(start, start + boothsPageSize);
+  }, [filteredBooths, boothsPage, boothsPageSize]);
 
   useEffect(() => {
     let active = true;
@@ -1284,6 +1307,11 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   const fakeVotersList = useMemo(() => {
     return voters.filter(v => v.voterStatus === 'Fake' || v.voterStatus === 'Duplicate' || v.voterStatus === 'Doubtful');
   }, [voters]);
+
+  const paginatedFakeVoters = useMemo(() => {
+    const start = (fakeVotersPage - 1) * fakeVotersPageSize;
+    return fakeVotersList.slice(start, start + fakeVotersPageSize);
+  }, [fakeVotersList, fakeVotersPage, fakeVotersPageSize]);
 
   // Caste / Demographics Analytics Datasets
   const casteChartsData = useMemo(() => {
@@ -2473,6 +2501,8 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                     {/* Sub Tab: Voters Directory */}
                     {villageSubTab === 'voters' && (() => {
                       const filteredVillageVoters = villageVoters.filter(v => boothFilter === 'All' || v.boothNumber === boothFilter);
+                      const start = (villageVotersPage - 1) * villageVotersPageSize;
+                      const paginatedVillageVoters = filteredVillageVoters.slice(start, start + villageVotersPageSize);
                       return (
                         <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-4 animate-fade-in">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-2">
@@ -2510,7 +2540,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-100">
-                                {filteredVillageVoters.map((v) => (
+                                {paginatedVillageVoters.map((v) => (
                                 <tr key={v.epicNumber} className="hover:bg-slate-50 font-bold text-slate-700">
                                   <td className="py-2.5 px-3 text-slate-400 font-mono text-[10px]">{v.epicNumber}</td>
                                   <td className="py-2.5 px-3 font-black text-slate-900">{v.name}</td>
@@ -2540,6 +2570,20 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                             </tbody>
                           </table>
                         </div>
+
+                        <Pagination
+                          currentPage={villageVotersPage}
+                          pageSize={villageVotersPageSize}
+                          totalItems={filteredVillageVoters.length}
+                          onPageChange={setVillageVotersPage}
+                          onPageSizeChange={(newSize) => {
+                            setVillageVotersPageSize(newSize);
+                            setVillageVotersPage(1);
+                          }}
+                          pageSizeOptions={[10, 25, 50, 100]}
+                          itemName="voters"
+                          accentColor="amber"
+                        />
                       </div>
                     );
                     })()}
@@ -2802,7 +2846,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
 
             {/* Booth Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredBooths.map((b) => {
+              {paginatedBooths.map((b) => {
                 let tdpPct = 0;
                 let ysrcpPct = 0;
                 let neutralPct = 0;
@@ -2939,6 +2983,20 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
               })}
             </div>
 
+            <Pagination
+              currentPage={boothsPage}
+              pageSize={boothsPageSize}
+              totalItems={filteredBooths.length}
+              onPageChange={setBoothsPage}
+              onPageSizeChange={(newSize) => {
+                setBoothsPageSize(newSize);
+                setBoothsPage(1);
+              }}
+              pageSizeOptions={[6, 12, 24, 48]}
+              itemName="booths"
+              accentColor="amber"
+            />
+
             {/* Empty State */}
             {filteredBooths.length === 0 && (
               <div className="bg-slate-50 border border-slate-100 rounded-2xl p-10 text-center space-y-2">
@@ -3012,7 +3070,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                       </td>
                     </tr>
                   ) : (
-                    fakeVotersList.map((v) => (
+                    paginatedFakeVoters.map((v) => (
                       <tr key={v.id} className="hover:bg-slate-50/50">
                         <td className="py-3 px-3">
                           <p className="font-bold text-slate-900">{v.name}</p>
@@ -3043,6 +3101,20 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 </tbody>
               </table>
             </div>
+
+            <Pagination
+              currentPage={fakeVotersPage}
+              pageSize={fakeVotersPageSize}
+              totalItems={fakeVotersList.length}
+              onPageChange={setFakeVotersPage}
+              onPageSizeChange={(newSize) => {
+                setFakeVotersPageSize(newSize);
+                setFakeVotersPage(1);
+              }}
+              pageSizeOptions={[10, 15, 25, 50]}
+              itemName="flagged records"
+              accentColor="amber"
+            />
 
           </div>
         )}

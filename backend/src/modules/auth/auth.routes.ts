@@ -27,6 +27,20 @@ export async function authRoutes(fastify: FastifyInstance) {
     AuthController.demoLogin,
   );
 
+  // Authoritative Administrator Login (Password / Passcode Verification)
+  fastify.post(
+    '/admin-login',
+    {
+      config: {
+        rateLimit: {
+          max: process.env.NODE_ENV === 'test' ? 100 : 30,
+          timeWindow: '1 minute',
+        },
+      },
+    },
+    AuthController.adminLogin,
+  );
+
   // Silent device-based auto-login (Zomato/Uber/Ola persistent device session)
   fastify.post(
     '/device-session',

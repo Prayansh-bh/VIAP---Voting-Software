@@ -32,6 +32,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import { VoterPreference } from '../types';
+import { useNotification } from '../context/NotificationContext';
 
 export interface AIStrategicIntelligenceCenterProps {
   session?: any;
@@ -113,6 +114,7 @@ export default function AIStrategicIntelligenceCenter({
   flaggedVoters = [],
   tasksList = []
 }: AIStrategicIntelligenceCenterProps) {
+  const { notify } = useNotification();
   const [activeSubTab, setActiveSubTab] = useState<SubTabType>('overview');
   const [isGenerating, setIsGenerating] = useState(false);
   const [lastAnalysisTime, setLastAnalysisTime] = useState<string>('2026-07-30 04:15');
@@ -1207,7 +1209,7 @@ export default function AIStrategicIntelligenceCenter({
                     <div className="flex justify-between items-center text-[10px]">
                       <span className="text-slate-400 uppercase font-black">Topic Classification: {na.topic}</span>
                       <button 
-                        onClick={() => alert(`Connecting to verified RSS stream for: ${na.headline}`)}
+                        onClick={() => notify.info(`Connecting to verified live feed stream for: ${na.headline}`, 'Live Feed Source')}
                         className="text-yellow-600 hover:underline uppercase font-black cursor-pointer"
                       >
                         View Source Document &rarr;
@@ -1438,7 +1440,7 @@ export default function AIStrategicIntelligenceCenter({
                 </p>
 
                 <button
-                  onClick={() => alert('Compiling PDF Briefing Booklet... Standard system browser print layout will trigger.')}
+                  onClick={() => notify.info('Compiling PDF Briefing Booklet... Standard print layout initialized.', 'Report Generator')}
                   className="px-6 py-3 bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 mx-auto cursor-pointer shadow"
                 >
                   <Printer className="w-4 h-4" /> Generate Full Constituency Intelligence Report

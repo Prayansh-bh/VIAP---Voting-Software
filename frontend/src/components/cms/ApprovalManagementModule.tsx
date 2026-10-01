@@ -30,6 +30,7 @@ import {
   rejectRequest,
 } from '../../lib/api/approvals.api';
 import { useCms } from '../../context/CmsContext';
+import { useNotification } from '../../context/NotificationContext';
 
 interface ApprovalManagementModuleProps {
   partyId?: string;
@@ -43,6 +44,7 @@ export default function ApprovalManagementModule({
   onBack,
 }: ApprovalManagementModuleProps) {
   const { config } = useCms();
+  const { notify } = useNotification();
   const [stats, setStats] = useState<ApprovalStats>({
     totalPending: 0,
     totalApproved: 0,
@@ -119,18 +121,20 @@ export default function ApprovalManagementModule({
 
   const handleReject = async (item: ApprovalItem) => {
     if (!rejectReason.trim()) {
-      alert('Please provide a reason for rejection.');
+      notify.warning('Please provide an audit reason for rejecting this request.', 'Reason Required');
       return;
     }
     setActionLoading(true);
     try {
       await rejectRequest(item.id, rejectReason.trim());
+      notify.success(`Rejected request "${item.title}".`, 'Request Rejected');
       setFeedbackMessage({ text: `Rejected "${item.title}".`, type: 'success' });
       setIsRejecting(false);
       setRejectReason('');
       setSelectedItem(null);
       await loadData();
     } catch (err: any) {
+      notify.error(err.message || 'Failed to reject request', 'Rejection Error');
       setFeedbackMessage({ text: err.message || 'Failed to reject request', type: 'error' });
     } finally {
       setActionLoading(false);

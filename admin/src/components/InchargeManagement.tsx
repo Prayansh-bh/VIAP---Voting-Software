@@ -14,6 +14,8 @@ import {
   Phone,
 } from 'lucide-react';
 import { InchargeRecord, AppInstance, HierarchyLevelKey } from '../types';
+import Pagination from './Pagination';
+import { useNotification } from '../context/NotificationContext';
 
 interface InchargeManagementProps {
   incharges: InchargeRecord[];
@@ -32,8 +34,11 @@ export default function InchargeManagement({
   onToggleStatus,
   onResetCredentials,
 }: InchargeManagementProps) {
+  const { notify, confirmDialog } = useNotification();
   const [search, setSearch] = useState('');
   const [filterLevel, setFilterLevel] = useState<string>('ALL');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(15);
 
   // Modals
   const [transferItem, setTransferItem] = useState<InchargeRecord | null>(null);
@@ -57,18 +62,24 @@ export default function InchargeManagement({
     return matchSearch && matchLevel;
   });
 
+  const totalPages = Math.max(1, Math.ceil(filteredIncharges.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedIncharges = filteredIncharges.slice((safePage - 1) * pageSize, safePage * pageSize);
+
   const handleExecuteTransfer = async () => {
     if (!transferItem || !targetJurisdiction.trim()) {
-      alert('Please specify the target jurisdiction.');
+      notify.warning('Please specify the target jurisdiction to proceed with transfer.', 'Incomplete Transfer');
       return;
     }
     setActionLoading(true);
     try {
       await onTransfer(transferItem.id, targetJurisdiction.trim(), targetLevel);
+      notify.success(`Successfully transferred ${transferItem.name} to ${targetJurisdiction}.`, 'Transfer Complete');
       setFeedback({ message: `Successfully transferred ${transferItem.name} to ${targetJurisdiction}.`, type: 'success' });
       setTransferItem(null);
       setTargetJurisdiction('');
     } catch (err: any) {
+      notify.error(err.message || 'Transfer failed', 'Transfer Error');
       setFeedback({ message: err.message || 'Transfer failed', type: 'error' });
     } finally {
       setActionLoading(false);
@@ -77,18 +88,20 @@ export default function InchargeManagement({
 
   const handleExecuteReplace = async () => {
     if (!replaceItem || !replacementName.trim() || !replacementMobile.trim()) {
-      alert('Replacement name and valid mobile number are required.');
+      notify.warning('Replacement full name and valid 10-digit mobile number are required.', 'Missing Details');
       return;
     }
     setActionLoading(true);
     try {
       await onReplace(replaceItem.id, replacementName.trim(), replacementMobile.trim(), handoverNote.trim());
+      notify.success(`Successfully replaced ${replaceItem.name} with ${replacementName}.`, 'Replacement Complete');
       setFeedback({ message: `Successfully replaced ${replaceItem.name} with ${replacementName}.`, type: 'success' });
       setReplaceItem(null);
       setReplacementName('');
       setReplacementMobile('');
       setHandoverNote('');
     } catch (err: any) {
+      notify.error(err.message || 'Replacement failed', 'Replacement Error');
       setFeedback({ message: err.message || 'Replacement failed', type: 'error' });
     } finally {
       setActionLoading(false);
@@ -144,8 +157,8 @@ export default function InchargeManagement({
 
         <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
           <div>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Average Voter Coverage</div>
-            <div className="text-2xl font-black text-white mt-0.5">86.4%</div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Cadre In DB</div>
+            <div className="text-2xl font-black text-white mt-0.5">{incharges.length}</div>
           </div>
           <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold">
             <BarChart3 className="w-5 h-5" />
@@ -154,8 +167,12 @@ export default function InchargeManagement({
 
         <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
           <div>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Hierarchy Saturation</div>
-            <div className="text-2xl font-black text-white mt-0.5">92.0%</div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Active Deployment Ratio</div>
+            <div className="text-2xl font-black text-white mt-0.5">
+              {incharges.length > 0
+                ? `${Math.round((incharges.filter((i) => i.status === 'ACTIVE').length / incharges.length) * 100)}%`
+                : '0%'}
+            </div>
           </div>
           <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center font-bold">
             <Shield className="w-5 h-5" />
@@ -171,7 +188,10 @@ export default function InchargeManagement({
             type="text"
             placeholder="Search by name, phone, or unit..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setCurrentPage(1);
+            }}
             className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-emerald-400 outline-none"
           />
         </div>
@@ -180,7 +200,10 @@ export default function InchargeManagement({
           {['ALL', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'].map((lvl) => (
             <button
               key={lvl}
-              onClick={() => setFilterLevel(lvl)}
+              onClick={() => {
+                setFilterLevel(lvl);
+                setCurrentPage(1);
+              }}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
                 filterLevel === lvl
                   ? 'bg-emerald-400 text-slate-950 shadow-sm'
@@ -194,7 +217,7 @@ export default function InchargeManagement({
       </div>
 
       {/* Incharges Table */}
-      <div className="p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-sm overflow-hidden">
+      <div className="p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-sm overflow-hidden space-y-4">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-950 text-slate-400 font-semibold border-b border-slate-800">
@@ -208,100 +231,127 @@ export default function InchargeManagement({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80">
-              {filteredIncharges.map((inc) => (
-                <tr key={inc.id} className="hover:bg-slate-800/40 text-slate-300">
-                  <td className="p-3">
-                    <div className="font-bold text-white">{inc.name}</div>
-                    <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
-                      <Phone className="w-3 h-3 text-slate-500" />
-                      <span>{inc.phone}</span>
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-950 border border-slate-800 text-emerald-400">
-                      {inc.level.replace('_', ' ')}
-                    </span>
-                  </td>
-                  <td className="p-3 font-medium text-slate-200">{inc.jurisdiction}</td>
-                  <td className="p-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-20 bg-slate-950 rounded-full h-1.5 overflow-hidden">
-                        <div
-                          className="bg-emerald-400 h-full rounded-full"
-                          style={{ width: `${inc.coverageRate}%` }}
-                        />
-                      </div>
-                      <span className="text-[10px] font-bold text-emerald-400">{inc.coverageRate}%</span>
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[9px] font-black ${
-                        inc.status === 'ACTIVE'
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                      }`}
-                    >
-                      {inc.status}
-                    </span>
-                  </td>
-                  <td className="p-3 text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button
-                        onClick={() => {
-                          setTransferItem(inc);
-                          setTargetLevel(inc.level);
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold transition flex items-center gap-1"
-                        title="Transfer to another unit"
-                      >
-                        <ArrowRightLeft className="w-3 h-3 text-amber-400" />
-                        <span>Transfer</span>
-                      </button>
-
-                      <button
-                        onClick={() => setReplaceItem(inc)}
-                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold transition flex items-center gap-1"
-                        title="Replace with new incharge"
-                      >
-                        <UserX className="w-3 h-3 text-rose-400" />
-                        <span>Replace</span>
-                      </button>
-
-                      <button
-                        onClick={async () => {
-                          if (confirm(`Reset login credentials for ${inc.name}?`)) {
-                            await onResetCredentials(inc.id);
-                            setFeedback({ message: `Reset passcode sent to ${inc.phone}.`, type: 'success' });
-                          }
-                        }}
-                        className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-amber-400 transition"
-                        title="Reset Access Credentials"
-                      >
-                        <KeyRound className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        onClick={async () => {
-                          const nextStatus = inc.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-                          await onToggleStatus(inc.id, nextStatus);
-                        }}
-                        className={`p-1 rounded-lg transition ${
-                          inc.status === 'ACTIVE'
-                            ? 'text-slate-400 hover:text-rose-400 hover:bg-rose-500/10'
-                            : 'text-emerald-400 hover:bg-emerald-500/10'
-                        }`}
-                        title={inc.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+              {filteredIncharges.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="text-center py-12 text-slate-500 font-bold">
+                    No incharges match the active search or level filter.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                paginatedIncharges.map((inc) => (
+                  <tr key={inc.id} className="hover:bg-slate-800/40 text-slate-300">
+                    <td className="p-3">
+                      <div className="font-bold text-white">{inc.name}</div>
+                      <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
+                        <Phone className="w-3 h-3 text-slate-500" />
+                        <span>{inc.phone}</span>
+                      </div>
+                    </td>
+                    <td className="p-3">
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-950 border border-slate-800 text-emerald-400">
+                        {inc.level.replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td className="p-3 font-medium text-slate-200">{inc.jurisdiction}</td>
+                    <td className="p-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-20 bg-slate-950 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className="bg-emerald-400 h-full rounded-full"
+                            style={{ width: `${inc.coverageRate}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] font-bold text-emerald-400">{inc.coverageRate}%</span>
+                      </div>
+                    </td>
+                    <td className="p-3">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[9px] font-black ${
+                          inc.status === 'ACTIVE'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                        }`}
+                      >
+                        {inc.status}
+                      </span>
+                    </td>
+                    <td className="p-3 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => {
+                            setTransferItem(inc);
+                            setTargetLevel(inc.level);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                          title="Transfer to another unit"
+                        >
+                          <ArrowRightLeft className="w-3 h-3 text-amber-400" />
+                          <span>Transfer</span>
+                        </button>
+
+                        <button
+                          onClick={() => setReplaceItem(inc)}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                          title="Replace with new incharge"
+                        >
+                          <UserX className="w-3 h-3 text-rose-400" />
+                          <span>Replace</span>
+                        </button>
+
+                        <button
+                          onClick={async () => {
+                            const confirmed = await confirmDialog({
+                              title: 'Reset Login Credentials',
+                              message: `Reset credentials and active sessions for ${inc.name} (${inc.phone})? A new secure SMS passcode will be generated.`,
+                              confirmText: 'Reset Credentials',
+                              icon: 'key',
+                            });
+                            if (confirmed) {
+                              await onResetCredentials(inc.id);
+                              notify.success(`Login credentials for ${inc.name} have been reset.`, 'Credentials Reset');
+                              setFeedback({ message: `Reset passcode sent to ${inc.phone}.`, type: 'success' });
+                            }
+                          }}
+                          className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-amber-400 transition cursor-pointer"
+                          title="Reset Access Credentials"
+                        >
+                          <KeyRound className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                          onClick={async () => {
+                            const nextStatus = inc.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+                            await onToggleStatus(inc.id, nextStatus);
+                          }}
+                          className={`p-1 rounded-lg transition cursor-pointer ${
+                            inc.status === 'ACTIVE'
+                              ? 'text-slate-400 hover:text-rose-400 hover:bg-rose-500/10'
+                              : 'text-emerald-400 hover:bg-emerald-500/10'
+                          }`}
+                          title={inc.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
+
+        {/* Dynamic Pagination Controls */}
+        <Pagination
+          currentPage={safePage}
+          totalItems={filteredIncharges.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          pageSizeOptions={[10, 15, 25, 50, 100]}
+          itemLabel="incharges"
+          themeColor="emerald"
+        />
       </div>
 
       {/* Transfer Incharge Modal */}

@@ -41,6 +41,7 @@ import {
   InchargeRecord,
 } from '../../lib/api/applications.api';
 import { useCms } from '../../context/CmsContext';
+import { useNotification } from '../../context/NotificationContext';
 
 interface AssignInchargesModuleProps {
   initialAppId?: string;
@@ -54,6 +55,7 @@ export default function AssignInchargesModule({
   onClose,
 }: AssignInchargesModuleProps) {
   const { config } = useCms();
+  const { notify, confirmDialog } = useNotification();
 
   // Application selection
   const [applications, setApplications] = useState<any[]>([]);
@@ -358,20 +360,28 @@ export default function AssignInchargesModule({
 
   // Revoke incharge
   const handleDeleteIncharge = async (inchargeId: string, name: string) => {
-    if (!confirm(`Are you sure you want to revoke assignment for ${name}?`)) return;
+    const confirmed = await confirmDialog({
+      title: 'Revoke Incharge Assignment',
+      message: `Are you sure you want to revoke the deployment and assignment for ${name}?`,
+      confirmText: 'Revoke Assignment',
+      danger: true,
+      icon: 'trash',
+    });
+    if (!confirmed) return;
     try {
       await deleteApplicationIncharge(selectedAppId, inchargeId);
       loadIncharges(selectedAppId);
+      notify.success(`Assignment revoked for ${name}.`, 'Assignment Revoked');
       setActionSuccess(`Assignment revoked for ${name}.`);
     } catch (err: any) {
-      alert(`Error revoking incharge: ${err.message}`);
+      notify.error(`Error revoking incharge: ${err.message}`, 'Revocation Failed');
     }
   };
 
   // Transfer incharge
   const handleExecuteTransfer = async () => {
     if (!transferModalIncharge || !transferUnitId) {
-      alert('Please enter or select a target jurisdiction unit ID');
+      notify.warning('Please enter or select a target jurisdiction unit ID.', 'Incomplete Transfer');
       return;
     }
     try {
@@ -380,18 +390,19 @@ export default function AssignInchargesModule({
         targetUnitId: transferUnitId,
         reason: transferReason,
       });
+      notify.success(`Incharge ${transferModalIncharge.userName} transferred to ${transferUnitLevel} jurisdiction successfully.`, 'Transfer Succeeded');
       setActionSuccess(`Incharge ${transferModalIncharge.userName} transferred to ${transferUnitLevel} jurisdiction successfully.`);
       setTransferModalIncharge(null);
       loadIncharges(selectedAppId);
     } catch (err: any) {
-      alert(err.message || 'Transfer failed');
+      notify.error(err.message || 'Transfer failed', 'Transfer Error');
     }
   };
 
   // Replace incharge
   const handleExecuteReplace = async () => {
     if (!replaceModalIncharge || !replaceName.trim() || !replaceMobile.trim()) {
-      alert('Replacement Incharge Full Name and Mobile Number are required.');
+      notify.warning('Replacement Incharge Full Name and Mobile Number are required.', 'Missing Fields');
       return;
     }
     try {
@@ -401,13 +412,14 @@ export default function AssignInchargesModule({
         email: replaceEmail.trim() || undefined,
         reason: replaceReason,
       });
+      notify.success(`Incharge ${replaceModalIncharge.userName} successfully replaced with ${replaceName}.`, 'Replacement Complete');
       setActionSuccess(`Incharge ${replaceModalIncharge.userName} successfully replaced with ${replaceName}.`);
       setReplaceModalIncharge(null);
       setReplaceName('');
       setReplaceMobile('');
       loadIncharges(selectedAppId);
     } catch (err: any) {
-      alert(err.message || 'Replacement failed');
+      notify.error(err.message || 'Replacement failed', 'Replacement Error');
     }
   };
 
@@ -416,22 +428,29 @@ export default function AssignInchargesModule({
     const nextStatus = inc.status !== 'ACTIVE';
     try {
       await updateInchargeStatusApi(selectedAppId, inc.id, nextStatus);
+      notify.success(`Status for ${inc.userName} updated to ${nextStatus ? 'ACTIVE' : 'INACTIVE'}.`, 'Status Updated');
       setActionSuccess(`Status for ${inc.userName} updated to ${nextStatus ? 'ACTIVE' : 'INACTIVE'}.`);
       loadIncharges(selectedAppId);
     } catch (err: any) {
-      alert(err.message || 'Failed to update status');
+      notify.error(err.message || 'Failed to update status', 'Status Error');
     }
   };
 
   // Reset incharge credentials
   const handleResetCredentials = async (inc: InchargeRecord) => {
-    if (!confirm(`Reset credentials & authorized devices for ${inc.userName} (${inc.mobileNumber})?`)) return;
+    const confirmed = await confirmDialog({
+      title: 'Reset Credentials',
+      message: `Reset credentials & authorized devices for ${inc.userName} (${inc.mobileNumber})? A new OTP login passcode will be issued.`,
+      confirmText: 'Reset Credentials',
+      icon: 'key',
+    });
+    if (!confirmed) return;
     try {
       const res = await resetInchargeCredentialsApi(selectedAppId, inc.id);
-      alert(res.message || 'Credentials reset successfully.');
+      notify.success(res.message || 'Credentials reset successfully.', 'Credentials Reset');
       setActionSuccess(`Credentials reset for ${inc.userName}. They can now log in via fresh OTP.`);
     } catch (err: any) {
-      alert(err.message || 'Reset credentials failed');
+      notify.error(err.message || 'Reset credentials failed', 'Reset Error');
     }
   };
 

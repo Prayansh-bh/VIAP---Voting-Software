@@ -41,6 +41,32 @@ export class AuthController {
   }
 
   /**
+   * Authoritative Administrator Login verifying mobile number and security passcode.
+   */
+  static async adminLogin(req: FastifyRequest, reply: FastifyReply) {
+    const body = (req.body || {}) as { mobileNumber: string; passcode?: string; password?: string };
+    try {
+      const result = await AuthService.authenticateAdminLogin(body, {
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+
+      reply.setCookie('access_token', result.token, {
+        path: '/',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 86400,
+      });
+
+      return reply.status(200).send(successResponse(result, 'Admin authentication successful.'));
+    } catch (err: any) {
+      const statusCode = err.statusCode || 401;
+      return reply.status(statusCode).send(errorResponse(err.message, err.code || 'INVALID_CREDENTIALS'));
+    }
+  }
+
+  /**
    * Authenticates user directly using recognized authorized device token.
    * Eliminates repeat OTP prompts on authorized devices (Zomato/Uber pattern).
    */
