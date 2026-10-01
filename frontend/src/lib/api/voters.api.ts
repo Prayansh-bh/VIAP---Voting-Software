@@ -67,65 +67,6 @@ export function normalizeVoter(v: any): Voter {
   };
 }
 
-export function generateMockVoters(count = 50, filterBooth?: string): Voter[] {
-  const TELUGU_FIRST_NAMES = [
-    'Srinivasa Rao', 'Venkateswarlu', 'Ramanaiah', 'Subba Rao', 'Lakshmi Prasanna',
-    'Ramanamma', 'Koteswara Rao', 'Prasad', 'Sivaiah', 'Satyanarayana',
-    'Anjali Devi', 'Suresh Babu', 'Rajesh', 'Rama Devi', 'Venkata Krishna',
-    'Chenchaiah', 'Krishnaiah', 'Malyadri', 'Saraswathi', 'Gopalakrishna',
-  ];
-  const TELUGU_LAST_NAMES = [
-    'Gaddipati', 'Marella', 'Bollineni', 'Chundi', 'Yeluri',
-    'Damarla', 'Nelaturi', 'Ravipudi', 'Dara', 'Mupparaju',
-    'Nalamothu', 'Kolla', 'Myneni', 'Kakumanu', 'Gorantla',
-  ];
-  const CASTES = ['Kamma', 'Reddy', 'Kapu', 'SC (Madiga)', 'SC (Mala)', 'BC (Yadava)', 'BC (Gowda)', 'Muslim'];
-  const PROFESSIONS = ['Agriculture', 'Farmer', 'Business', 'Teacher', 'Homemaker', 'Student', 'Daily Wage Worker'];
-  const PREFERENCES: VoterPreference[] = ['TDP', 'TDP', 'TDP', 'YSRCP', 'YSRCP', 'JSP', 'Neutral'];
-
-  return Array.from({ length: count }, (_, i) => {
-    const fn = TELUGU_FIRST_NAMES[i % TELUGU_FIRST_NAMES.length];
-    const ln = TELUGU_LAST_NAMES[i % TELUGU_LAST_NAMES.length];
-    const caste = CASTES[i % CASTES.length];
-    const pref = PREFERENCES[i % PREFERENCES.length];
-    const isVoted = i % 3 !== 0;
-    const isMigrated = i % 10 === 0;
-
-    return {
-      id: `voter-${i + 1}`,
-      serialNumber: i + 1,
-      epicNumber: `KDP${String(1000000 + i * 37).slice(-7)}`,
-      name: `${ln} ${fn}`,
-      fatherHusbandName: `${ln} ${TELUGU_FIRST_NAMES[(i + 3) % TELUGU_FIRST_NAMES.length]}`,
-      relationType: 'Father',
-      houseNumber: `D.No. ${Math.floor(i / 5) + 1}-${(i % 5) + 10}`,
-      age: 22 + (i % 55),
-      gender: i % 2 === 0 ? 'Male' : 'Female',
-      mobileNumber: `9848${String(100000 + i * 13).slice(-6)}`,
-      assemblyConstituency: 'Kondapi',
-      mandal: 'Kondapi',
-      village: 'Kondapi Main',
-      boothNumber: filterBooth || 'Booth 101 - ZP High School',
-      assignedVoterGroup: `Team ${String(Math.floor(i / 100) + 1).padStart(2, '0')}`,
-      assignedInchargeId: 'demo-100-voter-incharge',
-      politicalPreference: pref,
-      voterStatus: 'Active',
-      surveyStatus: 'Surveyed',
-      notes: 'Cadre verified - Active supporter',
-      lastUpdated: '2026-08-25',
-      updatedBy: 'Booth Incharge',
-      caste,
-      subCaste: caste,
-      profession: PROFESSIONS[i % PROFESSIONS.length],
-      voterLocationStatus: isMigrated ? 'Migrated' : 'Local',
-      currentLocation: isMigrated ? 'Hyderabad' : 'Local',
-      voteStatus: isVoted ? 'VOTE DONE' : 'NOT VOTED',
-      voteDoneTime: isVoted ? '10:30 AM' : undefined,
-      inchargeAssessment: pref,
-    };
-  });
-}
-
 export async function fetchVoters(params: VoterQueryParams = {}): Promise<PaginatedVotersResponse> {
   const searchParams = new URLSearchParams();
   Object.entries(params).forEach(([key, val]) => {
@@ -141,7 +82,7 @@ export async function fetchVoters(params: VoterQueryParams = {}): Promise<Pagina
     const json = await apiFetch<any>(endpoint);
     const rawList = Array.isArray(json?.data) ? json.data : (Array.isArray(json?.items) ? json.items : (Array.isArray(json) ? json : []));
 
-    // When the API succeeds (even with 0 voters), return the genuine database state
+    // Return the genuine database state from PostgreSQL
     if (json !== undefined && json !== null) {
       const total = typeof json?.meta?.total === 'number' ? json.meta.total : rawList.length;
       const limit = typeof json?.meta?.limit === 'number' ? json.meta.limit : (params.limit || 50);
@@ -158,22 +99,7 @@ export async function fetchVoters(params: VoterQueryParams = {}): Promise<Pagina
       };
     }
   } catch (err) {
-    console.warn('[Voters API] Error fetching voters from API:', err);
-  }
-
-  // Only fall back to synthetic mock voters if explicitly in offline demo mode
-  const isExplicitDemo = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
-  if (isExplicitDemo) {
-    const mockList = generateMockVoters(50, params.boothId);
-    return {
-      items: mockList,
-      total: 1247,
-      page: params.page || 1,
-      limit: params.limit || 50,
-      totalPages: 25,
-      hasNextPage: true,
-      hasPrevPage: false,
-    };
+    console.warn('[Voters API] Error fetching voters from DB:', err);
   }
 
   return {

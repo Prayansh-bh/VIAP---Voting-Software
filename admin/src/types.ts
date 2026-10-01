@@ -85,4 +85,6 @@ export interface ApplicationSummary {
   totalGroups: number;
   totalIncharges: number;
   totalTasks: number;
+  totalMandals?: number;
+  totalConstituencies?: number;
 }

@@ -9,12 +9,7 @@ import {
   TrainingVideo 
 } from '../types';
 import { 
-  loadAllVillageVoters, 
-  saveVoterRecord, 
-  INCHARGES, 
-  TRAINING_VIDEOS,
-  INITIAL_BOOTH_TASKS,
-  getBoothForIncharge 
+  saveVoterRecord 
 } from '../utils/boothHelpers';
 import { 
   Home, 
@@ -56,6 +51,7 @@ import {
   fetchTrainingProgress,
   fetchTrainingVideos,
   fetchVotersForUnit,
+  fetchCadreNetwork,
   syncVoter,
   type HierarchySummaryPayload,
   type TrainingProgressItem,
@@ -64,6 +60,16 @@ import {
 import { createRealtimeSocket, RealtimeVoteEvent } from '../lib/realtime';
 import Pagination from './common/Pagination';
 import { useNotification } from '../context/NotificationContext';
+
+interface VillageCadreItem {
+  id: string;
+  name: string;
+  mobile: string;
+  group: string;
+  role: string;
+  unitName: string;
+  votersCount: number;
+}
 
 interface VillageInchargeDashboardProps {
   session: UserSession;
@@ -164,7 +170,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
   // Live updates states
   const [recentVoteDoneActivity, setRecentVoteDoneActivity] = useState<{voterName: string, boothName: string, time: string}[]>([]);
   const [backendSummary, setBackendSummary] = useState<HierarchySummaryPayload | null>(null);
-  const [trainingVideos, setTrainingVideos] = useState<TrainingVideo[]>(TRAINING_VIDEOS);
+  const [trainingVideos, setTrainingVideos] = useState<TrainingVideo[]>([]);
   const [trainingProgress, setTrainingProgress] = useState<Record<string, TrainingProgressItem>>({});
 
   // Ground Reports states
@@ -180,8 +186,9 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskInstructions, setNewTaskInstructions] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<'Low' | 'Medium' | 'High' | 'Urgent'>('Medium');
-  const [newTaskAssignee, setNewTaskAssignee] = useState(INCHARGES[0]?.id || '');
+  const [newTaskAssignee, setNewTaskAssignee] = useState('All');
   const [newTaskDueDate, setNewTaskDueDate] = useState('2026-08-05');
+  const [cadreList, setCadreList] = useState<VillageCadreItem[]>([]);
 
   // Video watching modal
   const [watchingVideo, setWatchingVideo] = useState<TrainingVideo | null>(null);
@@ -191,7 +198,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
 
     const hydrateLiveScope = async () => {
       try {
-        const [summaryPayload, eventItems, reports, tasks, videos, progressItems, voterItems] = await Promise.all([
+        const [summaryPayload, eventItems, reports, tasks, videos, progressItems, voterItems, cadrePayload] = await Promise.all([
           fetchHierarchySummaryByUser(session.userId),
           fetchLiveVoteEventsByUser(session.userId, 8),
           fetchReportsForUnit(session.unitId).catch(() => null),
@@ -199,6 +206,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
           fetchTrainingVideos(session.unitId).catch(() => null),
           fetchTrainingProgress(session.userId).catch(() => null),
           fetchVotersForUnit(session.unitId).catch(() => null),
+          fetchCadreNetwork(session.unitId).catch(() => null),
         ]);
 
         if (!active) {
@@ -231,6 +239,19 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
 
         if (videos && videos.length > 0) {
           setTrainingVideos(videos);
+        }
+
+        if (cadrePayload) {
+          const items = Array.isArray(cadrePayload) ? cadrePayload : cadrePayload.items || [];
+          setCadreList(items.map((c: any, idx: number) => ({
+            id: c.userId || c.id || `cadre-${idx + 1}`,
+            name: c.name || `Cadre ${idx + 1}`,
+            mobile: c.mobileNumber || c.mobile || '',
+            group: c.unitName || `Unit ${idx + 1}`,
+            role: c.role || 'VOTER_100_INCHARGE',
+            unitName: c.unitName || '',
+            votersCount: c.totalAssignedVoters || 0,
+          })));
         }
 
         if (progressItems) {
@@ -272,8 +293,9 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
 
   // Sync / Refresh data
   const refreshVoters = () => {
-    const updated = loadAllVillageVoters();
-    setVoters(updated);
+    void fetchVotersForUnit(session.unitId)
+      .then(setVoters)
+      .catch(() => {});
   };
 
   // Metric Computations (Dynamic and fully synchronous)
@@ -554,7 +576,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
     e.preventDefault();
     if (!newTaskTitle.trim() || !newTaskInstructions.trim()) return;
 
-    const assigneeObj = INCHARGES.find(i => i.id === newTaskAssignee);
+    const assigneeObj = cadreList.find(i => i.id === newTaskAssignee);
     const assigneeName = assigneeObj ? assigneeObj.name : 'All Cadres';
 
     const newTask: VoterTask = {
@@ -754,7 +776,8 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
 
   // Cadre Network computations
   const cadreNetworkList = useMemo(() => {
-    return INCHARGES.map(inc => {
+    const items = cadreList.filter(c => c.role === 'VOTER_100_INCHARGE' || c.role === 'Voter100' || (!c.role.includes('BOOTH') && !c.role.includes('VILLAGE')));
+    return items.map((inc) => {
       // Get all voters assigned to this 100 Voter Incharge
       const incVoters = voters.filter(v => v.assignedInchargeId === inc.id && v.voterStatus !== 'Deceased');
       
@@ -779,30 +802,31 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
       const majorityLead = leaderCount - runnerCount;
 
       return {
-        ...inc,
-        boothNumber: getBoothForIncharge(inc.id),
-        votersCount: incVoters.length,
+        id: inc.id,
+        name: inc.name,
+        mobile: inc.mobile,
+        group: inc.group,
+        boothNumber: inc.unitName || 'Assigned Booth',
+        votersCount: incVoters.length || inc.votersCount,
         counts,
         majorityParty: leaderParty,
         majorityCount: counts[leaderParty] || 0,
         majorityLead: majorityLead
       };
     });
-  }, [voters]);
+  }, [cadreList, voters]);
 
   const paginatedCadres = useMemo(() => {
     const start = (cadrePage - 1) * cadrePageSize;
     return cadreNetworkList.slice(start, start + cadrePageSize);
   }, [cadreNetworkList, cadrePage, cadrePageSize]);
 
-  // Booth Incharges Computations (3 prominent leaders)
+  // Booth Incharges Computations
   const boothInchargesData = useMemo(() => {
-    const booths = ["Booth 145", "Booth 146", "Booth 147"];
-    const names = ["M. Venkaiah Chowdary", "K. Prasada Reddy", "P. Srinivasa Naidu"];
-    const mobiles = ["9848022145", "9848522146", "9848922147"];
-    
-    return booths.map((bName, idx) => {
-      const boothVoters = voters.filter(v => v.boothNumber === bName && v.voterStatus !== 'Deceased');
+    const boothCadres = cadreList.filter(c => c.role === 'BOOTH_INCHARGE' || c.role === 'BoothIncharge');
+    return boothCadres.map((inc, idx) => {
+      const bName = inc.unitName || `Booth ${idx + 1}`;
+      const boothVoters = voters.filter(v => (v.boothNumber === bName || v.assignedInchargeId === inc.id) && v.voterStatus !== 'Deceased');
       
       const counts: Record<VoterPreference, number> = {
         TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0
@@ -824,17 +848,17 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
       const lead = leaderCount - runnerCount;
       
       return {
-        serial: `#0${idx + 1}`,
-        name: names[idx],
-        mobile: mobiles[idx],
+        serial: `#${String(idx + 1).padStart(2, '0')}`,
+        name: inc.name,
+        mobile: inc.mobile,
         booth: bName,
-        totalVoters: boothVoters.length,
+        totalVoters: boothVoters.length || inc.votersCount,
         counts,
         majorityParty: leaderParty,
         majorityLead: lead
       };
     });
-  }, [voters]);
+  }, [cadreList, voters]);
 
   return (
     <div className="w-full h-screen overflow-hidden flex flex-col md:flex-row bg-slate-50 text-slate-800" id="village-dashboard-container">
@@ -1768,7 +1792,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
 
               <div className="space-y-4 pt-1">
                 {tasksList.map((task) => {
-                  const assignedToIncharge = INCHARGES.find(i => i.id === task.assignedTo);
+                  const assignedToIncharge = cadreList.find(i => i.id === task.assignedTo);
                   const isOverdue = new Date() > new Date(task.dueDate) && task.status !== 'Completed';
                   
                   return (
@@ -1833,10 +1857,10 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                     onChange={(e) => setNewTaskAssignee(e.target.value)}
                     className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold focus:outline-none"
                   >
-                    {INCHARGES.map(i => (
-                      <option key={i.id} value={i.id}>{i.name} ({i.group})</option>
-                    ))}
                     <option value="All">All Incharges / Cadres</option>
+                    {cadreList.map(i => (
+                      <option key={i.id} value={i.id}>{i.name} ({i.group || i.role})</option>
+                    ))}
                   </select>
                 </div>
 
@@ -2103,7 +2127,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                     : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                Booth Incharges (3)
+                Booth Incharges ({boothInchargesData.length})
               </button>
               <button
                 onClick={() => setCadreActiveTab('voter')}
@@ -2113,164 +2137,184 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                     : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                100 Voter Incharges (37)
+                100 Voter Incharges ({cadreNetworkList.length})
               </button>
             </div>
 
-            {/* TAB 1 CONTENT: BOOTH INCHARGES (3) */}
+            {/* TAB 1 CONTENT: BOOTH INCHARGES */}
             {cadreActiveTab === 'booth' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 animate-fade-in" id="booth-incharges-grid">
-                {boothInchargesData.map((boothInc) => {
-                  return (
-                    <div key={boothInc.booth} className="bg-white border-2 border-slate-200 rounded-xl shadow-sm p-5 space-y-4 hover:shadow-md transition-all relative overflow-hidden">
-                      {/* Top Accent line */}
-                      <div className="absolute top-0 left-0 right-0 h-1 bg-amber-400"></div>
-                      
-                      {/* Serial Number & Role Badge */}
-                      <div className="flex items-center justify-between">
-                        <span className="text-xl font-black text-amber-500 tracking-tight">
-                          {boothInc.serial}
-                        </span>
-                        <span className="text-[10px] bg-slate-950 text-amber-400 border border-slate-800 px-2 py-0.5 rounded font-black uppercase tracking-wider">
-                          Booth Incharge
-                        </span>
-                      </div>
-
-                      {/* Header: Name, Mobile, Booth */}
-                      <div className="space-y-1.5 border-b border-slate-100 pb-3">
-                        <h4 className="text-sm font-black text-slate-950 uppercase">{boothInc.name}</h4>
-                        <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
-                          <Smartphone className="w-3.5 h-3.5 text-slate-400" />
-                          <span>{boothInc.mobile}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-xs pt-2">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Jurisdiction:</span>
-                          <span className="font-extrabold text-slate-900 text-sm">{boothInc.booth}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Total Voters:</span>
-                          <span className="font-extrabold text-slate-950 text-xs bg-slate-100 border border-slate-200 px-2 py-0.5 rounded">{boothInc.totalVoters.toLocaleString()} Voters</span>
-                        </div>
-                      </div>
-
-                      {/* Counts Breakdown Section */}
-                      <div className="space-y-2">
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Booth Preference Breakdown</p>
+              boothInchargesData.length === 0 ? (
+                <div className="bg-white border-2 border-dashed border-slate-200 rounded-xl p-8 text-center">
+                  <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-bold text-slate-700">No Booth Incharges Appointed</p>
+                  <p className="text-xs text-slate-400 mt-1">Booth incharges registered in this unit will appear here.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 animate-fade-in" id="booth-incharges-grid">
+                  {boothInchargesData.map((boothInc) => {
+                    return (
+                      <div key={boothInc.booth} className="bg-white border-2 border-slate-200 rounded-xl shadow-sm p-5 space-y-4 hover:shadow-md transition-all relative overflow-hidden">
+                        {/* Top Accent line */}
+                        <div className="absolute top-0 left-0 right-0 h-1 bg-amber-400"></div>
                         
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {(Object.keys(boothInc.counts) as VoterPreference[]).map((pref) => {
-                            const val = boothInc.counts[pref] || 0;
-                            if (val <= 0) return null;
-                            return (
-                              <span 
-                                key={pref} 
-                                className={`text-[10px] font-black px-2 py-0.5 rounded-md border flex items-center gap-1 ${PARTY_BG_COLORS[pref]}`}
-                              >
-                                <span className="w-1.5 h-1.5 rounded-sm" style={{ backgroundColor: PARTY_COLORS[pref] }}></span>
-                                {pref}: <span className="text-[11px] font-black">{val}</span>
-                              </span>
-                            );
-                          })}
+                        {/* Serial Number & Role Badge */}
+                        <div className="flex items-center justify-between">
+                          <span className="text-xl font-black text-amber-500 tracking-tight">
+                            {boothInc.serial}
+                          </span>
+                          <span className="text-[10px] bg-slate-950 text-amber-400 border border-slate-800 px-2 py-0.5 rounded font-black uppercase tracking-wider">
+                            Booth Incharge
+                          </span>
                         </div>
-                      </div>
 
-                      {/* Majority/Leading party highlight */}
-                      <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 flex items-center justify-between text-xs">
-                        <span className="text-slate-500 font-black uppercase text-[10px]">Majority Lead:</span>
-                        <span className={`font-black uppercase text-[11px] flex items-center gap-1.5 ${PARTY_TEXT_COLORS[boothInc.majorityParty]}`}>
-                          <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: PARTY_COLORS[boothInc.majorityParty] }}></span>
-                          {boothInc.majorityParty} <span className="font-black text-xs px-2 py-0.5 rounded bg-white border border-slate-200 shadow-sm">(+{boothInc.majorityLead} Votes)</span>
-                        </span>
-                      </div>
+                        {/* Header: Name, Mobile, Booth */}
+                        <div className="space-y-1.5 border-b border-slate-100 pb-3">
+                          <h4 className="text-sm font-black text-slate-950 uppercase">{boothInc.name}</h4>
+                          <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+                            <Smartphone className="w-3.5 h-3.5 text-slate-400" />
+                            <span>{boothInc.mobile}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-xs pt-2">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase">Jurisdiction:</span>
+                            <span className="font-extrabold text-slate-900 text-sm">{boothInc.booth}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase">Total Voters:</span>
+                            <span className="font-extrabold text-slate-950 text-xs bg-slate-100 border border-slate-200 px-2 py-0.5 rounded">{boothInc.totalVoters.toLocaleString()} Voters</span>
+                          </div>
+                        </div>
 
-                    </div>
-                  );
-                })}
-              </div>
+                        {/* Counts Breakdown Section */}
+                        <div className="space-y-2">
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Booth Preference Breakdown</p>
+                          
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {(Object.keys(boothInc.counts) as VoterPreference[]).map((pref) => {
+                              const val = boothInc.counts[pref] || 0;
+                              if (val <= 0) return null;
+                              return (
+                                <span 
+                                  key={pref} 
+                                  className={`text-[10px] font-black px-2 py-0.5 rounded-md border flex items-center gap-1 ${PARTY_BG_COLORS[pref]}`}
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-sm" style={{ backgroundColor: PARTY_COLORS[pref] }}></span>
+                                  {pref}: <span className="text-[11px] font-black">{val}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Majority/Leading party highlight */}
+                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 flex items-center justify-between text-xs">
+                          <span className="text-slate-500 font-black uppercase text-[10px]">Majority Lead:</span>
+                          {boothInc.totalVoters > 0 ? (
+                            <span className={`font-black uppercase text-[11px] flex items-center gap-1.5 ${PARTY_TEXT_COLORS[boothInc.majorityParty]}`}>
+                              <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: PARTY_COLORS[boothInc.majorityParty] }}></span>
+                              {boothInc.majorityParty} <span className="font-black text-xs px-2 py-0.5 rounded bg-white border border-slate-200 shadow-sm">(+{boothInc.majorityLead} Votes)</span>
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">No active data</span>
+                          )}
+                        </div>
+
+                      </div>
+                    );
+                  })}
+                </div>
+              )
             )}
 
-            {/* TAB 2 CONTENT: 100 VOTER INCHARGES (37) */}
+            {/* TAB 2 CONTENT: 100 VOTER INCHARGES */}
             {cadreActiveTab === 'voter' && (
               <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 animate-fade-in" id="voter-incharges-grid">
-                  {paginatedCadres.map((cadre, index) => {
-                    const serialNum = `#${String((cadrePage - 1) * cadrePageSize + index + 1).padStart(3, '0')}`;
-                  const hasSupporters = cadre.votersCount > 0;
-                  
-                  return (
-                    <div key={cadre.id} className="bg-white border-2 border-slate-200 rounded-xl shadow-sm p-4 space-y-4 hover:shadow-md transition-all relative overflow-hidden">
-                      {/* Top Accent line */}
-                      <div className="absolute top-0 left-0 right-0 h-1 bg-amber-500"></div>
+                {paginatedCadres.length === 0 ? (
+                  <div className="bg-white border-2 border-dashed border-slate-200 rounded-xl p-8 text-center">
+                    <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-slate-700">No 100-Voter Cadres Appointed</p>
+                    <p className="text-xs text-slate-400 mt-1">Local cadre incharges assigned under this village will appear here.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 animate-fade-in" id="voter-incharges-grid">
+                    {paginatedCadres.map((cadre, index) => {
+                      const serialNum = `#${String((cadrePage - 1) * cadrePageSize + index + 1).padStart(3, '0')}`;
+                      const hasSupporters = cadre.votersCount > 0;
+                    
+                      return (
+                        <div key={cadre.id} className="bg-white border-2 border-slate-200 rounded-xl shadow-sm p-4 space-y-4 hover:shadow-md transition-all relative overflow-hidden">
+                          {/* Top Accent line */}
+                          <div className="absolute top-0 left-0 right-0 h-1 bg-amber-500"></div>
 
-                      {/* Serial Number & Role Tag */}
-                      <div className="flex items-center justify-between">
-                        <span className="text-xl font-black text-amber-500 tracking-tight">
-                          {serialNum}
-                        </span>
-                        <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded font-black uppercase tracking-wider">
-                          100 Voter Incharge
-                        </span>
-                      </div>
-                      
-                      {/* Header: Name, Mobile, Booth */}
-                      <div className="space-y-1.5 border-b border-slate-100 pb-3">
-                        <h4 className="text-sm font-black text-slate-950 uppercase">{cadre.name}</h4>
-                        <p className="text-[10px] text-slate-400 font-bold tracking-wider">{cadre.group} Lead</p>
-                        
-                        <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium mt-1">
-                          <Smartphone className="w-3.5 h-3.5 text-slate-400" />
-                          <span>{cadre.mobile}</span>
-                        </div>
+                          {/* Serial Number & Role Tag */}
+                          <div className="flex items-center justify-between">
+                            <span className="text-xl font-black text-amber-500 tracking-tight">
+                              {serialNum}
+                            </span>
+                            <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded font-black uppercase tracking-wider">
+                              100 Voter Incharge
+                            </span>
+                          </div>
+                          
+                          {/* Header: Name, Mobile, Booth */}
+                          <div className="space-y-1.5 border-b border-slate-100 pb-3">
+                            <h4 className="text-sm font-black text-slate-950 uppercase">{cadre.name}</h4>
+                            <p className="text-[10px] text-slate-400 font-bold tracking-wider">{cadre.group} Lead</p>
+                            
+                            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium mt-1">
+                              <Smartphone className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{cadre.mobile}</span>
+                            </div>
 
-                        <div className="flex items-center justify-between text-xs pt-2">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Booth location:</span>
-                          <span className="font-extrabold text-slate-800">{cadre.boothNumber.split(' (')[0]}</span>
-                        </div>
+                            <div className="flex items-center justify-between text-xs pt-2">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase">Booth location:</span>
+                              <span className="font-extrabold text-slate-800">{cadre.boothNumber.split(' (')[0]}</span>
+                            </div>
 
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Assigned voters:</span>
-                          <span className="font-extrabold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">{cadre.votersCount} Voters</span>
-                        </div>
-                      </div>
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase">Assigned voters:</span>
+                              <span className="font-extrabold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">{cadre.votersCount} Voters</span>
+                            </div>
+                          </div>
 
-                      {/* Counts Breakdown Progress Section */}
-                      <div className="space-y-2">
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Team Preference Breakdown</p>
-                        
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {(Object.keys(cadre.counts) as VoterPreference[]).map((pref) => {
-                            const val = cadre.counts[pref] || 0;
-                            if (val <= 0) return null;
-                            return (
-                              <span 
-                                key={pref} 
-                                className={`text-[9px] font-black px-1.5 py-0.5 rounded border flex items-center gap-1 ${PARTY_BG_COLORS[pref]}`}
-                              >
-                                <span className="w-1.5 h-1.5 rounded-sm" style={{ backgroundColor: PARTY_COLORS[pref] }}></span>
-                                {pref}: {val}
+                          {/* Counts Breakdown Progress Section */}
+                          <div className="space-y-2">
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Team Preference Breakdown</p>
+                            
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {(Object.keys(cadre.counts) as VoterPreference[]).map((pref) => {
+                                const val = cadre.counts[pref] || 0;
+                                if (val <= 0) return null;
+                                return (
+                                  <span 
+                                    key={pref} 
+                                    className={`text-[9px] font-black px-1.5 py-0.5 rounded border flex items-center gap-1 ${PARTY_BG_COLORS[pref]}`}
+                                  >
+                                    <span className="w-1.5 h-1.5 rounded-sm" style={{ backgroundColor: PARTY_COLORS[pref] }}></span>
+                                    {pref}: {val}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Majority/Leading party highlight */}
+                          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 flex items-center justify-between text-xs">
+                            <span className="text-slate-500 font-black uppercase text-[10px]">Majority Lead:</span>
+                            {hasSupporters ? (
+                              <span className={`font-black uppercase text-[10px] flex items-center gap-1.5 ${PARTY_TEXT_COLORS[cadre.majorityParty]}`}>
+                                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: PARTY_COLORS[cadre.majorityParty] }}></span>
+                                {cadre.majorityParty} <span className="font-black text-xs px-1.5 py-0.5 rounded bg-white border border-slate-200 shadow-sm">(+{cadre.majorityLead} Votes)</span>
                               </span>
-                            );
-                          })}
+                            ) : (
+                              <span className="text-slate-400">No active data</span>
+                            )}
+                          </div>
+
                         </div>
-                      </div>
-
-                      {/* Majority/Leading party highlight */}
-                      <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 flex items-center justify-between text-xs">
-                        <span className="text-slate-500 font-black uppercase text-[10px]">Majority Lead:</span>
-                        {hasSupporters ? (
-                          <span className={`font-black uppercase text-[10px] flex items-center gap-1.5 ${PARTY_TEXT_COLORS[cadre.majorityParty]}`}>
-                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: PARTY_COLORS[cadre.majorityParty] }}></span>
-                            {cadre.majorityParty} <span className="font-black text-xs px-1.5 py-0.5 rounded bg-white border border-slate-200 shadow-sm">(+{cadre.majorityLead} Votes)</span>
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">No active data</span>
-                        )}
-                      </div>
-
-                    </div>
-                  );
-                })}
-              </div>
+                      );
+                    })}
+                  </div>
+                )}
 
               <Pagination
                 currentPage={cadrePage}

@@ -2715,7 +2715,7 @@ export class ApplicationsService {
       if (userScope.voterGroupId) scopeWhere.voterGroupId = userScope.voterGroupId;
     }
 
-    const [totalVoters, verifiedVoters, totalBooths, totalGroups, totalIncharges, totalTasks] =
+    const [totalVoters, verifiedVoters, totalBooths, totalGroups, totalIncharges, totalTasks, totalMandals, totalConstituencies] =
       await Promise.all([
         prisma.voter.count({ where: scopeWhere }),
         prisma.voter.count({ where: { ...scopeWhere, surveyStatus: 'VERIFIED' } }),
@@ -2723,6 +2723,8 @@ export class ApplicationsService {
         prisma.voterGroup.count(),
         prisma.userHierarchyAssignment.count({ where: { isActive: true } }),
         prisma.task.count(),
+        prisma.mandal.count(),
+        prisma.constituency.count(),
       ]);
 
     return {
@@ -2736,6 +2738,8 @@ export class ApplicationsService {
       totalGroups,
       totalIncharges,
       totalTasks,
+      totalMandals,
+      totalConstituencies,
     };
   }
 

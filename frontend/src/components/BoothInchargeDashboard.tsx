@@ -46,16 +46,23 @@ import {
   fetchTrainingProgress,
   fetchTrainingVideos,
   fetchVotersForUnit,
+  fetchCadreNetwork,
   type HierarchySummaryPayload,
   type TrainingProgressItem,
   syncVoter,
   updateTaskStatus,
   updateTrainingProgress,
 } from '../lib/api';
-import { 
-  INCHARGES, 
-  TRAINING_VIDEOS, 
-} from '../utils/boothHelpers';
+
+export interface InchargeDetail {
+  id: string;
+  name: string;
+  mobile: string;
+  group: string;
+  offset: number;
+  votersCount: number;
+  booth: string;
+}
 
 interface BoothInchargeDashboardProps {
   session: UserSession;
@@ -282,6 +289,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   const [voters, setVoters] = useState<Voter[]>([]);
   const [reports, setReports] = useState<GroundReport[]>([]);
   const [tasks, setTasks] = useState<VoterTask[]>([]);
+  const [cadreList, setCadreList] = useState<InchargeDetail[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -293,8 +301,9 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
       fetchTrainingVideos(session.unitId).catch(() => null),
       fetchTrainingProgress(session.userId).catch(() => null),
       fetchVotersForUnit(session.unitId).catch(() => null),
+      fetchCadreNetwork(session.unitId).catch(() => null),
     ])
-      .then(([payload, reportsPayload, tasksPayload, videosPayload, progressItems, voterItems]) => {
+      .then(([payload, reportsPayload, tasksPayload, videosPayload, progressItems, voterItems, cadrePayload]) => {
         if (!active) {
           return;
         }
@@ -317,6 +326,19 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
           setTrainingVideos(videosPayload);
         }
 
+        if (cadrePayload) {
+          const items = Array.isArray(cadrePayload) ? cadrePayload : cadrePayload.items || [];
+          setCadreList(items.map((c: any, idx: number) => ({
+            id: c.userId || c.id || `100-INC-${idx + 1}`,
+            name: c.name,
+            mobile: c.mobileNumber || c.mobile || '',
+            group: c.unitName || `Team ${String(idx + 1).padStart(2, '0')}`,
+            offset: idx * 100,
+            votersCount: c.totalAssignedVoters || 0,
+            booth: session.assignedBooth || 'Assigned Booth'
+          })));
+        }
+
         if (progressItems) {
           const progressMap: Record<string, TrainingProgressItem> = {};
           progressItems.forEach((item) => {
@@ -331,7 +353,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
     return () => {
       active = false;
     };
-  }, [session.userId]);
+  }, [session.userId, session.unitId]);
 
   // --------------------------------------------------------
   // DASHBOARD CALCULATIONS & METRICS
@@ -655,7 +677,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   // TAB 7: CADRE NETWORK AGGREGATION
   // --------------------------------------------------------
   const teamSummaries = useMemo(() => {
-    return INCHARGES.map(inc => {
+    return cadreList.map(inc => {
       const teamVoters = voters.filter(v => v.assignedInchargeId === inc.id);
       const assignedCount = teamVoters.length;
 
@@ -672,7 +694,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
         pStats
       };
     });
-  }, [voters]);
+  }, [cadreList, voters]);
 
   // --------------------------------------------------------
   // REPORT SUBMISSION STATE
@@ -864,7 +886,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
               <span title={session.userId}>ID: {session.userId?.slice(-8).toUpperCase() || 'BOOTH'}</span>
               <span>Booth: {session.assignedBooth?.split(' ')[1] || '145'}</span>
               <span>Village: {session.assignedVillage || 'Kondapi Village'}</span>
-              <span>Total Teams: {INCHARGES.length} Incharges</span>
+              <span>Total Teams: {cadreList.length} Incharges</span>
             </div>
           </div>
 
@@ -1001,7 +1023,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
               Live Booth Network Active
             </div>
-            <p className="text-[10px] text-gray-400 font-semibold uppercase mt-1">Aggregated Teams: {INCHARGES.length}</p>
+            <p className="text-[10px] text-gray-400 font-semibold uppercase mt-1">Aggregated Teams: {cadreList.length}</p>
           </div>
         </div>
 
@@ -1061,7 +1083,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                 <h3 className="text-3xl font-black text-slate-950">{liveBoothStats.totalVoters}</h3>
                 <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px] font-semibold text-slate-500">
                   <span>Assigned Teams</span>
-                  <span className="font-extrabold text-slate-900">{INCHARGES.length} Incharges</span>
+                  <span className="font-extrabold text-slate-900">{cadreList.length} Incharges</span>
                 </div>
               </div>
 
@@ -1411,7 +1433,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                     className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-700 focus:outline-none focus:border-yellow-400 cursor-pointer"
                   >
                     <option value="ALL">All Teams</option>
-                    {INCHARGES.map(inc => (
+                    {cadreList.map(inc => (
                       <option key={inc.id} value={inc.group}>{inc.group}</option>
                     ))}
                   </select>
@@ -1718,7 +1740,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                 className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-yellow-400 cursor-pointer min-w-[120px]"
               >
                 <option value="ALL">All Teams</option>
-                {INCHARGES.map(inc => (
+                {cadreList.map(inc => (
                   <option key={inc.id} value={inc.group}>{inc.group}</option>
                 ))}
               </select>
@@ -2004,7 +2026,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                   <p className="text-center py-12 text-slate-400 font-bold">No campaigning tasks created yet.</p>
                 ) : (
                   tasks.map((t) => {
-                    const assignedTeam = INCHARGES.find(inc => inc.id === t.assignedTo);
+                    const assignedTeam = cadreList.find(inc => inc.id === t.assignedTo);
                     const isCompleted = t.status === 'Completed';
 
                     return (
@@ -2085,9 +2107,13 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                     onChange={(e) => setNewTaskAssignedTo(e.target.value)}
                     className="w-full text-xs font-bold p-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:border-yellow-400"
                   >
-                    {INCHARGES.map(inc => (
-                      <option key={inc.id} value={inc.id}>{inc.name} ({inc.group})</option>
-                    ))}
+                    {cadreList.length === 0 ? (
+                      <option value="">No Incharges Registered</option>
+                    ) : (
+                      cadreList.map(inc => (
+                        <option key={inc.id} value={inc.id}>{inc.name} ({inc.group})</option>
+                      ))
+                    )}
                   </select>
                 </div>
 
@@ -2197,19 +2223,28 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
               <div>
                 <h3 className="font-black text-lg text-slate-900">Cadre Network</h3>
                 <p className="text-xs text-slate-400 font-semibold mt-1">
-                  Performance tracking and political preference audit of the 13 Cadre Incharges working under Booth 145.
+                  Performance tracking and political preference audit of the {cadreList.length} Cadre Incharges working under {session.assignedBooth || 'this booth'}.
                 </p>
               </div>
               <span className="text-xs bg-slate-50 text-slate-700 font-black px-3 py-1.5 rounded-lg border border-slate-100 self-start sm:self-center">
-                Total Cadre: 13 Incharges
+                Total Cadre: {cadreList.length} Incharges
               </span>
             </div>
 
             {/* Cadre Cards 3-Column Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
-              {teamSummaries.map((team, idx) => {
-                // Calculate leading party, majority, etc.
-                const parties: VoterPreference[] = ['TDP', 'YSRCP', 'JSP', 'BJP', 'INC', 'Neutral', 'OTH'];
+            {teamSummaries.length === 0 ? (
+              <div className="p-8 text-center bg-white border border-slate-200/60 rounded-xl space-y-2">
+                <Users className="w-8 h-8 text-slate-400 mx-auto" />
+                <h4 className="text-slate-900 font-bold text-sm">No Cadre Incharges Assigned</h4>
+                <p className="text-slate-500 text-xs max-w-md mx-auto">
+                  Cadre incharges for {session.assignedBooth || 'this booth'} will be shown once registered in the cadre network.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
+                {teamSummaries.map((team, idx) => {
+                  // Calculate leading party, majority, etc.
+                  const parties: VoterPreference[] = ['TDP', 'YSRCP', 'JSP', 'BJP', 'INC', 'Neutral', 'OTH'];
                 const sortedParties = parties
                   .map(party => ({ party, count: team.pStats[party] || 0 }))
                   .sort((a, b) => b.count - a.count);
@@ -2306,6 +2341,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                 );
               })}
             </div>
+            )}
 
           </div>
         )}
@@ -2389,7 +2425,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                         <span className="text-slate-300 cursor-pointer hover:underline">MUTE</span>
                       </div>
                       <span className="text-slate-400 font-mono font-medium">
-                        Booth 145 Operation Portal
+                        {session.assignedBooth || 'Booth Operation'} Portal
                       </span>
                     </div>
                   </div>

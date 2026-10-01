@@ -180,7 +180,7 @@ export async function createApplication(formData: any): Promise<AppInstance> {
       {
         name: formData.jurisdiction || appName,
         code: `AC-${partyCode}-01`,
-        totalVoters: 240000,
+        totalVoters: typeof formData.totalVoters === 'number' ? formData.totalVoters : 0,
         mlaName: formData.leaderName || 'Party Candidate',
       },
     ],
@@ -203,8 +203,8 @@ export async function createApplication(formData: any): Promise<AppInstance> {
     primaryColor: app.primaryColor || formData.primaryColor || '#F59E0B',
     secondaryColor: app.secondaryColor || formData.secondaryColor || '#DC2626',
     accentColor: app.accentColor || formData.accentColor || '#0F172A',
-    totalVoters: 240000,
-    turnoutPercent: 74.5,
+    totalVoters: typeof app.totalVoters === 'number' ? app.totalVoters : 0,
+    turnoutPercent: typeof app.turnoutPercent === 'number' ? app.turnoutPercent : 0,
     isActive: true,
     isDefault: false,
     createdAt: new Date().toLocaleDateString('en-IN'),
@@ -296,3 +296,42 @@ export async function rejectRequest(id: string, reason: string): Promise<any> {
     body: JSON.stringify({ reason }),
   });
 }
+
+// ── Data Ingestion & Live Voters ──
+export async function fetchVotersList(params?: { limit?: number; page?: number; search?: string }): Promise<{ items: any[]; total: number }> {
+  try {
+    const q = new URLSearchParams();
+    if (params?.limit) q.set('limit', String(params.limit));
+    if (params?.page) q.set('page', String(params.page));
+    if (params?.search) q.set('search', params.search);
+
+    const res: any = await request(`/voters?${q.toString()}`);
+    const items = Array.isArray(res?.data) ? res.data : (Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []));
+    const total = res?.meta?.total ?? items.length;
+    return { items, total };
+  } catch (err) {
+    console.warn('Backend /voters fetch note:', err);
+    return { items: [], total: 0 };
+  }
+}
+
+export async function importVoterRolls(appId: string, payload: {
+  rows: any[];
+  fileName?: string;
+  fileSize?: number;
+  targetConstituencyId?: string;
+  importMode?: 'APPEND' | 'REPLACE';
+}): Promise<any> {
+  return request(`/applications/${appId}/data/import`, {
+    method: 'POST',
+    body: JSON.stringify({
+      level: 'VOTER',
+      rows: payload.rows,
+      fileName: payload.fileName || 'voter_roll.xlsx',
+      fileSize: payload.fileSize || 0,
+      targetConstituencyId: payload.targetConstituencyId,
+      importMode: payload.importMode || 'APPEND',
+    }),
+  });
+}
+

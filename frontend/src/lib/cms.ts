@@ -123,7 +123,7 @@ export const APPLICATION_TEMPLATES: ApplicationTemplate[] = [
     description: 'Constituency War Room & Voter Intelligence cockpit for a single Assembly Constituency candidate.',
     stateName: 'Andhra Pradesh',
     constituencies: [
-      { name: 'Kondapi Assembly Constituency (AC No. 107)', code: 'AC-107', totalVoters: 228000 },
+      { name: 'Kondapi Assembly Constituency (AC No. 107)', code: 'AC-107', totalVoters: 0 },
     ],
     parties: [
       { name: 'Telugu Desam Party', code: 'TDP', shortName: 'TDP', primaryColor: '#eab308', symbolName: 'Bicycle' },
@@ -149,13 +149,13 @@ export const APPLICATION_TEMPLATES: ApplicationTemplate[] = [
     stateName: 'Andhra Pradesh',
     parliamentName: 'Ongole Parliament Constituency',
     constituencies: [
-      { name: 'Ongole Constituency', code: 'AC-101', totalVoters: 235000 },
-      { name: 'Kandukur Constituency', code: 'AC-102', totalVoters: 218000 },
-      { name: 'Darsi Constituency', code: 'AC-103', totalVoters: 212000 },
-      { name: 'Addanki Constituency', code: 'AC-104', totalVoters: 224000 },
-      { name: 'Kondapi Constituency', code: 'AC-107', totalVoters: 228000 },
-      { name: 'Santhanuthalapadu Constituency', code: 'AC-106', totalVoters: 210000 },
-      { name: 'Kanigiri Constituency', code: 'AC-105', totalVoters: 220000 },
+      { name: 'Ongole Constituency', code: 'AC-101', totalVoters: 0 },
+      { name: 'Kandukur Constituency', code: 'AC-102', totalVoters: 0 },
+      { name: 'Darsi Constituency', code: 'AC-103', totalVoters: 0 },
+      { name: 'Addanki Constituency', code: 'AC-104', totalVoters: 0 },
+      { name: 'Kondapi Constituency', code: 'AC-107', totalVoters: 0 },
+      { name: 'Santhanuthalapadu Constituency', code: 'AC-106', totalVoters: 0 },
+      { name: 'Kanigiri Constituency', code: 'AC-105', totalVoters: 0 },
     ],
     parties: [
       { name: 'Telugu Desam Party', code: 'TDP', shortName: 'TDP', primaryColor: '#eab308', symbolName: 'Bicycle' },
@@ -304,11 +304,11 @@ export const DEFAULT_CONFIG: CmsConfig = {
   appScope: 'STATE',
   activeHierarchyLevels: ['VOTER_GROUP', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY', 'PARLIAMENT', 'ZONE', 'STATE'],
   constituencies: [
-    { name: 'Nalgonda Constituency', code: 'TS-AC-92', totalVoters: 220000 },
-    { name: 'Warangal West Constituency', code: 'TS-AC-105', totalVoters: 245000 },
-    { name: 'Khammam Constituency', code: 'TS-AC-112', totalVoters: 250000 },
-    { name: 'Karimnagar Constituency', code: 'TS-AC-26', totalVoters: 260000 },
-    { name: 'Secunderabad Constituency', code: 'TS-AC-70', totalVoters: 265000 },
+    { name: 'Nalgonda Constituency', code: 'TS-AC-92', totalVoters: 0 },
+    { name: 'Warangal West Constituency', code: 'TS-AC-105', totalVoters: 0 },
+    { name: 'Khammam Constituency', code: 'TS-AC-112', totalVoters: 0 },
+    { name: 'Karimnagar Constituency', code: 'TS-AC-26', totalVoters: 0 },
+    { name: 'Secunderabad Constituency', code: 'TS-AC-70', totalVoters: 0 },
   ],
   slogan: 'Praja Palana — Congress Ki Guarantee for Telangana',
   hierarchyLabels: {

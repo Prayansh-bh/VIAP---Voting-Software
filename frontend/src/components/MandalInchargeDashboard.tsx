@@ -9,14 +9,7 @@ import {
   TrainingVideo 
 } from '../types';
 import { 
-  TRAINING_VIDEOS,
-  INITIAL_BOOTH_TASKS
-} from '../utils/boothHelpers';
-import { 
-  SINGARAYAKONDA_VILLAGES, 
   MandalVillage,
-  getMandalCadreNetwork, 
-  generateVotersForMandalVillage, 
   saveMandalVoterRecord 
 } from '../utils/mandalHelpers';
 import { 
@@ -45,14 +38,15 @@ import {
   CheckCircle, 
   TrendingUp, 
   ChevronRight, 
-  FileText,
-  Clock,
-  Phone
+  FileText, 
+  Clock, 
+  Phone 
 } from 'lucide-react';
 import {
   createReport,
   createTask,
   ensureTrainingAssigned,
+  fetchCadreNetwork,
   fetchHierarchySummaryByUser,
   fetchLiveVoteEventsByUser,
   fetchReportsForUnit,
@@ -135,35 +129,65 @@ interface VillageDataInfo {
   margin: number;
 }
 
-const VILLAGE_PROJECTED_DATA: Record<string, VillageDataInfo> = {
-  "BINGINAPALLI": { totalVoters: 2398, tdp: 1100, ysrcp: 1180, neutral: 118, status: 'TRAILING', margin: 80 },
-  "BINGINI PALLI": { totalVoters: 2398, tdp: 1100, ysrcp: 1180, neutral: 118, status: 'TRAILING', margin: 80 },
-  "KALIKIVAYA": { totalVoters: 2443, tdp: 1462, ysrcp: 862, neutral: 119, status: 'WINNING', margin: 600 },
-  "KANUMALA": { totalVoters: 2183, tdp: 1388, ysrcp: 688, neutral: 107, status: 'WINNING', margin: 700 },
-  "MULAGUNTAPADU": { totalVoters: 4300, tdp: 2944, ysrcp: 1144, neutral: 212, status: 'WINNING', margin: 1800 },
-  "MULAGUNTA PADU": { totalVoters: 4300, tdp: 2944, ysrcp: 1144, neutral: 212, status: 'WINNING', margin: 1800 },
-  "PAKALA": { totalVoters: 7530, tdp: 3231, ysrcp: 3931, neutral: 368, status: 'TRAILING', margin: 700 },
-  "PATHA SINGARAYAKONDA": { totalVoters: 2061, tdp: 1130, ysrcp: 830, neutral: 101, status: 'WINNING', margin: 300 },
-  "SANAMPUDI": { totalVoters: 4624, tdp: 3049, ysrcp: 1349, neutral: 226, status: 'WINNING', margin: 1700 },
-  "SINGARAYAKONDA": { totalVoters: 17200, tdp: 8029, ysrcp: 8329, neutral: 842, status: 'TRAILING', margin: 300 },
-  "SOMARAJU PALLI": { totalVoters: 5159, tdp: 3053, ysrcp: 1853, neutral: 253, status: 'WINNING', margin: 1200 },
-  "SOMARAJUPALLI": { totalVoters: 5159, tdp: 3053, ysrcp: 1853, neutral: 253, status: 'WINNING', margin: 1200 },
-  "SOMARAJPALLI": { totalVoters: 5159, tdp: 3053, ysrcp: 1853, neutral: 253, status: 'WINNING', margin: 1200 },
-  "WOOLLAPALEM": { totalVoters: 4349, tdp: 2668, ysrcp: 1468, neutral: 213, status: 'WINNING', margin: 1200 },
-};
-
-const VILLAGE_PROJECTED_MARGINS: Record<string, { status: 'WINNING' | 'TRAILING'; margin: number }> = VILLAGE_PROJECTED_DATA;
-
 export default function MandalInchargeDashboard({ session, onLogout }: MandalInchargeDashboardProps) {
 
-  const { villageIncharges, boothIncharges, voter100Incharges } = useMemo(() => getMandalCadreNetwork(), []);
+  const [cadreItems, setCadreItems] = useState<any[]>([]);
+
+  const villageIncharges = useMemo(() => {
+    return cadreItems
+      .filter((c) => c.role === 'VILLAGE_INCHARGE')
+      .map((c, i) => ({
+        sNo: `#${String(i + 1).padStart(2, '0')}`,
+        name: c.name,
+        mobile: c.mobileNumber || '',
+        village: c.unitName,
+        votersCount: c.totalAssignedVoters || 0,
+        leadingParty: 'Neutral' as VoterPreference,
+        pStats: { TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0 },
+        lead: 0,
+      }));
+  }, [cadreItems]);
+
+  const boothIncharges = useMemo(() => {
+    return cadreItems
+      .filter((c) => c.role === 'BOOTH_PRESIDENT')
+      .map((c, i) => ({
+        sNo: `#${String(i + 1).padStart(3, '0')}`,
+        name: c.name,
+        mobile: c.mobileNumber || '',
+        village: c.unitName,
+        booth: c.unitName,
+        votersCount: c.totalAssignedVoters || 0,
+        leadingParty: 'Neutral' as VoterPreference,
+        lead: 0,
+        pStats: { TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0 },
+      }));
+  }, [cadreItems]);
+
+  const voter100Incharges = useMemo(() => {
+    return cadreItems
+      .filter((c) => c.role === 'VOTER_100_INCHARGE')
+      .map((c, i) => ({
+        sNo: `#${String(i + 1).padStart(3, '0')}`,
+        name: c.name,
+        mobile: c.mobileNumber || '',
+        village: c.unitName,
+        booth: c.unitName,
+        votersCount: c.totalAssignedVoters || 0,
+        leadingParty: 'Neutral' as VoterPreference,
+        lead: 0,
+        pStats: { TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0 },
+      }));
+  }, [cadreItems]);
+
   const ALL_CADRES = useMemo(() => {
-    return [
-      ...villageIncharges.map((v, i) => ({ id: 'VIL-'+i, name: v.name, group: v.village, role: 'VILLAGE_INCHARGE' })),
-      ...boothIncharges.map((b, i) => ({ id: 'BOO-'+i, name: b.name, group: b.booth, role: 'BOOTH_PRESIDENT' })),
-      ...voter100Incharges.map((v, i) => ({ id: 'V100-'+i, name: v.name, group: v.booth, role: 'VOTER_100_INCHARGE' }))
-    ];
-  }, [villageIncharges, boothIncharges, voter100Incharges]);
+    return cadreItems.map((c, i) => ({
+      id: c.id || `CADRE-${i}`,
+      name: c.name,
+      group: c.unitName,
+      role: c.role,
+    }));
+  }, [cadreItems]);
 
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [cadreActiveTab, setCadreActiveTab] = useState<'village' | 'booth' | 'voter'>('village');
@@ -244,7 +268,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   // Live updates states
   const [recentVoteDoneActivity, setRecentVoteDoneActivity] = useState<{voterName: string, boothName: string, time: string}[]>([]);
   const [backendSummary, setBackendSummary] = useState<HierarchySummaryPayload | null>(null);
-  const [trainingVideos, setTrainingVideos] = useState<TrainingVideo[]>(TRAINING_VIDEOS);
+  const [trainingVideos, setTrainingVideos] = useState<TrainingVideo[]>([]);
   const [trainingProgress, setTrainingProgress] = useState<Record<string, TrainingProgressItem>>({});
 
   // Ground Reports states
@@ -267,132 +291,36 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   const [watchingVideo, setWatchingVideo] = useState<TrainingVideo | null>(null);
 
   // REDESIGNED CADRE NETWORK CONSTANTS & STATES
-  const VERIFIED_BOOTHS_DATA = useMemo(() => [
-    { boothNumber: 224, totalVoters: 950, v100InchargesCount: 9 },
-    { boothNumber: 225, totalVoters: 709, v100InchargesCount: 7 },
-    { boothNumber: 226, totalVoters: 784, v100InchargesCount: 8 },
-    { boothNumber: 227, totalVoters: 1207, v100InchargesCount: 12 },
-    { boothNumber: 228, totalVoters: 1088, v100InchargesCount: 11 },
-    { boothNumber: 229, totalVoters: 977, v100InchargesCount: 10 },
-    { boothNumber: 230, totalVoters: 880, v100InchargesCount: 9 },
-    { boothNumber: 231, totalVoters: 672, v100InchargesCount: 7 },
-    { boothNumber: 232, totalVoters: 645, v100InchargesCount: 6 },
-    { boothNumber: 233, totalVoters: 1057, v100InchargesCount: 11 },
-    { boothNumber: 234, totalVoters: 1126, v100InchargesCount: 11 },
-    { boothNumber: 235, totalVoters: 689, v100InchargesCount: 7 },
-    { boothNumber: 236, totalVoters: 739, v100InchargesCount: 7 },
-    { boothNumber: 237, totalVoters: 1004, v100InchargesCount: 10 },
-    { boothNumber: 238, totalVoters: 1074, v100InchargesCount: 11 },
-    { boothNumber: 239, totalVoters: 977, v100InchargesCount: 10 },
-    { boothNumber: 240, totalVoters: 1118, v100InchargesCount: 11 },
-    { boothNumber: 241, totalVoters: 1085, v100InchargesCount: 11 },
-    { boothNumber: 242, totalVoters: 798, v100InchargesCount: 8 },
-    { boothNumber: 243, totalVoters: 818, v100InchargesCount: 8 },
-    { boothNumber: 244, totalVoters: 760, v100InchargesCount: 8 },
-    { boothNumber: 245, totalVoters: 972, v100InchargesCount: 10 },
-    { boothNumber: 246, totalVoters: 705, v100InchargesCount: 7 },
-    { boothNumber: 247, totalVoters: 1061, v100InchargesCount: 11 },
-    { boothNumber: 248, totalVoters: 843, v100InchargesCount: 8 },
-    { boothNumber: 249, totalVoters: 806, v100InchargesCount: 8 },
-    { boothNumber: 250, totalVoters: 815, v100InchargesCount: 8 },
-    { boothNumber: 251, totalVoters: 698, v100InchargesCount: 7 },
-    { boothNumber: 252, totalVoters: 747, v100InchargesCount: 7 },
-    { boothNumber: 253, totalVoters: 698, v100InchargesCount: 7 },
-    { boothNumber: 254, totalVoters: 819, v100InchargesCount: 8 },
-    { boothNumber: 255, totalVoters: 755, v100InchargesCount: 8 },
-    { boothNumber: 256, totalVoters: 780, v100InchargesCount: 8 },
-    { boothNumber: 257, totalVoters: 659, v100InchargesCount: 7 },
-    { boothNumber: 258, totalVoters: 520, v100InchargesCount: 5 },
-    { boothNumber: 259, totalVoters: 1025, v100InchargesCount: 10 },
-    { boothNumber: 260, totalVoters: 754, v100InchargesCount: 8 },
-    { boothNumber: 261, totalVoters: 780, v100InchargesCount: 8 },
-    { boothNumber: 262, totalVoters: 1023, v100InchargesCount: 10 },
-    { boothNumber: 263, totalVoters: 996, v100InchargesCount: 10 },
-    { boothNumber: 264, totalVoters: 807, v100InchargesCount: 8 },
-    { boothNumber: 265, totalVoters: 918, v100InchargesCount: 9 },
-    { boothNumber: 266, totalVoters: 786, v100InchargesCount: 8 },
-    { boothNumber: 267, totalVoters: 846, v100InchargesCount: 8 },
-    { boothNumber: 268, totalVoters: 789, v100InchargesCount: 8 },
-    { boothNumber: 269, totalVoters: 750, v100InchargesCount: 8 },
-    { boothNumber: 270, totalVoters: 919, v100InchargesCount: 9 },
-    { boothNumber: 271, totalVoters: 1146, v100InchargesCount: 11 },
-    { boothNumber: 272, totalVoters: 769, v100InchargesCount: 8 },
-    { boothNumber: 273, totalVoters: 1052, v100InchargesCount: 11 },
-    { boothNumber: 274, totalVoters: 992, v100InchargesCount: 10 },
-    { boothNumber: 275, totalVoters: 1113, v100InchargesCount: 11 },
-    { boothNumber: 276, totalVoters: 1090, v100InchargesCount: 11 },
-    { boothNumber: 277, totalVoters: 829, v100InchargesCount: 8 },
-    { boothNumber: 278, totalVoters: 1142, v100InchargesCount: 11 },
-    { boothNumber: 279, totalVoters: 738, v100InchargesCount: 7 },
-    { boothNumber: 280, totalVoters: 550, v100InchargesCount: 6 },
-    { boothNumber: 281, totalVoters: 400, v100InchargesCount: 4 },
-    { boothNumber: 282, totalVoters: 996, v100InchargesCount: 10 },
-    { boothNumber: 283, totalVoters: 1002, v100InchargesCount: 10 }
-  ], []);
+  const VERIFIED_BOOTHS_DATA = useMemo(() => {
+    const boothMap = new Map<number, { boothNumber: number; totalVoters: number; v100InchargesCount: number }>();
+    voters.forEach(v => {
+      const match = (v.boothNumber || '').match(/\d+/);
+      const bNum = match ? parseInt(match[0], 10) : 1;
+      const existing = boothMap.get(bNum) || { boothNumber: bNum, totalVoters: 0, v100InchargesCount: 0 };
+      existing.totalVoters += 1;
+      boothMap.set(bNum, existing);
+    });
+
+    boothIncharges.forEach((b, idx) => {
+      const match = (b.booth || '').match(/\d+/);
+      const bNum = match ? parseInt(match[0], 10) : idx + 1;
+      if (!boothMap.has(bNum)) {
+        boothMap.set(bNum, { boothNumber: bNum, totalVoters: b.votersCount || 0, v100InchargesCount: 0 });
+      }
+    });
+
+    const result = Array.from(boothMap.values());
+    result.forEach(b => {
+      b.v100InchargesCount = Math.max(1, Math.ceil(b.totalVoters / 100));
+    });
+    return result;
+  }, [voters, boothIncharges]);
 
   const [cadreSearchQuery, setCadreSearchQuery] = useState('');
   const [cadreFilter, setCadreFilter] = useState<'all' | 'fully' | 'partially' | 'not_assigned'>('all');
   const [selectedBoothCadreNum, setSelectedBoothCadreNum] = useState<number | null>(null);
 
-  const [cadreAssignments, setCadreAssignments] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {};
-    const seedNames = [
-      "K. Srinivasa Rao", "Ch. Rama Devi", "S. Anusha", "V. Koteswara Rao",
-      "D. Prasada Rao", "R. Siva Prasad", "K. Venkata Ramana", "G. Subba Rao",
-      "M. Lakshmi", "P. Raghavulu", "S. Chenchuramaiah", "T. Mastan Rao"
-    ];
-    
-    // Seed Booths 224 to 230 as fully assigned
-    // Seed Booths 231 to 255 as partially assigned
-    // Booths 256 to 283 as unassigned
-    [
-      { boothNumber: 224, totalVoters: 950, v100InchargesCount: 9 },
-      { boothNumber: 225, totalVoters: 709, v100InchargesCount: 7 },
-      { boothNumber: 226, totalVoters: 784, v100InchargesCount: 8 },
-      { boothNumber: 227, totalVoters: 1207, v100InchargesCount: 12 },
-      { boothNumber: 228, totalVoters: 1088, v100InchargesCount: 11 },
-      { boothNumber: 229, totalVoters: 977, v100InchargesCount: 10 },
-      { boothNumber: 230, totalVoters: 880, v100InchargesCount: 9 },
-      { boothNumber: 231, totalVoters: 672, v100InchargesCount: 7 },
-      { boothNumber: 232, totalVoters: 645, v100InchargesCount: 6 },
-      { boothNumber: 233, totalVoters: 1057, v100InchargesCount: 11 },
-      { boothNumber: 234, totalVoters: 1126, v100InchargesCount: 11 },
-      { boothNumber: 235, totalVoters: 689, v100InchargesCount: 7 },
-      { boothNumber: 236, totalVoters: 739, v100InchargesCount: 7 },
-      { boothNumber: 237, totalVoters: 1004, v100InchargesCount: 10 },
-      { boothNumber: 238, totalVoters: 1074, v100InchargesCount: 11 },
-      { boothNumber: 239, totalVoters: 977, v100InchargesCount: 10 },
-      { boothNumber: 240, totalVoters: 1118, v100InchargesCount: 11 },
-      { boothNumber: 241, totalVoters: 1085, v100InchargesCount: 11 },
-      { boothNumber: 242, totalVoters: 798, v100InchargesCount: 8 },
-      { boothNumber: 243, totalVoters: 818, v100InchargesCount: 8 },
-      { boothNumber: 244, totalVoters: 760, v100InchargesCount: 8 },
-      { boothNumber: 245, totalVoters: 972, v100InchargesCount: 10 },
-      { boothNumber: 246, totalVoters: 705, v100InchargesCount: 7 },
-      { boothNumber: 247, totalVoters: 1061, v100InchargesCount: 11 },
-      { boothNumber: 248, totalVoters: 843, v100InchargesCount: 8 },
-      { boothNumber: 249, totalVoters: 806, v100InchargesCount: 8 },
-      { boothNumber: 250, totalVoters: 815, v100InchargesCount: 8 },
-      { boothNumber: 251, totalVoters: 698, v100InchargesCount: 7 },
-      { boothNumber: 252, totalVoters: 747, v100InchargesCount: 7 },
-      { boothNumber: 253, totalVoters: 698, v100InchargesCount: 7 },
-      { boothNumber: 254, totalVoters: 819, v100InchargesCount: 8 },
-      { boothNumber: 255, totalVoters: 755, v100InchargesCount: 8 }
-    ].forEach(booth => {
-      const bNum = booth.boothNumber;
-      if (bNum <= 230) {
-        for (let s = 0; s < booth.v100InchargesCount; s++) {
-          initial[`${bNum}-${s}`] = seedNames[s % seedNames.length];
-        }
-      } else {
-        const assignedCount = Math.floor(booth.v100InchargesCount / 2);
-        for (let s = 0; s < assignedCount; s++) {
-          initial[`${bNum}-${s}`] = seedNames[(s + bNum) % seedNames.length];
-        }
-      }
-    });
-    return initial;
-  });
+  const [cadreAssignments, setCadreAssignments] = useState<Record<string, string>>({});
 
   const [boothInchargeOverrides, setBoothInchargeOverrides] = useState<Record<number, { name: string; mobile: string }>>(() => ({}));
 
@@ -518,7 +446,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
 
     const hydrateLiveScope = async () => {
       try {
-        const [summaryPayload, eventItems, reports, tasks, videos, progressItems, voterItems] = await Promise.all([
+        const [summaryPayload, eventItems, reports, tasks, videos, progressItems, voterItems, cadre] = await Promise.all([
           fetchHierarchySummaryByUser(session.userId),
           fetchLiveVoteEventsByUser(session.userId, 8),
           fetchReportsForUnit(session.unitId).catch(() => null),
@@ -526,6 +454,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
           fetchTrainingVideos(session.unitId).catch(() => null),
           fetchTrainingProgress(session.userId).catch(() => null),
           fetchVotersForUnit(session.unitId).catch(() => null),
+          fetchCadreNetwork(session.unitId).catch(() => null),
         ]);
 
         if (!active) {
@@ -533,6 +462,10 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         }
 
         setBackendSummary(summaryPayload);
+
+        if (cadre && Array.isArray((cadre as any).items)) {
+          setCadreItems((cadre as any).items);
+        }
 
         if (eventItems.length > 0) {
           setRecentVoteDoneActivity(
@@ -605,51 +538,52 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   };
 
   // Metric Computations (Dynamic and fully synchronous)
-  const isDemoMode = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
-  const TOTAL_MANDAL_REGISTERED_VOTERS = isDemoMode ? 52247 : (voters.length > 0 ? voters.length : 0);
-  const surveyedVotersCount = voters.length;
+  const TOTAL_MANDAL_REGISTERED_VOTERS = backendSummary?.snapshot?.summary?.totalVoters ?? voters.length;
+  const surveyedVotersCount = voters.filter(v => v.surveyStatus === 'Surveyed').length;
   const pendingSurveyCount = Math.max(0, TOTAL_MANDAL_REGISTERED_VOTERS - surveyedVotersCount);
   const surveyCompletionPct = TOTAL_MANDAL_REGISTERED_VOTERS > 0 && surveyedVotersCount > 0 ? ((surveyedVotersCount / TOTAL_MANDAL_REGISTERED_VOTERS) * 100).toFixed(1) : '0.0';
 
   const totalVotersCount = TOTAL_MANDAL_REGISTERED_VOTERS;
 
   const villagesSource = useMemo(() => {
-    const isDemo = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
-    if (isDemo) return SINGARAYAKONDA_VILLAGES;
     const distinctNames = Array.from(new Set(voters.map(v => v.village).filter(Boolean)));
     if (distinctNames.length === 0) return [];
-    return distinctNames.map((name, idx) => ({
-      sNo: `#${String(idx + 1).padStart(2, '0')}`,
-      name: name as string,
-      totalVoters: voters.filter(v => v.village === name).length,
-      totalBooths: 0,
-      localVoters: 0,
-      migratedVoters: 0,
-      pStats: { TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0 },
-      leadingParty: 'Neutral' as const,
-      lead: 0,
-    }));
+    return distinctNames.map((name, idx) => {
+      const vList = voters.filter(v => v.village === name);
+      const tdp = vList.filter(v => v.politicalPreference === 'TDP').length;
+      const ysrcp = vList.filter(v => v.politicalPreference === 'YSRCP').length;
+      const jsp = vList.filter(v => v.politicalPreference === 'JSP').length;
+      const bjp = vList.filter(v => v.politicalPreference === 'BJP').length;
+      const inc = vList.filter(v => v.politicalPreference === 'INC').length;
+      const neutral = vList.filter(v => v.politicalPreference === 'Neutral').length;
+      const oth = vList.filter(v => v.politicalPreference === 'OTH').length;
+      const leadingParty: VoterPreference = tdp >= ysrcp ? 'TDP' : 'YSRCP';
+      return {
+        sNo: `#${String(idx + 1).padStart(2, '0')}`,
+        name: name as string,
+        totalVoters: vList.length,
+        totalBooths: new Set(vList.map(v => v.boothNumber).filter(Boolean)).size,
+        localVoters: vList.filter(v => v.voterLocationStatus === 'Local').length,
+        migratedVoters: vList.filter(v => v.voterLocationStatus === 'Migrated').length,
+        pStats: { TDP: tdp, YSRCP: ysrcp, JSP: jsp, BJP: bjp, INC: inc, Neutral: neutral, OTH: oth },
+        leadingParty,
+        lead: Math.abs(tdp - ysrcp),
+      };
+    });
   }, [voters]);
 
   const liveMandalStats = useMemo(() => {
-    const isDemo = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
     const snapshot = backendSummary?.snapshot;
-    const fallbackWinning = isDemo ? SINGARAYAKONDA_VILLAGES.filter((v) => {
-      const info = VILLAGE_PROJECTED_MARGINS[v.name.toUpperCase().trim()] || { status: 'WINNING', margin: 0 };
-      return info.status === 'WINNING';
-    }).length : 0;
-    const fallbackTrailing = isDemo ? (SINGARAYAKONDA_VILLAGES.length - fallbackWinning) : 0;
-
     return {
-      totalVoters: snapshot?.summary.totalVoters ?? (isDemo ? 52247 : voters.length),
+      totalVoters: snapshot?.summary.totalVoters ?? voters.length,
       totalVillages: snapshot?.hierarchyCounts.VILLAGE ?? villagesSource.length,
       totalBooths: snapshot?.hierarchyCounts.BOOTH ?? boothIncharges.length,
       voted: snapshot?.summary.voted ?? 0,
       remaining: snapshot?.summary.remaining ?? 0,
-      winning: snapshot?.performance.winningChildren ?? fallbackWinning,
-      trailing: snapshot?.performance.trailingChildren ?? fallbackTrailing,
+      winning: snapshot?.performance.winningChildren ?? 0,
+      trailing: snapshot?.performance.trailingChildren ?? 0,
     };
-  }, [backendSummary, boothIncharges.length, SINGARAYAKONDA_VILLAGES, villagesSource.length, voters.length]);
+  }, [backendSummary, boothIncharges.length, villagesSource.length, voters.length]);
 
   // Voters filtered by active (excluding deceased)
   const activeVoters = useMemo(() => voters.filter(v => !v.voterStatus || v.voterStatus === 'Active' || v.voterStatus === 'Shifted'), [voters]);
@@ -801,7 +735,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     const activeParties: VoterPreference[] = ['TDP', 'YSRCP', 'JSP', 'BJP', 'INC', 'Neutral'];
     return activeParties.map(key => {
       const value = partyStats[key];
-      const percentage = (value / 52247) * 100;
+      const percentage = totalVotersCount > 0 ? (value / totalVotersCount) * 100 : 0;
       return {
         key,
         value,
@@ -819,93 +753,57 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   }, [villagesSource]);
 
   const getVillageInchargeName = useCallback((vName: string) => {
-    if (!vName) return "Ch. Venkaiah";
-    const inchargeMap: Record<string, string> = {
-      "SINGARAYAKONDA": "Ch. Venkaiah",
-      "PATHA SINGARAYAKONDA": "T. Ramanamma",
-      "MULAGUNTA PADU": "B. Koteswara Rao",
-      "SOMARAJU PALLI": "Y. Satyanarayana",
-      "KALIKIVAYA": "D. Hari Babu",
-      "KANUMALA": "R. Vasudeva Rao",
-      "PAKALA": "S. Yedukondalu",
-      "BINGINI PALLI": "V. Ramanaiah",
-      "WOOLLAPALEM": "T. Ramana Rao",
-      "SANAMPUDI": "G. Satyanarayana",
-      // Compatibility fallback
-      "SINGARAYA KONDA": "Ch. Venkaiah",
-      "KANUMALLA": "R. Vasudeva Rao",
-      "BINGINIPALLI": "V. Ramanaiah",
-      "BINGINAPALLI": "V. Ramanaiah",
-      "MULAGUNTAPADU": "B. Koteswara Rao",
-      "SOMARAJUPALLI": "Y. Satyanarayana"
-    };
-    return inchargeMap[vName.toUpperCase()] || "Ch. Venkaiah";
-  }, []);
+    if (!vName) return "Unassigned";
+    const incharge = cadreItems.find(c => c.role === 'VILLAGE_INCHARGE' && (c.unitName || '').toLowerCase() === vName.toLowerCase());
+    return incharge?.name || "Unassigned";
+  }, [cadreItems]);
 
   const getInchargePhone = useCallback((vName: string) => {
-    const phones: Record<string, string> = {
-      "KALIKIVAYA": "+919440234501",
-      "PATHA SINGARAYAKONDA": "+919440234502",
-      "SANAMPUDI": "+919440234503",
-      "SINGARAYAKONDA": "+919440234504",
-      "KANUMALA": "+919440234505",
-      "PAKALA": "+919440234506",
-      "WOOLLAPALEM": "+919440234507",
-      "BINGINAPALLI": "+919440234508",
-      "BINGINI PALLI": "+919440234508",
-      "MULAGUNTA PADU": "+919440234509",
-      "SOMARAJU PALLI": "+919440234510"
-    };
-    return phones[vName.toUpperCase()] || "+919440234500";
-  }, []);
+    if (!vName) return "";
+    const incharge = cadreItems.find(c => c.role === 'VILLAGE_INCHARGE' && (c.unitName || '').toLowerCase() === vName.toLowerCase());
+    return incharge?.mobileNumber || "";
+  }, [cadreItems]);
 
-  const getVillageMetrics = useCallback((vName: string, totalVoters: number) => {
-    const vKey = vName.toUpperCase().trim();
-    const info = VILLAGE_PROJECTED_DATA[vKey];
-    if (info) {
-      return {
-        surveyed: info.totalVoters,
-        surveyProgressPct: '100.0',
-        tdp: info.tdp,
-        ysrcp: info.ysrcp,
-        jsp: 0,
-        bjp: 0,
-        congress: 0,
-        neutral: info.neutral,
-        undecided: 0,
-        fake: 0,
-        leadingParty: info.status === 'WINNING' ? ('TDP' as VoterPreference) : ('YSRCP' as VoterPreference),
-        lead: info.margin,
-        isCloseContest: false
-      };
-    }
+  const getVillageMetrics = useCallback((vName: string, _totalVoters: number) => {
+    const vVoters = voters.filter(v => (v.village || '').trim().toLowerCase() === vName.trim().toLowerCase());
+    const total = vVoters.length;
+    const surveyed = vVoters.filter(v => v.surveyStatus === 'Surveyed').length;
+    const tdp = vVoters.filter(v => v.politicalPreference === 'TDP').length;
+    const ysrcp = vVoters.filter(v => v.politicalPreference === 'YSRCP').length;
+    const jsp = vVoters.filter(v => v.politicalPreference === 'JSP').length;
+    const bjp = vVoters.filter(v => v.politicalPreference === 'BJP').length;
+    const congress = vVoters.filter(v => v.politicalPreference === 'INC').length;
+    const neutral = vVoters.filter(v => v.politicalPreference === 'Neutral').length;
+    const undecided = vVoters.filter(v => v.politicalPreference === 'OTH').length;
+    const fake = vVoters.filter(v => v.voterStatus === 'Fake' || v.voterStatus === 'Doubtful').length;
+    const lead = Math.abs(tdp - ysrcp);
+    const leadingParty: VoterPreference = tdp >= ysrcp ? 'TDP' : 'YSRCP';
+    const isCloseContest = total > 0 && (lead / total) < 0.05;
 
     return {
-      surveyed: 0,
-      surveyProgressPct: '0.0',
-      tdp: 0,
-      ysrcp: 0,
-      jsp: 0,
-      bjp: 0,
-      congress: 0,
-      neutral: 0,
-      undecided: 0,
-      fake: 0,
-      leadingParty: 'TDP' as VoterPreference,
-      lead: 0,
-      isCloseContest: false
+      surveyed,
+      surveyProgressPct: total > 0 ? ((surveyed / total) * 100).toFixed(1) : '0.0',
+      tdp,
+      ysrcp,
+      jsp,
+      bjp,
+      congress,
+      neutral,
+      undecided,
+      fake,
+      leadingParty,
+      lead,
+      isCloseContest
     };
-  }, []);
+  }, [voters]);
 
   const villageCounts = useMemo(() => {
     let winning = 0;
     let trailing = 0;
     villagesSource.forEach(v => {
-      const vKey = v.name.toUpperCase().trim();
-      const info = VILLAGE_PROJECTED_MARGINS[vKey] || { status: 'WINNING', margin: 0 };
-      if (info.status === 'WINNING') {
+      if (v.leadingParty === 'TDP' && v.lead > 0) {
         winning++;
-      } else {
+      } else if (v.lead > 0) {
         trailing++;
       }
     });
@@ -918,9 +816,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
 
   const filteredVillages = useMemo(() => {
     return villagesSource.filter(v => {
-      const vKey = v.name.toUpperCase().trim();
-      const info = VILLAGE_PROJECTED_MARGINS[vKey] || { status: 'WINNING', margin: 0 };
-      const isWinning = info.status === 'WINNING';
+      const isWinning = v.leadingParty === 'TDP' && v.lead > 0;
       
       if (villageSearchQuery && !(v.name || '').toLowerCase().includes(villageSearchQuery.toLowerCase())) {
         return false;
@@ -931,18 +827,13 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       if (villageListFilter === 'Trailing') return !isWinning;
       return true;
     });
-  }, [villageSearchQuery, villageListFilter]);
+  }, [villagesSource, villageSearchQuery, villageListFilter]);
 
   const sortedVillages = useMemo(() => {
     const list = [...filteredVillages];
     list.sort((a, b) => {
       const aMetrics = getVillageMetrics(a.name, a.totalVoters);
       const bMetrics = getVillageMetrics(b.name, b.totalVoters);
-
-      const aKey = a.name.toUpperCase().trim();
-      const bKey = b.name.toUpperCase().trim();
-      const aInfo = VILLAGE_PROJECTED_MARGINS[aKey] || { status: 'WINNING', margin: 0 };
-      const bInfo = VILLAGE_PROJECTED_MARGINS[bKey] || { status: 'WINNING', margin: 0 };
 
       let valA: any = 0;
       let valB: any = 0;
@@ -973,12 +864,12 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
           valB = bMetrics.ysrcp;
           break;
         case 'leadingParty':
-          valA = aInfo.status === 'WINNING' ? 'TDP' : 'YSRCP';
-          valB = bInfo.status === 'WINNING' ? 'TDP' : 'YSRCP';
+          valA = aMetrics.leadingParty === 'TDP' ? 1 : 0;
+          valB = bMetrics.leadingParty === 'TDP' ? 1 : 0;
           break;
         case 'lead':
-          valA = aInfo.margin;
-          valB = bInfo.margin;
+          valA = aMetrics.lead;
+          valB = bMetrics.lead;
           break;
         case 'fake':
           valA = aMetrics.fake;
@@ -1425,46 +1316,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     });
   }, [voters]);
 
-  // Booth Incharges Computations (3 prominent leaders)
-  const boothInchargesData = useMemo(() => {
-    const booths = ["Booth 145", "Booth 146", "Booth 147"];
-    const names = ["M. Venkaiah Chowdary", "K. Prasada Reddy", "P. Srinivasa Naidu"];
-    const mobiles = ["9848022145", "9848522146", "9848922147"];
-    
-    return booths.map((bName, idx) => {
-      const boothVoters = voters.filter(v => v.boothNumber === bName && v.voterStatus !== 'Deceased');
-      
-      const counts: Record<VoterPreference, number> = {
-        TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0
-      };
-      
-      boothVoters.forEach(v => {
-        const p = v.politicalPreference || 'Neutral';
-        if (counts[p] !== undefined) counts[p]++;
-      });
-      
-      const politicalContenders = Object.entries(counts)
-        .filter(([p]) => p !== 'Neutral' && p !== 'OTH')
-        .sort((a, b) => b[1] - a[1]);
-        
-      const leaderParty = politicalContenders[0] ? (politicalContenders[0][0] as VoterPreference) : 'Neutral' as VoterPreference;
-      const runnerParty = politicalContenders[1] ? (politicalContenders[1][0] as VoterPreference) : 'Neutral' as VoterPreference;
-      const leaderCount = counts[leaderParty] || 0;
-      const runnerCount = counts[runnerParty] || 0;
-      const lead = leaderCount - runnerCount;
-      
-      return {
-        serial: `#0${idx + 1}`,
-        name: names[idx],
-        mobile: mobiles[idx],
-        booth: bName,
-        totalVoters: boothVoters.length,
-        counts,
-        majorityParty: leaderParty,
-        majorityLead: lead
-      };
-    });
-  }, [voters]);
+
 
   return (
     <div className="w-full h-screen overflow-hidden flex flex-col md:flex-row bg-slate-50 text-slate-800" id="village-dashboard-container">
@@ -1730,7 +1582,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                     const activeParties: VoterPreference[] = ['TDP', 'YSRCP', 'JSP', 'BJP', 'INC', 'Neutral'];
                     return activeParties.map((p) => {
                       const count = partyStats[p];
-                      const pct = ((count / 52247) * 100).toFixed(1);
+                      const pct = totalVotersCount > 0 ? ((count / totalVotersCount) * 100).toFixed(1) : '0.0';
                       return (
                         <div key={p} className={"rounded-xl p-3 border " + PARTY_BG_COLORS[p]}>
                           <h4 className="text-[10px] font-black tracking-wider uppercase mb-1">{PARTY_NAMES[p]}</h4>
@@ -1807,13 +1659,13 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                           <span className="text-[10px] font-black uppercase text-slate-400">{PARTY_NAMES[hoveredSlice as VoterPreference]}</span>
                           <span className="text-base font-black text-slate-950">{partyStats[hoveredSlice as VoterPreference].toLocaleString()}</span>
                           <span className="text-[9px] font-bold text-slate-500">
-                            {((partyStats[hoveredSlice as VoterPreference] / 52247) * 100).toFixed(1)}% Share
+                            {((partyStats[hoveredSlice as VoterPreference] / (totalVotersCount || 1)) * 100).toFixed(1)}% Share
                           </span>
                         </>
                       ) : (
                         <>
                           <span className="text-[9px] font-bold uppercase text-slate-400">TOTAL</span>
-                          <span className="text-lg font-black text-slate-950">52,247</span>
+                          <span className="text-lg font-black text-slate-950">{totalVotersCount.toLocaleString()}</span>
                           <span className="text-[9px] font-bold text-green-600 uppercase">VOTERS</span>
                         </>
                       )}
@@ -1967,11 +1819,11 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
           <div className="space-y-6 animate-fade-in" id="mandal-village-list-view">
             
             {/* Database sum validation alert */}
-            {totalVotersSum !== 52247 && (
-              <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-center gap-3 text-red-800 shadow-sm">
-                <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
+            {totalVotersSum !== TOTAL_MANDAL_REGISTERED_VOTERS && TOTAL_MANDAL_REGISTERED_VOTERS > 0 && totalVotersSum > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-3 text-amber-800 shadow-sm">
+                <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
                 <div className="text-xs font-bold">
-                  <span className="font-black">DATABASE WARNING:</span> Singarayakonda Mandal total registered voters sum mismatch. Combined sum of villages is <span className="font-black underline">{totalVotersSum.toLocaleString()}</span> instead of expected <span className="font-black underline">52,247</span>. Please verify database integrity.
+                  <span className="font-black">DATABASE NOTICE:</span> Mandal total registered voters sum differs from combined village sums ({totalVotersSum.toLocaleString()} vs {TOTAL_MANDAL_REGISTERED_VOTERS.toLocaleString()}).
                 </div>
               </div>
             )}
@@ -2047,12 +1899,9 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                         const metrics = getVillageMetrics(v.name, v.totalVoters);
                         const inchargeName = getVillageInchargeName(v.name);
                         
-                        // TDP vs YSRCP based Status and Lead using VILLAGE_PROJECTED_MARGINS
-                        const vKey = v.name.toUpperCase().trim();
-                        const info = VILLAGE_PROJECTED_MARGINS[vKey] || { status: 'WINNING', margin: 0 };
-                        const isWinning = info.status === 'WINNING';
-                        const status = info.status;
-                        const leadVal = info.margin;
+                        const isWinning = metrics.leadingParty === 'TDP' && metrics.lead > 0;
+                        const status = metrics.isCloseContest ? 'CLOSE CONTEST' : (isWinning ? 'WINNING' : 'TRAILING');
+                        const leadVal = metrics.lead;
                         const leadStr = leadVal.toLocaleString();
 
                         return (
@@ -2138,12 +1987,9 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                     const metrics = getVillageMetrics(v.name, v.totalVoters);
                     const inchargeName = getVillageInchargeName(v.name);
 
-                    // Calculating customized Status and Lead using VILLAGE_PROJECTED_MARGINS
-                    const vKey = v.name.toUpperCase().trim();
-                    const info = VILLAGE_PROJECTED_MARGINS[vKey] || { status: 'WINNING', margin: 0 };
-                    const isWinning = info.status === 'WINNING';
-                    const status = info.status;
-                    const leadVal = info.margin;
+                    const isWinning = metrics.leadingParty === 'TDP' && metrics.lead > 0;
+                    const status = metrics.isCloseContest ? 'CLOSE CONTEST' : (isWinning ? 'WINNING' : 'TRAILING');
+                    const leadVal = metrics.lead;
                     const leadStr = leadVal.toLocaleString();
 
                     return (
@@ -2242,11 +2088,10 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 const vLocalCount = villageVoters.filter(v => v.voterLocationStatus === 'Local' || !v.voterLocationStatus).length;
                 const vMigratedCount = villageVoters.length - vLocalCount;
 
-                // Leading Party for specific village using VILLAGE_PROJECTED_MARGINS
-                const vKey = selectedVillageName.toUpperCase().trim();
-                const info = VILLAGE_PROJECTED_MARGINS[vKey] || { status: 'WINNING', margin: 0 };
-                const leadingP = info.status === 'WINNING' ? 'TDP' : 'YSRCP';
-                const leadingLead = info.margin;
+                const tdpCount = vStats.TDP || 0;
+                const ysrcpCount = vStats.YSRCP || 0;
+                const leadingP: VoterPreference = tdpCount >= ysrcpCount ? 'TDP' : 'YSRCP';
+                const leadingLead = Math.abs(tdpCount - ysrcpCount);
 
                 const selectedVillageSpec: MandalVillage = villagesSource.find(v => v.name.toUpperCase() === selectedVillageName.toUpperCase()) || villagesSource[0] || ({
                   sNo: '#01',
@@ -3288,7 +3133,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
               <div className="flex items-center gap-4 shrink-0">
                 <div className="bg-slate-900 text-white rounded-2xl p-4 border border-slate-800 text-right min-w-[180px] shadow-sm">
                   <span className="block text-[9px] font-black uppercase text-yellow-400 tracking-widest">TOTAL MANDAL VOTERS</span>
-                  <span className="text-2xl font-black tracking-tight block mt-0.5">52,247</span>
+                  <span className="text-2xl font-black tracking-tight block mt-0.5">{totalVotersCount.toLocaleString()}</span>
                 </div>
                 <div className="bg-yellow-50/50 border border-yellow-100 rounded-2xl p-4 text-right min-w-[180px]">
                   <span className="block text-[9px] font-black uppercase text-yellow-700 tracking-widest">ANALYZED RECORDS</span>
@@ -3898,7 +3743,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 </div>
                 <div>
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Total Voters</span>
-                  <span className="text-xl font-black text-slate-950">52,247</span>
+                  <span className="text-xl font-black text-slate-950">{totalVotersCount.toLocaleString()}</span>
                 </div>
               </div>
 
@@ -3908,7 +3753,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 </div>
                 <div>
                   <span className="text-[10px] font-black text-blue-700 uppercase tracking-wider block">Total Booths</span>
-                  <span className="text-xl font-black text-blue-800">60 Booths</span>
+                  <span className="text-xl font-black text-blue-800">{VERIFIED_BOOTHS_DATA.length} Booths</span>
                 </div>
               </div>
 
@@ -3918,7 +3763,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 </div>
                 <div>
                   <span className="text-[10px] font-black text-purple-700 uppercase tracking-wider block">Booth Incharges</span>
-                  <span className="text-xl font-black text-purple-800">60 Positions</span>
+                  <span className="text-xl font-black text-purple-800">{VERIFIED_BOOTHS_DATA.length} Positions</span>
                 </div>
               </div>
 
@@ -3928,7 +3773,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 </div>
                 <div>
                   <span className="text-[10px] font-black text-amber-700 uppercase tracking-wider block">100-Voter Incharges</span>
-                  <span className="text-xl font-black text-amber-600">523 Slots</span>
+                  <span className="text-xl font-black text-amber-600">{Math.ceil(totalVotersCount / 100) || 0} Slots</span>
                 </div>
               </div>
             </div>
@@ -4003,7 +3848,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                   <span className="text-[8px] tracking-wider uppercase font-black bg-yellow-400 text-slate-950 px-2 py-0.5 rounded absolute -top-2.5 left-1/2 -translate-x-1/2">Level 1</span>
                   <h4 className="text-xs font-black uppercase tracking-wider text-yellow-400">Mandal Incharge</h4>
                   <p className="text-sm font-black mt-1">Singarayakonda Mandal Head</p>
-                  <p className="text-[10px] text-slate-400 font-bold mt-1">Coverage: 60 Booths | 52,247 Voters</p>
+                  <p className="text-[10px] text-slate-400 font-bold mt-1">Coverage: {VERIFIED_BOOTHS_DATA.length} Booths | {totalVotersCount.toLocaleString()} Voters</p>
                 </div>
 
                 {/* Arrow */}
@@ -4016,7 +3861,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 <div className="bg-white border-2 border-slate-900 rounded-xl p-4 w-full max-w-sm text-center shadow relative">
                   <span className="text-[8px] tracking-wider uppercase font-black bg-slate-900 text-white px-2 py-0.5 rounded absolute -top-2.5 left-1/2 -translate-x-1/2">Level 2</span>
                   <h4 className="text-xs font-black uppercase tracking-wider text-slate-900">Booth Incharges</h4>
-                  <p className="text-sm font-black mt-1">60 Polling Station Leaders</p>
+                  <p className="text-sm font-black mt-1">{VERIFIED_BOOTHS_DATA.length} Polling Station Leaders</p>
                   <p className="text-[10px] text-slate-500 font-bold mt-1">1 Assigned per Booth | Direct Field Management</p>
                 </div>
 
@@ -4030,9 +3875,9 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 <div className="bg-white border border-slate-200 rounded-xl p-4 w-full max-w-sm text-center shadow-sm relative">
                   <span className="text-[8px] tracking-wider uppercase font-black bg-slate-100 text-slate-600 px-2 py-0.5 rounded absolute -top-2.5 left-1/2 -translate-x-1/2">Level 3</span>
                   <h4 className="text-xs font-black uppercase tracking-wider text-yellow-600">100-Voter Incharges</h4>
-                  <p className="text-sm font-black mt-1">523 Cluster Leaders</p>
+                  <p className="text-sm font-black mt-1">{Math.ceil(totalVotersCount / 100) || 0} Cluster Leaders</p>
                   <p className="text-[10px] text-slate-500 font-bold mt-1">
-                    {totalAssignedV100} / 523 Slots Filled ({Math.round((totalAssignedV100 / 523) * 100)}%)
+                    {totalAssignedV100} / {Math.ceil(totalVotersCount / 100) || 0} Slots Filled ({Math.ceil(totalVotersCount / 100) > 0 ? Math.round((totalAssignedV100 / Math.ceil(totalVotersCount / 100)) * 100) : 0}%)
                   </p>
                 </div>
 
@@ -4046,7 +3891,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5 w-full max-w-sm text-center relative">
                   <span className="text-[8px] tracking-wider uppercase font-black bg-slate-200 text-slate-600 px-2 py-0.5 rounded absolute -top-2.5 left-1/2 -translate-x-1/2">Level 4</span>
                   <h4 className="text-xs font-black uppercase tracking-wider text-slate-500">Registered Voters</h4>
-                  <p className="text-sm font-black text-slate-800">52,247 Voters</p>
+                  <p className="text-sm font-black text-slate-800">{totalVotersCount.toLocaleString()} Voters</p>
                   <p className="text-[10px] text-slate-400 font-bold mt-0.5">Strict Electoral Roll Reconciliation</p>
                 </div>
               </div>
@@ -4057,7 +3902,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div>
                   <h3 className="text-sm font-black text-slate-950 uppercase tracking-wider">Booth Cadre Directory</h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Search and filter assignment statuses across all 60 booths</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Search and filter assignment statuses across all {VERIFIED_BOOTHS_DATA.length} booths</p>
                 </div>
 
                 {/* Controls */}
@@ -4547,31 +4392,27 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
               <div className="lg:col-span-2 bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4">
                 <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider">Village-wise Cadre Training Coverage</h3>
                 <div className="space-y-3.5">
-                  {[
-                    { name: "Singarayakonda", trained: 94, total: 100 },
-                    { name: "Patha Singarayakonda", trained: 58, total: 60 },
-                    { name: "Mulagunta Padu", trained: 65, total: 70 },
-                    { name: "Pakala", trained: 47, total: 50 },
-                    { name: "Sanampudi", trained: 38, total: 40 },
-                    { name: "Kanumala", trained: 28, total: 30 },
-                    { name: "Binginapalli", trained: 23, total: 25 },
-                    { name: "Kalikivaya", trained: 18, total: 20 },
-                    { name: "Somaraju Palli", trained: 25, total: 30 },
-                    { name: "Woollapalem", trained: 16, total: 25 }
-                  ].map((v) => {
-                    const pct = Math.round((v.trained / v.total) * 100);
-                    return (
-                      <div key={v.name} className="space-y-1">
-                        <div className="flex justify-between text-xs font-bold text-slate-700">
-                          <span className="uppercase">{v.name}</span>
-                          <span>{v.trained} / {v.total} Incharges ({pct}%)</span>
+                  {villagesSource.length === 0 ? (
+                    <p className="text-xs text-slate-400 font-medium py-4 text-center">No village training records available.</p>
+                  ) : (
+                    villagesSource.map((v) => {
+                      const villageCadres = cadreItems.filter(c => (c.unitName || '').toLowerCase() === v.name.toLowerCase());
+                      const total = Math.max(1, villageCadres.length);
+                      const trained = villageCadres.filter(c => (c.performanceScore || 0) > 50).length;
+                      const pct = Math.round((trained / total) * 100);
+                      return (
+                        <div key={v.name} className="space-y-1">
+                          <div className="flex justify-between text-xs font-bold text-slate-700">
+                            <span className="uppercase">{v.name}</span>
+                            <span>{trained} / {total} Incharges ({pct}%)</span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                            <div className="bg-yellow-400 h-full rounded-full" style={{ width: `${pct}%` }}></div>
+                          </div>
                         </div>
-                        <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                          <div className="bg-yellow-400 h-full rounded-full" style={{ width: `${pct}%` }}></div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </div>
 

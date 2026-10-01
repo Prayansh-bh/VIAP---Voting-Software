@@ -56,9 +56,9 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
   const [aiStats, setAiStats] = useState<any>({
     status: 'ACTIVE',
     provider: 'Google Gemini Pro / Flash',
-    totalTokens: '48,200',
-    costEstimate: '$0.07',
-    latencyAvg: '420ms',
+    totalTokens: '0',
+    costEstimate: '$0.00',
+    latencyAvg: '0ms',
   });
 
   const loadData = async () => {
@@ -208,7 +208,7 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 font-medium">
                   <span>Governance: <strong className="text-slate-800 font-bold">Root SaaS Engine</strong></span>
                   <span className="text-slate-300">•</span>
-                  <span>Active Tenant: <strong className="text-slate-800 font-bold">{config.organisationName || 'Telangana Congress Connect'}</strong></span>
+                  <span>Active Tenant: <strong className="text-slate-800 font-bold">{config.organisationName || 'Platform Studio'}</strong></span>
                   <span className="text-slate-300">•</span>
                   <span>Database: <strong className="text-slate-800 font-bold">PostgreSQL 16</strong></span>
                 </div>

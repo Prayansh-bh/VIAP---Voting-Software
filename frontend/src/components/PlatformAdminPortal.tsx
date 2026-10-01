@@ -31,7 +31,7 @@ import {
   ClipboardCheck,
 } from 'lucide-react';
 import { useCms } from '../context/CmsContext';
-import { fetchCmsApplications } from '../lib/api/applications.api';
+import { fetchCmsApplications, fetchApplicationSummary, type ApplicationSummaryKpis } from '../lib/api/applications.api';
 import AssignDataModule from './cms/AssignDataModule';
 import AssignInchargesModule from './cms/AssignInchargesModule';
 import ApprovalManagementModule from './cms/ApprovalManagementModule';
@@ -55,61 +55,6 @@ interface AppInstance {
   createdAt: string;
   logoUrl?: string;
 }
-
-// ─── Mock Data ────────────────────────────────────────────────────────────
-const MOCK_APPS: AppInstance[] = [
-  {
-    id: '1',
-    name: 'Telangana Congress Connect',
-    party: 'Indian National Congress',
-    partyCode: 'INC',
-    leaderName: 'Revanth Reddy',
-    jurisdiction: 'Telangana State (119 Constituencies)',
-    description: 'Integrated Voter Management & Constituency Command Center for Telangana Pradesh Congress Committee (TPCC)',
-    primaryColor: '#FF6600',
-    secondaryColor: '#138808',
-    accentColor: '#0038A8',
-    totalVoters: 33517327,
-    turnoutPercent: 64.7,
-    isActive: true,
-    isDefault: true,
-    createdAt: '07/09/2024',
-  },
-  {
-    id: '2',
-    name: 'Nalgonda Congress Connect',
-    party: 'Indian National Congress',
-    partyCode: 'INC',
-    leaderName: 'N. Uttam Kumar Reddy',
-    jurisdiction: 'Nalgonda Parliament Constituency',
-    description: 'Parliament-level command center for Nalgonda constituency covering 7 Assembly segments.',
-    primaryColor: '#FF6600',
-    secondaryColor: '#138808',
-    accentColor: '#0038A8',
-    totalVoters: 1547000,
-    turnoutPercent: 72.3,
-    isActive: true,
-    isDefault: false,
-    createdAt: '08/09/2024',
-  },
-  {
-    id: '3',
-    name: 'Karimnagar Congress Command',
-    party: 'Indian National Congress',
-    partyCode: 'INC',
-    leaderName: 'Ponnam Prabhakar',
-    jurisdiction: 'Karimnagar Parliament Constituency',
-    description: 'Multi-constituency voter intelligence platform for Karimnagar Parliament region.',
-    primaryColor: '#FF6600',
-    secondaryColor: '#138808',
-    accentColor: '#0038A8',
-    totalVoters: 1612000,
-    turnoutPercent: 69.8,
-    isActive: false,
-    isDefault: false,
-    createdAt: '09/09/2024',
-  },
-];
 
 // ─── Live Brand Preview ───────────────────────────────────────────────────
 function LiveBrandPreview({
@@ -500,8 +445,9 @@ function CreateAppForm({ onClose, onCreate }: { onClose: () => void; onCreate: (
 
 // ─── Main Platform Admin Portal ──────────────────────────────────────────
 export default function PlatformAdminPortal() {
-  const [apps, setApps] = useState<AppInstance[]>(MOCK_APPS);
-  const [selectedApp, setSelectedApp] = useState<AppInstance | null>(MOCK_APPS[0]);
+  const [apps, setApps] = useState<AppInstance[]>([]);
+  const [selectedApp, setSelectedApp] = useState<AppInstance | null>(null);
+  const [summaryKpis, setSummaryKpis] = useState<ApplicationSummaryKpis | null>(null);
   const [view, setView] = useState<'list' | 'create' | 'assign-data' | 'assign-incharges' | 'approvals'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'All' | 'Active' | 'Inactive'>('All');
@@ -525,14 +471,14 @@ export default function PlatformAdminPortal() {
             primaryColor: c.primaryColor || '#F59E0B',
             secondaryColor: c.secondaryColor || '#DC2626',
             accentColor: c.accentColor || '#0F172A',
-            totalVoters: c.votersCount || 228000,
-            turnoutPercent: 74.2,
+            totalVoters: c.votersCount || 0,
+            turnoutPercent: c.turnoutPercent || 0,
             isActive: true,
             isDefault: c.isDefault || false,
             createdAt: new Date(c.createdAt).toLocaleDateString('en-IN'),
           }));
           setApps(mapped);
-          setSelectedApp(mapped[0]);
+          setSelectedApp(mapped.find((a) => a.isDefault) || mapped[0] || null);
         }
       } catch (err) {
         console.error('Failed to load apps from backend:', err);
@@ -540,6 +486,16 @@ export default function PlatformAdminPortal() {
     }
     loadBackendApps();
   }, []);
+
+  useEffect(() => {
+    if (!selectedApp?.id) {
+      setSummaryKpis(null);
+      return;
+    }
+    fetchApplicationSummary(selectedApp.id)
+      .then((kpis) => setSummaryKpis(kpis))
+      .catch(() => setSummaryKpis(null));
+  }, [selectedApp?.id]);
 
   const handleLaunchApp = async (app: AppInstance) => {
     setApps((prev) => prev.map((a) => ({ ...a, isDefault: a.id === app.id })));
@@ -744,40 +700,46 @@ export default function PlatformAdminPortal() {
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
                     <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                      <div className="text-[9px] uppercase font-bold text-slate-400">Total Users</div>
-                      <div className="text-base font-black text-slate-900 mt-0.5">1,248</div>
-                      <div className="text-[9px] text-emerald-600 font-bold">1,180 Active</div>
-                    </div>
-                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                       <div className="text-[9px] uppercase font-bold text-slate-400">Total Incharges</div>
-                      <div className="text-base font-black text-slate-900 mt-0.5">342</div>
-                      <div className="text-[9px] text-emerald-600 font-bold">328 Active • 14 Inactive</div>
+                      <div className="text-base font-black text-slate-900 mt-0.5">
+                        {summaryKpis ? summaryKpis.totalIncharges.toLocaleString() : '0'}
+                      </div>
+                      <div className="text-[9px] text-emerald-600 font-bold">Assigned Cadre</div>
                     </div>
                     <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                       <div className="text-[9px] uppercase font-bold text-slate-400">Total Voters</div>
                       <div className="text-base font-black text-slate-900 mt-0.5">
-                        {selectedApp?.totalVoters ? (selectedApp.totalVoters / 1000).toFixed(0) + 'K' : '228K'}
+                        {summaryKpis ? (summaryKpis.totalVoters > 1000 ? (summaryKpis.totalVoters / 1000).toFixed(0) + 'K' : summaryKpis.totalVoters.toLocaleString()) : (selectedApp?.totalVoters ? (selectedApp.totalVoters > 1000 ? (selectedApp.totalVoters / 1000).toFixed(0) + 'K' : selectedApp.totalVoters.toLocaleString()) : '0')}
                       </div>
-                      <div className="text-[9px] text-blue-600 font-bold">Electoral Roll v2024</div>
+                      <div className="text-[9px] text-blue-600 font-bold">Electoral Roll DB</div>
                     </div>
                     <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                      <div className="text-[9px] uppercase font-bold text-slate-400">Assigned Voters</div>
+                      <div className="text-[9px] uppercase font-bold text-slate-400">Total Booths</div>
                       <div className="text-base font-black text-slate-900 mt-0.5">
-                        {selectedApp?.totalVoters ? Math.round(selectedApp.totalVoters * 0.88 / 1000) + 'K' : '198K'}
+                        {summaryKpis ? summaryKpis.totalBooths.toLocaleString() : '0'}
                       </div>
-                      <div className="text-[9px] text-emerald-600 font-bold">88% Coverage</div>
+                      <div className="text-[9px] text-emerald-600 font-bold">Mapped Booths</div>
                     </div>
                     <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                       <div className="text-[9px] uppercase font-bold text-slate-400">Completed Surveys</div>
-                      <div className="text-base font-black text-slate-900 mt-0.5">48,920</div>
+                      <div className="text-base font-black text-slate-900 mt-0.5">
+                        {summaryKpis ? summaryKpis.verifiedCount.toLocaleString() : '0'}
+                      </div>
                       <div className="text-[9px] text-purple-600 font-bold">Ground Verified</div>
+                    </div>
+                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      <div className="text-[9px] uppercase font-bold text-slate-400">Total Tasks</div>
+                      <div className="text-base font-black text-slate-900 mt-0.5">
+                        {summaryKpis ? summaryKpis.totalTasks.toLocaleString() : '0'}
+                      </div>
+                      <div className="text-[9px] text-slate-600 font-bold">Operational</div>
                     </div>
                     <div
                       className="bg-amber-50/80 p-2.5 rounded-xl border border-amber-200 cursor-pointer hover:bg-amber-100 transition"
                       onClick={() => setView('approvals')}
                     >
                       <div className="text-[9px] uppercase font-bold text-amber-800">Pending Approvals</div>
-                      <div className="text-base font-black text-amber-900 mt-0.5">91</div>
+                      <div className="text-base font-black text-amber-900 mt-0.5">0</div>
                       <div className="text-[9px] text-amber-700 font-bold flex items-center gap-1">Open Queue ➔</div>
                     </div>
                   </div>
@@ -825,151 +787,167 @@ export default function PlatformAdminPortal() {
                 </div>
 
                 {/* App Cards Grid (2 Column Grid) */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {filteredApps.map((app) => {
-                    const isSelected = selectedApp?.id === app.id;
-                    const isDefault = app.isDefault;
+                {filteredApps.length === 0 ? (
+                  <div className="bg-white rounded-2xl p-12 border-2 border-dashed border-slate-200 text-center space-y-3">
+                    <Database className="w-10 h-10 text-slate-300 mx-auto" />
+                    <h4 className="text-sm font-bold text-slate-700">No Applications Configured</h4>
+                    <p className="text-xs text-slate-400 max-w-md mx-auto">
+                      No constituency workspaces were found matching your criteria. Create a new application to get started.
+                    </p>
+                    <button
+                      onClick={() => setView('create')}
+                      className="px-4 py-2 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs rounded-xl shadow-xs transition"
+                    >
+                      + Create New Application
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {filteredApps.map((app) => {
+                      const isSelected = selectedApp?.id === app.id;
+                      const isDefault = app.isDefault;
 
-                    return (
-                      <div
-                        key={app.id}
-                        onClick={() => setSelectedApp(app)}
-                        className={`relative bg-white rounded-2xl p-4 border-2 transition-all cursor-pointer shadow-xs hover:shadow-md flex flex-col justify-between ${
-                          isDefault
-                            ? 'border-[#F59E0B] ring-2 ring-[#F59E0B]/20'
-                            : isSelected
-                            ? 'border-slate-400 bg-slate-50/50'
-                            : 'border-slate-200 hover:border-slate-300'
-                        }`}
-                      >
-                        {/* Top Active Workspace Gold Pill */}
-                        {isDefault && (
-                          <div className="absolute top-3 right-3 flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-[#F59E0B] text-slate-950 shadow-xs">
-                            <Zap className="w-3 h-3 fill-slate-950" />
-                            ACTIVE WORKSPACE
-                          </div>
-                        )}
-
-                        <div>
-                          {/* Card Header: Icon Badge & Name */}
-                          <div className="flex items-start gap-3 mb-3">
-                            <div
-                              className="w-13 h-13 rounded-2xl flex items-center justify-center text-slate-950 font-black text-sm shrink-0 shadow-xs"
-                              style={{ backgroundColor: app.primaryColor || '#F59E0B' }}
-                            >
-                              {app.partyCode.slice(0, 3)}
-                            </div>
-                            <div className="min-w-0 flex-1 pr-16">
-                              <div className="flex items-center gap-2">
-                                <h3 className="font-black text-slate-900 text-sm truncate">{app.name}</h3>
-                                <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-emerald-100 text-emerald-700 shrink-0">
-                                  ACTIVE
-                                </span>
-                              </div>
-                              <p className="text-[11px] text-slate-500 font-extrabold truncate mt-0.5">
-                                {app.jurisdiction}
-                              </p>
-                              {app.party && (
-                                <span className="inline-block mt-1 px-2 py-0.5 rounded bg-slate-100 text-[9px] font-black uppercase text-slate-600 tracking-wider">
-                                  {app.party} ({app.partyCode})
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Leader & Location Info */}
-                          <div className="space-y-1 text-[11px] text-slate-500 font-semibold mb-3">
-                            {app.leaderName && (
-                              <div>
-                                Leader: <span className="font-bold text-slate-800">{app.leaderName}</span>
-                              </div>
-                            )}
-                            <div>
-                              Loc: <span className="font-bold text-slate-800">{app.jurisdiction}</span>
-                            </div>
-                          </div>
-
-                          {/* Gray Description Box */}
-                          {app.description && (
-                            <div className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 text-[10px] text-slate-500 leading-relaxed font-semibold mb-3 line-clamp-2">
-                              {app.description}
+                      return (
+                        <div
+                          key={app.id}
+                          onClick={() => setSelectedApp(app)}
+                          className={`relative bg-white rounded-2xl p-4 border-2 transition-all cursor-pointer shadow-xs hover:shadow-md flex flex-col justify-between ${
+                            isDefault
+                              ? 'border-[#F59E0B] ring-2 ring-[#F59E0B]/20'
+                              : isSelected
+                              ? 'border-slate-400 bg-slate-50/50'
+                              : 'border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          {/* Top Active Workspace Gold Pill */}
+                          {isDefault && (
+                            <div className="absolute top-3 right-3 flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-[#F59E0B] text-slate-950 shadow-xs">
+                              <Zap className="w-3 h-3 fill-slate-950" />
+                              ACTIVE WORKSPACE
                             </div>
                           )}
-                        </div>
 
-                        {/* Card Footer Row */}
-                        <div>
-                          <div className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-2">
-                            CREATED: {app.createdAt}
+                          <div>
+                            {/* Card Header: Icon Badge & Name */}
+                            <div className="flex items-start gap-3 mb-3">
+                              <div
+                                className="w-13 h-13 rounded-2xl flex items-center justify-center text-slate-950 font-black text-sm shrink-0 shadow-xs"
+                                style={{ backgroundColor: app.primaryColor || '#F59E0B' }}
+                              >
+                                {app.partyCode.slice(0, 3)}
+                              </div>
+                              <div className="min-w-0 flex-1 pr-16">
+                                <div className="flex items-center gap-2">
+                                  <h3 className="font-black text-slate-900 text-sm truncate">{app.name}</h3>
+                                  <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-emerald-100 text-emerald-700 shrink-0">
+                                    ACTIVE
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 font-extrabold truncate mt-0.5">
+                                  {app.jurisdiction}
+                                </p>
+                                {app.party && (
+                                  <span className="inline-block mt-1 px-2 py-0.5 rounded bg-slate-100 text-[9px] font-black uppercase text-slate-600 tracking-wider">
+                                    {app.party} ({app.partyCode})
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Leader & Location Info */}
+                            <div className="space-y-1 text-[11px] text-slate-500 font-semibold mb-3">
+                              {app.leaderName && (
+                                <div>
+                                  Leader: <span className="font-bold text-slate-800">{app.leaderName}</span>
+                                </div>
+                              )}
+                              <div>
+                                Loc: <span className="font-bold text-slate-800">{app.jurisdiction}</span>
+                              </div>
+                            </div>
+
+                            {/* Gray Description Box */}
+                            {app.description && (
+                              <div className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 text-[10px] text-slate-500 leading-relaxed font-semibold mb-3 line-clamp-2">
+                                {app.description}
+                              </div>
+                            )}
                           </div>
 
-                          <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-100">
-                            {/* Open App Button */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleLaunchApp(app);
-                              }}
-                              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-black text-white bg-slate-950 hover:bg-slate-800 shadow-xs transition-all active:scale-95 cursor-pointer"
-                            >
-                              <span>▶ Open App</span>
-                            </button>
+                          {/* Card Footer Row */}
+                          <div>
+                            <div className="text-[9px] text-slate-400 font-black uppercase tracking-wider mb-2">
+                              CREATED: {app.createdAt}
+                            </div>
 
-                            {/* Assign Data Button */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedApp(app);
-                                setView('assign-data');
-                              }}
-                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 transition-all cursor-pointer"
-                              title="Upload and Assign Data to this application"
-                            >
-                              <Database className="w-3 h-3 text-amber-600" /> Assign Data
-                            </button>
-
-                            {/* Assign Incharges Button */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedApp(app);
-                                setView('assign-incharges');
-                              }}
-                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-blue-900 bg-blue-100 hover:bg-blue-200 transition-all cursor-pointer"
-                              title="Assign Incharges and Jurisdiction to this application"
-                            >
-                              <Users className="w-3 h-3 text-blue-600" /> Assign Incharges
-                            </button>
-
-                            {/* Duplicate Button */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDuplicate(app);
-                              }}
-                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-slate-700 border border-slate-200 hover:bg-slate-50 transition-all cursor-pointer"
-                            >
-                              <Copy className="w-3 h-3" /> Duplicate
-                            </button>
-
-                            {/* Set Default */}
-                            {!app.isDefault && (
+                            <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-100">
+                              {/* Open App Button */}
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleSetDefault(app.id);
+                                  handleLaunchApp(app);
                                 }}
-                                className="px-2.5 py-1.5 rounded-xl text-xs font-bold text-slate-600 border border-slate-200 hover:border-amber-400 transition-all cursor-pointer"
+                                className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-black text-white bg-slate-950 hover:bg-slate-800 shadow-xs transition-all active:scale-95 cursor-pointer"
                               >
-                                Set as Default
+                                <span>▶ Open App</span>
                               </button>
-                            )}
+
+                              {/* Assign Data Button */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedApp(app);
+                                  setView('assign-data');
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 transition-all cursor-pointer"
+                                title="Upload and Assign Data to this application"
+                              >
+                                <Database className="w-3 h-3 text-amber-600" /> Assign Data
+                              </button>
+
+                              {/* Assign Incharges Button */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedApp(app);
+                                  setView('assign-incharges');
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-blue-900 bg-blue-100 hover:bg-blue-200 transition-all cursor-pointer"
+                                title="Assign Incharges and Jurisdiction to this application"
+                              >
+                                <Users className="w-3 h-3 text-blue-600" /> Assign Incharges
+                              </button>
+
+                              {/* Duplicate Button */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDuplicate(app);
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-slate-700 border border-slate-200 hover:bg-slate-50 transition-all cursor-pointer"
+                              >
+                                <Copy className="w-3 h-3" /> Duplicate
+                              </button>
+
+                              {/* Set Default */}
+                              {!app.isDefault && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSetDefault(app.id);
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold text-slate-600 border border-slate-200 hover:border-amber-400 transition-all cursor-pointer"
+                                >
+                                  Set as Default
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Right Column: Live Brand Preview Panel */}

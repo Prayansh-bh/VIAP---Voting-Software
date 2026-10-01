@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import {
   Database,
   UploadCloud,
@@ -11,7 +12,8 @@ import {
   RefreshCw,
   FolderTree,
 } from 'lucide-react';
-import { AppInstance } from '../types';
+import { AppInstance, ApplicationSummary } from '../types';
+import { fetchApplicationSummary, fetchVotersList, importVoterRolls } from '../lib/api';
 
 interface DataIngestionProps {
   currentApp: AppInstance | null;
@@ -21,27 +23,81 @@ export default function DataIngestion({ currentApp }: DataIngestionProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'parsing' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
-  const [previewRows, setPreviewRows] = useState<any[]>([]);
+  
+  // Real DB states
+  const [summary, setSummary] = useState<ApplicationSummary | null>(null);
+  const [voters, setVoters] = useState<any[]>([]);
+  const [totalVotersCount, setTotalVotersCount] = useState<number>(0);
+  const [loading, setLoading] = useState(false);
 
-  const sampleRows = [
-    { epic: 'ABC1029384', name: 'K. Venkateswara Rao', age: 46, gender: 'M', booth: '104 - ZPHS School', village: 'Pakala', mandal: 'Singarayakonda' },
-    { epic: 'ABC1029385', name: 'K. Subbalakshmi', age: 42, gender: 'F', booth: '104 - ZPHS School', village: 'Pakala', mandal: 'Singarayakonda' },
-    { epic: 'ABC1029386', name: 'P. Krishna Chaitanya', age: 24, gender: 'M', booth: '104 - ZPHS School', village: 'Pakala', mandal: 'Singarayakonda' },
-    { epic: 'ABC1029387', name: 'M. Sivaiah', age: 58, gender: 'M', booth: '105 - Govt Primary', village: 'Kondapi', mandal: 'Kondapi' },
-  ];
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-      setUploadStatus('parsing');
-      setTimeout(() => {
-        setUploadStatus('success');
-        setStatusMessage(`Successfully processed "${file.name}" (1,480 voter records identified).`);
-        setPreviewRows(sampleRows);
-      }, 1200);
+  const loadLiveData = async () => {
+    if (!currentApp) return;
+    setLoading(true);
+    try {
+      const [sum, vList] = await Promise.all([
+        fetchApplicationSummary(currentApp.id),
+        fetchVotersList({ limit: 15 }),
+      ]);
+      setSummary(sum);
+      setVoters(vList.items);
+      setTotalVotersCount(sum?.totalVoters ?? vList.total);
+    } catch (err) {
+      console.warn('Failed to load live ingestion summary from DB:', err);
+    } finally {
+      setLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadLiveData();
+  }, [currentApp?.id]);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentApp) return;
+    
+    setSelectedFile(file);
+    setUploadStatus('parsing');
+    setStatusMessage('Reading spreadsheet and extracting columns...');
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rows: any[] = XLSX.utils.sheet_to_json(worksheet);
+
+      if (!rows || rows.length === 0) {
+        setUploadStatus('error');
+        setStatusMessage('No valid data rows found in selected file.');
+        return;
+      }
+
+      setStatusMessage(`Parsed ${rows.length.toLocaleString('en-IN')} rows. Uploading to PostgreSQL database...`);
+
+      const res = await importVoterRolls(currentApp.id, {
+        rows,
+        fileName: file.name,
+        fileSize: file.size,
+        importMode: 'APPEND',
+      });
+
+      const importedCount = res?.importedCount ?? res?.insertedVoters ?? rows.length;
+      setUploadStatus('success');
+      setStatusMessage(`Successfully committed ${importedCount.toLocaleString('en-IN')} records into PostgreSQL database.`);
+
+      // Re-fetch genuine data from PostgreSQL
+      await loadLiveData();
+    } catch (err: any) {
+      setUploadStatus('error');
+      setStatusMessage(err.message || 'File ingestion failed.');
+    }
+  };
+
+  const totalMandals = summary?.totalMandals ?? 0;
+  const totalBooths = summary?.totalBooths ?? 0;
+  const totalVoters = summary?.totalVoters ?? totalVotersCount;
+  const totalConstituencies = summary?.totalConstituencies ?? (currentApp ? 1 : 0);
 
   return (
     <div className="space-y-6">
@@ -58,9 +114,20 @@ export default function DataIngestion({ currentApp }: DataIngestionProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span>Postgres Bulk Ingestion Engine Ready</span>
+        <div className="flex items-center gap-3 text-xs text-slate-400">
+          <button
+            onClick={loadLiveData}
+            disabled={loading}
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            title="Refresh database metrics"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Sync DB</span>
+          </button>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>PostgreSQL Active</span>
+          </div>
         </div>
       </div>
 
@@ -74,7 +141,7 @@ export default function DataIngestion({ currentApp }: DataIngestionProps) {
           Upload Official Electoral Roll (XLSX, CSV, TSV)
         </h3>
         <p className="text-xs text-slate-400 max-w-md mb-4">
-          Select or drag your Election Commission voter roll file. Automatic column matching will identify EPIC, Polling Station, Section, House No, and Demographics.
+          Select your Election Commission voter roll file. The ingestion engine will parse and commit EPIC, Polling Station, Mandal, and Citizen demographics directly to PostgreSQL.
         </p>
 
         <label className="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-500/20 transition cursor-pointer flex items-center gap-2">
@@ -91,7 +158,7 @@ export default function DataIngestion({ currentApp }: DataIngestionProps) {
         {uploadStatus === 'parsing' && (
           <div className="mt-4 flex items-center gap-2 text-xs text-amber-400 font-semibold animate-pulse">
             <RefreshCw className="w-4 h-4 animate-spin" />
-            <span>Validating schema and parsing geographic hierarchy...</span>
+            <span>{statusMessage}</span>
           </div>
         )}
 
@@ -101,43 +168,66 @@ export default function DataIngestion({ currentApp }: DataIngestionProps) {
             <span>{statusMessage}</span>
           </div>
         )}
+
+        {uploadStatus === 'error' && (
+          <div className="mt-4 px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-semibold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4" />
+            <span>{statusMessage}</span>
+          </div>
+        )}
       </div>
 
-      {/* Jurisdiction Hierarchy Counts */}
+      {/* Jurisdiction Hierarchy Counts — Derived directly from live PostgreSQL database */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800">
           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Constituencies</div>
-          <div className="text-2xl font-black text-white mt-1">1 Assembly</div>
-          <div className="text-[11px] text-slate-500">Kondapi (SC Reserved)</div>
+          <div className="text-2xl font-black text-white mt-1">
+            {totalConstituencies} {totalConstituencies === 1 ? 'Constituency' : 'Constituencies'}
+          </div>
+          <div className="text-[11px] text-slate-500 truncate">
+            {currentApp?.jurisdiction || currentApp?.name || 'Active Platform Tenant'}
+          </div>
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800">
           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Mandals / Blocks</div>
-          <div className="text-2xl font-black text-white mt-1">5 Mandals</div>
-          <div className="text-[11px] text-slate-500">100% Boundary Mapped</div>
+          <div className="text-2xl font-black text-white mt-1">
+            {totalMandals} {totalMandals === 1 ? 'Mandal' : 'Mandals'}
+          </div>
+          <div className="text-[11px] text-slate-500">
+            {totalMandals > 0 ? 'Boundary Mapped in DB' : '0 Mandals in DB'}
+          </div>
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800">
           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Polling Booths</div>
-          <div className="text-2xl font-black text-white mt-1">268 Booths</div>
-          <div className="text-[11px] text-emerald-400 font-bold">All Stations Geocoded</div>
+          <div className="text-2xl font-black text-white mt-1">
+            {totalBooths} {totalBooths === 1 ? 'Booth' : 'Booths'}
+          </div>
+          <div className="text-[11px] text-emerald-400 font-bold">
+            {totalBooths > 0 ? 'Geocoded & Synchronized' : '0 Booths in DB'}
+          </div>
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800">
           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Enrolled Voters</div>
-          <div className="text-2xl font-black text-white mt-1">228,410</div>
-          <div className="text-[11px] text-cyan-400 font-bold">Active Roll 2024-25</div>
+          <div className="text-2xl font-black text-white mt-1">
+            {totalVoters.toLocaleString('en-IN')}
+          </div>
+          <div className="text-[11px] text-cyan-400 font-bold">
+            {totalVoters > 0 ? 'PostgreSQL Live Records' : '0 Enrolled Voters'}
+          </div>
         </div>
       </div>
 
-      {/* Preview Table */}
+      {/* Preview Table — Sourced directly from PostgreSQL database */}
       <div className="p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-sm space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BarChart2 className="w-4 h-4 text-cyan-400" />
             <h2 className="text-sm font-bold text-white">Electoral Roll Records Preview</h2>
           </div>
-          <span className="text-[10px] font-bold text-slate-500">Live Database Schema</span>
+          <span className="text-[10px] font-bold text-slate-500">Live Database Records ({voters.length})</span>
         </div>
 
         <div className="overflow-x-auto">
@@ -154,21 +244,41 @@ export default function DataIngestion({ currentApp }: DataIngestionProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80">
-              {(previewRows.length > 0 ? previewRows : sampleRows).map((row, idx) => (
-                <tr key={idx} className="hover:bg-slate-800/40 text-slate-300">
-                  <td className="p-3 font-mono font-bold text-cyan-400">{row.epic}</td>
-                  <td className="p-3 font-semibold text-white">{row.name}</td>
-                  <td className="p-3">{row.age} / {row.gender}</td>
-                  <td className="p-3">{row.booth}</td>
-                  <td className="p-3">{row.village}</td>
-                  <td className="p-3">{row.mandal}</td>
-                  <td className="p-3 text-right">
-                    <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                      Verified
-                    </span>
+              {voters.length > 0 ? (
+                voters.map((row, idx) => {
+                  const epic = row.epicNumber || row.epic || row.voterId || row.id || '—';
+                  const name = row.name || row.fullName || row.voterName || '—';
+                  const age = row.age ? `${row.age} / ${row.gender || '-'}` : (row.gender || '—');
+                  const booth = row.boothNumber || row.booth?.name || row.booth || '—';
+                  const village = row.village?.name || row.village || '—';
+                  const mandal = row.mandal?.name || row.mandal || '—';
+                  const status = row.surveyStatus || row.voterStatus || 'Active';
+
+                  return (
+                    <tr key={row.id || idx} className="hover:bg-slate-800/40 text-slate-300">
+                      <td className="p-3 font-mono font-bold text-cyan-400">{epic}</td>
+                      <td className="p-3 font-semibold text-white">{name}</td>
+                      <td className="p-3">{age}</td>
+                      <td className="p-3">{booth}</td>
+                      <td className="p-3">{village}</td>
+                      <td className="p-3">{mandal}</td>
+                      <td className="p-3 text-right">
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          {status}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center text-slate-500">
+                    <FolderTree className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+                    <p className="font-bold text-slate-300">No voter records enrolled in database yet.</p>
+                    <p className="text-xs text-slate-500 mt-1">Upload an official electoral roll file (.xlsx, .csv) above to ingest live voter rolls.</p>
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>

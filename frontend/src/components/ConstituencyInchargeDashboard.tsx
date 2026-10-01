@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { UserSession, VoterPreference, VoterStatus } from '../types';
+import { UserSession, Voter, VoterPreference, VoterStatus } from '../types';
 import {
   createPollingReport,
   fetchCadreNetwork,
@@ -138,22 +138,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
   const [cadreItems, setCadreItems] = useState<CadreNetworkItem[]>([]);
   const [trainingProgressItems, setTrainingProgressItems] = useState<TrainingProgressItem[]>([]);
   const [liveTurnoutSummary, setLiveTurnoutSummary] = useState<LiveTurnoutSummaryPayload | null>(null);
-  const [scopedVoters, setScopedVoters] = useState<Array<{
-    caste?: string;
-    profession?: string;
-    gender: 'Male' | 'Female' | 'Other';
-    age: number;
-    politicalPreference: VoterPreference;
-    mandal: string;
-    village: string;
-    boothNumber: string;
-    name: string;
-    epicNumber: string;
-    mobileNumber: string;
-    voterLocationStatus?: 'Local' | 'Migrated';
-    currentLocation?: string;
-    notes: string;
-  }>>([]);
+  const [scopedVoters, setScopedVoters] = useState<Voter[]>([]);
   const [isRefreshingLiveTurnout, setIsRefreshingLiveTurnout] = useState(false);
   const [mandalRollups, setMandalRollups] = useState<ReturnType<typeof mapMandalRollup>[]>([]);
   const [villageRollups, setVillageRollups] = useState<Array<{
@@ -303,34 +288,20 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
     };
   }, [session.unitId, session.userId]);
 
-  const DEFAULT_KONDAPI_MANDALS: ReturnType<typeof mapMandalRollup>[] = useMemo(() => [
-    { name: 'Kondapi', voters: 43200, villages: 24, booths: 52, tdp: 22800, ysrcp: 18100, neutral: 2300, jsp: 0, bjp: 0, inc: 0, leading: 'TDP' as VoterPreference, lead: 4700, status: 'WINNING' as const },
-    { name: 'Singarayakonda', voters: 54100, villages: 18, booths: 64, tdp: 28400, ysrcp: 22600, neutral: 3100, jsp: 0, bjp: 0, inc: 0, leading: 'TDP' as VoterPreference, lead: 5800, status: 'WINNING' as const },
-    { name: 'Tangutur', voters: 48900, villages: 22, booths: 58, tdp: 25100, ysrcp: 20900, neutral: 2900, jsp: 0, bjp: 0, inc: 0, leading: 'TDP' as VoterPreference, lead: 4200, status: 'WINNING' as const },
-    { name: 'Jarugumalli', voters: 29800, villages: 16, booths: 36, tdp: 15300, ysrcp: 12900, neutral: 1600, jsp: 0, bjp: 0, inc: 0, leading: 'TDP' as VoterPreference, lead: 2400, status: 'WINNING' as const },
-    { name: 'Ponnaluru', voters: 28400, villages: 17, booths: 38, tdp: 14600, ysrcp: 12400, neutral: 1400, jsp: 0, bjp: 0, inc: 0, leading: 'TDP' as VoterPreference, lead: 2200, status: 'WINNING' as const },
-    { name: 'Marripudi', voters: 23600, villages: 17, booths: 35, tdp: 11800, ysrcp: 10500, neutral: 1300, jsp: 0, bjp: 0, inc: 0, leading: 'TDP' as VoterPreference, lead: 1300, status: 'WINNING' as const }
-  ], []);
-
   const mandalsData = useMemo(() => {
-    if (mandalRollups && mandalRollups.length > 0) {
-      return mandalRollups;
-    }
-    const isDemo = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
-    return isDemo ? DEFAULT_KONDAPI_MANDALS : [];
-  }, [mandalRollups, DEFAULT_KONDAPI_MANDALS]);
+    return mandalRollups || [];
+  }, [mandalRollups]);
 
   // Rolled Up Constituency Stats
   const constituencyStats = useMemo(() => {
-    const isDemo = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
     const snapshot = backendSummary?.snapshot;
     if (snapshot) {
       const prefs = (snapshot as HierarchySummaryPayload['snapshot'] & { politicalPreference?: Record<string, number> }).politicalPreference;
       return {
-        voters: snapshot.summary?.totalVoters ?? (isDemo ? 228000 : 0),
+        voters: snapshot.summary?.totalVoters ?? 0,
         mandals: snapshot.hierarchyCounts?.MANDAL ?? mandalsData.length,
-        villages: snapshot.hierarchyCounts?.VILLAGE ?? (villageRollups.length || (isDemo ? 114 : 0)),
-        booths: snapshot.hierarchyCounts?.BOOTH ?? (isDemo ? 283 : 0),
+        villages: snapshot.hierarchyCounts?.VILLAGE ?? villageRollups.length,
+        booths: snapshot.hierarchyCounts?.BOOTH ?? 0,
         tdp: prefs?.TDP ?? mandalsData.reduce((sum, m) => sum + (m.tdp || 0), 0),
         ysrcp: prefs?.YSRCP ?? mandalsData.reduce((sum, m) => sum + (m.ysrcp || 0), 0),
         neutral: prefs?.NEUTRAL ?? mandalsData.reduce((sum, m) => sum + (m.neutral || 0), 0),
@@ -339,8 +310,8 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
     let voters = 0;
     let mandals = mandalsData.length;
-    let villages = villageRollups.length || (isDemo ? 114 : 0);
-    let booths = mandalsData.reduce((sum, m) => sum + (m.booths || 0), 0) || (isDemo ? 283 : 0);
+    let villages = villageRollups.length;
+    let booths = mandalsData.reduce((sum, m) => sum + (m.booths || 0), 0);
     let tdp = 0;
     let ysrcp = 0;
     let neutral = 0;
@@ -352,19 +323,18 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
       neutral += m.neutral || 0;
     });
 
-    return { voters: voters || (isDemo ? 228000 : 0), mandals: mandals || (isDemo ? 6 : 0), villages, booths, tdp: tdp || (isDemo ? 118000 : 0), ysrcp: ysrcp || (isDemo ? 97400 : 0), neutral: neutral || (isDemo ? 12600 : 0) };
-  }, [backendSummary, mandalsData, villageRollups.length]);
+    return { voters, mandals, villages, booths, tdp, ysrcp, neutral };
+  }, [backendSummary, mandalsData, villageRollups]);
 
   const liveConstituencyStats = useMemo(() => {
-    const isDemo = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
     const snapshot = backendSummary?.snapshot;
     return {
-      totalVoters: snapshot?.summary?.totalVoters ?? constituencyStats?.voters ?? (isDemo ? 228000 : 0),
-      totalMandals: snapshot?.hierarchyCounts?.MANDAL ?? constituencyStats?.mandals ?? (isDemo ? 6 : 0),
-      totalVillages: snapshot?.hierarchyCounts?.VILLAGE ?? constituencyStats?.villages ?? (isDemo ? 114 : 0),
-      totalBooths: snapshot?.hierarchyCounts?.BOOTH ?? constituencyStats?.booths ?? (isDemo ? 283 : 0),
-      voted: snapshot?.summary?.voted ?? (isDemo ? 159600 : 0),
-      remaining: snapshot?.summary?.remaining ?? (isDemo ? 68400 : 0),
+      totalVoters: snapshot?.summary?.totalVoters ?? constituencyStats?.voters ?? 0,
+      totalMandals: snapshot?.hierarchyCounts?.MANDAL ?? constituencyStats?.mandals ?? 0,
+      totalVillages: snapshot?.hierarchyCounts?.VILLAGE ?? constituencyStats?.villages ?? 0,
+      totalBooths: snapshot?.hierarchyCounts?.BOOTH ?? constituencyStats?.booths ?? 0,
+      voted: snapshot?.summary?.voted ?? 0,
+      remaining: snapshot?.summary?.remaining ?? 0,
     };
   }, [backendSummary, constituencyStats]);
 
@@ -399,21 +369,8 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
       grouped.set(key, item);
     });
 
-    const DEFAULT_KONDAPI_VILLAGES = [
-      { sNo: 1, name: 'Kondapi Village', mandal: 'Kondapi', voters: 3420, tdp: 1850, ysrcp: 1380, neutral: 190, status: 'WINNING', lead: 470, leading: 'TDP' },
-      { sNo: 2, name: 'Chinna Venkanna Palem', mandal: 'Kondapi', voters: 2180, tdp: 1140, ysrcp: 910, neutral: 130, status: 'WINNING', lead: 230, leading: 'TDP' },
-      { sNo: 3, name: 'Singarayakonda Town', mandal: 'Singarayakonda', voters: 6840, tdp: 3620, ysrcp: 2850, neutral: 370, status: 'WINNING', lead: 770, leading: 'TDP' },
-      { sNo: 4, name: 'Somarajupalli', mandal: 'Singarayakonda', voters: 2940, tdp: 1530, ysrcp: 1240, neutral: 170, status: 'WINNING', lead: 290, leading: 'TDP' },
-      { sNo: 5, name: 'Tangutur Town', mandal: 'Tangutur', voters: 5410, tdp: 2810, ysrcp: 2290, neutral: 310, status: 'WINNING', lead: 520, leading: 'TDP' },
-      { sNo: 6, name: 'Alakurapadu', mandal: 'Tangutur', voters: 3120, tdp: 1620, ysrcp: 1340, neutral: 160, status: 'WINNING', lead: 280, leading: 'TDP' },
-      { sNo: 7, name: 'Jarugumalli Village', mandal: 'Jarugumalli', voters: 2860, tdp: 1480, ysrcp: 1220, neutral: 160, status: 'WINNING', lead: 260, leading: 'TDP' },
-      { sNo: 8, name: 'Ponnaluru Village', mandal: 'Ponnaluru', voters: 3200, tdp: 1650, ysrcp: 1380, neutral: 170, status: 'WINNING', lead: 270, leading: 'TDP' },
-      { sNo: 9, name: 'Marripudi Village', mandal: 'Marripudi', voters: 2450, tdp: 1260, ysrcp: 1080, neutral: 110, status: 'WINNING', lead: 180, leading: 'TDP' },
-    ];
-
     if (grouped.size === 0) {
-      const isDemo = typeof window !== 'undefined' && localStorage.getItem('DEMO_MODE') === 'true';
-      return isDemo ? DEFAULT_KONDAPI_VILLAGES : [];
+      return [];
     }
 
     let currentSNo = 1;
@@ -439,40 +396,14 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
   }, [scopedVoters, villageRollups]);
 
   // --- High Command Tasks ---
-  const [tasksList, setTasksList] = useState([
-    {
-      id: "T1",
-      title: "Voter List Verification Drive",
-      description: "Perform physical verification of newly added voter applications across all 283 booths. Identify potentially duplicate or shifted entries.",
-      priority: "HIGH PRIORITY",
-      dueDate: "2026-08-10",
-      status: "IN PROGRESS"
-    },
-    {
-      id: "T2",
-      title: "Booth Committee Configuration Review",
-      description: "Ensure all 2,504 '100-Voter Incharges' are assigned and fully configured with valid contact details across all mandals.",
-      priority: "HIGH PRIORITY",
-      dueDate: "2026-08-05",
-      status: "IN PROGRESS"
-    },
-    {
-      id: "T3",
-      title: "Neutral Voter Outreach Mobilization",
-      description: "Conduct targeted interactions and community meetings targeting 15,959 Neutral Voters in close contest villages.",
-      priority: "MEDIUM PRIORITY",
-      dueDate: "2026-08-15",
-      status: "PENDING"
-    },
-    {
-      id: "T4",
-      title: "Door-to-Door Campaign Handbook Distribution",
-      description: "Complete booklet and sticker distribution to all village and booth leaders for standard campaign alignment.",
-      priority: "LOW PRIORITY",
-      dueDate: "2026-08-20",
-      status: "COMPLETED"
-    }
-  ]);
+  const [tasksList, setTasksList] = useState<Array<{
+    id: string;
+    title: string;
+    description: string;
+    priority: string;
+    dueDate: string;
+    status: string;
+  }>>([]);
 
   const [selectedTask, setSelectedTask] = useState<typeof tasksList[0] | null>(null);
 
@@ -659,15 +590,29 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
   // --- Fake/Flagged Voters ---
   const [fakeSearch, setFakeSearch] = useState('');
   const [fakeFilterStatus, setFakeFilterStatus] = useState<string>('ALL');
-  const [flaggedVoters, setFlaggedVoters] = useState<FlaggedVoter[]>([
-    { sNo: 1, name: "Nelaturi Srinivasa Rao", epic: "KDP8493012", age: 43, gender: "Male", village: "Singarayakonda", mandal: "Singarayakonda", booth: "Booth 235 (ZPHS)", reason: "Potential Duplicate", status: "FLAGGED" },
-    { sNo: 2, name: "Marella Venkateswarlu", epic: "KDP9102431", age: 52, gender: "Male", village: "Kalikivaya", mandal: "Singarayakonda", booth: "Booth 224", reason: "Shifted Residence", status: "UNDER VERIFICATION" },
-    { sNo: 3, name: "Kolla Lakshmi Prasanna", epic: "KDP1249302", age: 31, gender: "Female", village: "Pakala", mandal: "Singarayakonda", booth: "Booth 236", reason: "Deceased Record", status: "VERIFIED ISSUE" },
-    { sNo: 4, name: "Gaddipati Balagangadhar", epic: "KDP3320491", age: 67, gender: "Male", village: "Sanampudi", mandal: "Singarayakonda", booth: "Booth 230", reason: "Potential Duplicate", status: "RESOLVED" },
-    { sNo: 5, name: "Damarla Ankamma", epic: "KDP4493021", age: 72, gender: "Female", village: "Woollapalem", mandal: "Singarayakonda", booth: "Booth 245", reason: "Address Verification Required", status: "FLAGGED" },
-    { sNo: 6, name: "Bollineni Venkaiah", epic: "KDP1102941", age: 58, gender: "Male", village: "Kondapi Village", mandal: "Kondapi", booth: "Booth 145", reason: "Age/DOB Mismatch", status: "UNDER VERIFICATION" },
-    { sNo: 7, name: "Yeluri Subbamma", epic: "KDP8849201", age: 80, gender: "Female", village: "Tangutur Town", mandal: "Tangutur", booth: "Booth 102", reason: "Deceased Record", status: "VERIFIED ISSUE" }
-  ]);
+  const [flaggedVoters, setFlaggedVoters] = useState<FlaggedVoter[]>([]);
+
+  useEffect(() => {
+    if (scopedVoters && scopedVoters.length > 0) {
+      const flagged = scopedVoters
+        .filter(v => v.voterStatus === 'Doubtful' || v.voterStatus === 'Fake' || v.voterStatus === 'Shifted' || v.voterStatus === 'Deceased')
+        .map((v, index) => ({
+          sNo: index + 1,
+          name: v.name,
+          epic: v.epicNumber,
+          age: v.age,
+          gender: v.gender,
+          village: v.village,
+          mandal: v.mandal,
+          booth: v.boothNumber,
+          reason: v.notes || `${v.voterStatus} Record`,
+          status: (v.voterStatus === 'Fake' ? 'FLAGGED' : 'UNDER VERIFICATION') as FlaggedVoter['status'],
+        }));
+      setFlaggedVoters(flagged);
+    } else {
+      setFlaggedVoters([]);
+    }
+  }, [scopedVoters]);
 
   const [auditingVoter, setAuditingVoter] = useState<FlaggedVoter | null>(null);
 
@@ -2441,7 +2386,13 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {paginatedFlaggedVoters.map((item, idx) => {
+                      {paginatedFlaggedVoters.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="py-8 text-center text-slate-400 font-medium">
+                            No flagged or doubtful voters found in records.
+                          </td>
+                        </tr>
+                      ) : paginatedFlaggedVoters.map((item, idx) => {
                         const statusColors = 
                           item.status === 'RESOLVED' ? 'bg-emerald-100 text-emerald-800' :
                           item.status === 'VERIFIED ISSUE' ? 'bg-red-100 text-red-800' :

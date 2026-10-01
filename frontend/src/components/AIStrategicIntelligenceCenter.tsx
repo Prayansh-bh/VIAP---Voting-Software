@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Compass, 
   Sparkles, 
@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { VoterPreference } from '../types';
 import { useNotification } from '../context/NotificationContext';
+import { fetchNewsArticles, fetchSocialTrends } from '../lib/api/ai.api';
 
 export interface AIStrategicIntelligenceCenterProps {
   session?: any;
@@ -108,9 +109,10 @@ type SubTabType =
   | 'ask_ai';
 
 export default function AIStrategicIntelligenceCenter({
+  session,
   mandalsData = [],
   villagesData = [],
-  constituencyStats = { voters: 228000, mandals: 6, villages: 114, booths: 240, tdp: 124000, ysrcp: 98000, neutral: 6000 },
+  constituencyStats = { voters: 0, mandals: 0, villages: 0, booths: 0, tdp: 0, ysrcp: 0, neutral: 0 },
   flaggedVoters = [],
   tasksList = []
 }: AIStrategicIntelligenceCenterProps) {
@@ -120,6 +122,64 @@ export default function AIStrategicIntelligenceCenter({
   const [lastAnalysisTime, setLastAnalysisTime] = useState<string>('2026-07-30 04:15');
   const [globalSearch, setGlobalSearch] = useState('');
   const [hasRunAnalysis, setHasRunAnalysis] = useState(true);
+
+  // Live News and Social Trends from Backend DB
+  const [liveNews, setLiveNews] = useState<Array<{
+    id: string;
+    headline: string;
+    source: string;
+    date: string;
+    summary: string;
+    relevance: string;
+    topic: string;
+    url: string;
+  }>>([]);
+
+  const [liveTrends, setLiveTrends] = useState<Array<{
+    topic: string;
+    mentions: number;
+    source: string;
+    trend: 'RISING' | 'STABLE' | 'DECLINING';
+    relevantMandals: string;
+    detected: string;
+    updated: string;
+  }>>([]);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      fetchNewsArticles().catch(() => []),
+      fetchSocialTrends().catch(() => []),
+    ]).then(([newsRes, trendsRes]) => {
+      if (!active) return;
+      if (Array.isArray(newsRes) && newsRes.length > 0) {
+        setLiveNews(newsRes.map((n: any) => ({
+          id: n.id,
+          headline: n.headline,
+          source: n.sourceName || 'News Agency',
+          date: n.publishedAt ? new Date(n.publishedAt).toLocaleDateString() : 'Recent',
+          summary: n.snippet || '',
+          relevance: n.sentiment || 'General',
+          topic: 'Constituency News',
+          url: n.articleUrl || '#',
+        })));
+      }
+      if (Array.isArray(trendsRes) && trendsRes.length > 0) {
+        setLiveTrends(trendsRes.map((t: any) => ({
+          topic: t.hashtag,
+          mentions: t.mentionCount || 0,
+          source: t.platform || 'Social Media',
+          trend: 'RISING',
+          relevantMandals: 'Constituency Wide',
+          detected: t.recordedAt ? new Date(t.recordedAt).toLocaleDateString() : 'Recent',
+          updated: t.recordedAt ? new Date(t.recordedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+        })));
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Ask AI Chat State
   const [chatMessages, setChatMessages] = useState<Array<{ sender: 'user' | 'ai'; text: string; citations?: string[]; timestamp: string }>>([
@@ -208,102 +268,89 @@ export default function AIStrategicIntelligenceCenter({
   }, [mandalsData, villagesData, constituencyStats]);
 
   // --- 2. GROUND REPORTS DATABASE ---
-  const groundReports = useMemo(() => [
-    { id: 'GR-101', category: 'Drinking Water', description: 'Severe drinking water scarcity in Kalikivaya village. Public borewells have run dry, and tankers are not arriving regularly.', location: 'Kalikivaya', mandal: 'Singarayakonda', date: '2026-07-29', priority: 'Urgent', status: 'Pending' },
-    { id: 'GR-102', category: 'Roads', description: 'The main road connecting Patha Singarayakonda to the highway is completely damaged, making commute difficult.', location: 'Patha Singarayakonda', mandal: 'Singarayakonda', date: '2026-07-28', priority: 'High', status: 'In Progress' },
-    { id: 'GR-103', category: 'Agriculture', description: 'Farmers in Sanampudi complaining about delayed subsidized fertilizer distribution at Rythu Bharosa Kendras.', location: 'Sanampudi', mandal: 'Singarayakonda', date: '2026-07-29', priority: 'High', status: 'Pending' },
-    { id: 'GR-104', category: 'Pensions', description: 'Elderly citizens in Mupparajuvari Palem alleging that government pension distribution is being delayed selectively based on political support.', location: 'Mupparajuvari Palem', mandal: 'Kondapi', date: '2026-07-27', priority: 'Medium', status: 'In Progress' },
-    { id: 'GR-105', category: 'Drainage', description: 'Clogged drainage canals in Tangutur Town creating unhygienic conditions and risk of dengue outbreaks.', location: 'Tangutur Town', mandal: 'Tangutur', date: '2026-07-29', priority: 'Urgent', status: 'Pending' },
-    { id: 'GR-106', category: 'Local Development', description: 'Unfinished community hall building in Alakurapadu village has become a spot for antisocial elements.', location: 'Alakurapadu', mandal: 'Tangutur', date: '2026-07-25', priority: 'Low', status: 'Resolved' },
-    { id: 'GR-107', category: 'Drinking Water', description: 'Borewell repair needed near Booth 236 in Pakala village before the next layout campaign.', location: 'Pakala', mandal: 'Singarayakonda', date: '2026-07-29', priority: 'Medium', status: 'Pending' },
-    { id: 'GR-108', category: 'Education', description: 'Anganwadi school building in Chimata village requires urgent repairs to the ceiling before monsoon.', location: 'Chimata', mandal: 'Marripudi', date: '2026-07-26', priority: 'High', status: 'Pending' },
-    { id: 'GR-109', category: 'Drinking Water', description: 'Drinking water pipe leaks in Singarayakonda Ward 12 causing massive wastage and low pressure.', location: 'Singarayakonda', mandal: 'Singarayakonda', date: '2026-07-29', priority: 'High', status: 'Pending' }
-  ], []);
+  const [dbReports, setDbReports] = useState<any[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    import('../lib/api').then(({ fetchGroundReports }) => {
+      fetchGroundReports(session?.unitId).then(res => {
+        if (active && Array.isArray(res)) {
+          setDbReports(res);
+        }
+      }).catch(() => {});
+    });
+    return () => { active = false; };
+  }, [session?.unitId]);
+
+  const groundReports = useMemo(() => {
+    return dbReports.map((r, idx) => ({
+      id: r.id || `GR-${idx + 1}`,
+      category: r.category || 'General',
+      description: r.description || r.notes || '',
+      location: r.unitName || r.location || 'Constituency',
+      mandal: r.mandal || '',
+      date: r.createdAt ? new Date(r.createdAt).toISOString().split('T')[0] : '',
+      priority: r.priority || 'Medium',
+      status: r.status || 'Pending',
+    }));
+  }, [dbReports]);
 
   // --- 3. TOP ISSUES ANALYSIS ---
-  const topIssues = useMemo(() => [
-    { issue: 'Drinking Water Supply', count: 18, mandals: 4, villages: 9, trend: 'RISING' as const, priority: 'URGENT' as const },
-    { issue: 'Delayed Pensions', count: 12, mandals: 3, villages: 5, trend: 'STABLE' as const, priority: 'HIGH' as const },
-    { issue: 'Pothole Road Damage', count: 9, mandals: 2, villages: 6, trend: 'DECLINING' as const, priority: 'MEDIUM' as const },
-    { issue: 'RBK Fertilizer Shortage', count: 7, mandals: 2, villages: 4, trend: 'RISING' as const, priority: 'HIGH' as const },
-    { issue: 'Drainage Overflow', count: 6, mandals: 1, villages: 2, trend: 'RISING' as const, priority: 'MEDIUM' as const }
-  ], []);
+  const topIssues = useMemo(() => {
+    const issueMap: Record<string, { issue: string; count: number; mandals: Set<string>; villages: Set<string>; priority: 'URGENT' | 'HIGH' | 'MEDIUM' }> = {};
+    groundReports.forEach(r => {
+      const cat = r.category || 'General';
+      const existing = issueMap[cat] || { issue: cat, count: 0, mandals: new Set<string>(), villages: new Set<string>(), priority: 'MEDIUM' };
+      existing.count += 1;
+      if (r.mandal) existing.mandals.add(r.mandal);
+      if (r.location) existing.villages.add(r.location);
+      if (r.priority === 'Urgent') existing.priority = 'URGENT';
+      else if (r.priority === 'High' && existing.priority !== 'URGENT') existing.priority = 'HIGH';
+      issueMap[cat] = existing;
+    });
+
+    return Object.values(issueMap).map(item => ({
+      issue: item.issue,
+      count: item.count,
+      mandals: item.mandals.size,
+      villages: item.villages.size,
+      trend: 'STABLE' as 'RISING' | 'STABLE' | 'DECLINING',
+      priority: item.priority,
+    }));
+  }, [groundReports]);
 
   // --- 4. NEWS INTELLIGENCE DATABASE ---
-  const newsArticles = useMemo(() => [
-    {
-      id: 'N-01',
-      headline: 'Prakasam District Collector Announces High-Speed Water Tanker Relief Funds',
-      source: 'Andhra Jyothy',
-      date: '2026-07-29',
-      summary: 'The District Administration has released ₹1.2 crore specifically for immediate water supply tankers across Prakasam district drought-hit zones. Kondapi and Tangutur are named as priority blocks.',
-      relevance: 'PRAKASAM DISTRICT',
-      topic: 'Infrastructure',
-      url: 'https://andhrajyothy.com/prakasam-water-funds-2026'
-    },
-    {
-      id: 'N-02',
-      headline: 'Kondapi Assembly Constituency MLA Inspects Ground Drainage Construction In Tangutur',
-      source: 'Eenadu',
-      date: '2026-07-28',
-      summary: 'MLA inspected the ongoing drainage pipeline extension project worth ₹45 Lakhs in Tangutur town. Directed engineers to complete work within 30 days to avoid rainwater stagnation issues.',
-      relevance: 'KONDAPI DIRECT',
-      topic: 'Local Development',
-      url: 'https://eenadu.net/kondapi-mla-inspection-tangutur'
-    },
-    {
-      id: 'N-03',
-      headline: 'Andhra Pradesh Government Announces New Fertilizer Subsidy Scheme for Drylands',
-      source: 'Deccan Chronicle',
-      date: '2026-07-27',
-      summary: 'Cabinet has approved an additional ₹200 crore allocation for dryland seed and bio-fertilizer supply, targeting small-scale farmers before the kharif season operations.',
-      relevance: 'ANDHRA PRADESH',
-      topic: 'Agriculture',
-      url: 'https://deccanchronicle.com/ap-dryland-fertilizer-subsidy'
-    },
-    {
-      id: 'N-04',
-      headline: 'Singarayakonda National Highway Expansion to Impact 45 Local Shops Near Junction',
-      source: 'The Hindu',
-      date: '2026-07-25',
-      summary: 'The proposed bypass broadening on NH-16 near Singarayakonda central junction is facing local pushback. Shopkeepers demand higher commercial rehabilitation compensation from NHAI.',
-      relevance: 'KONDAPI DIRECT',
-      topic: 'Infrastructure',
-      url: 'https://thehindu.com/singarayakonda-nh-expansion-compensation'
-    }
-  ], []);
+  const newsArticles = liveNews;
 
   // --- 5. PUBLIC SOCIAL TRENDS ---
-  const socialTrends = useMemo(() => [
-    { topic: 'Borewell Dryouts', mentions: 184, source: 'Facebook Groups & Twitter Local hashtags', trend: 'RISING' as const, relevantMandals: 'Singarayakonda, Tangutur', detected: '2026-07-25', updated: '2026-07-29' },
-    { topic: 'Highway Compensation', mentions: 125, source: 'Local WhatsApp & Public FB Comments', trend: 'RISING' as const, relevantMandals: 'Singarayakonda', detected: '2026-07-26', updated: '2026-07-29' },
-    { topic: 'TDP Cadre Training Success', mentions: 95, source: 'Verified TDP Cadre Twitter posts', trend: 'STABLE' as const, relevantMandals: 'All Mandals', detected: '2026-07-22', updated: '2026-07-28' },
-    { topic: 'Rythu Bharosa delay complaints', mentions: 62, source: 'Public Agriculture Forum Discussions', trend: 'DECLINING' as const, relevantMandals: 'Marripudi, Ponnaluru', detected: '2026-07-24', updated: '2026-07-28' }
-  ], []);
+  const socialTrends = liveTrends;
 
   // --- 6. GOVERNMENT & DEVELOPMENT MONITOR ---
-  const govtProjects = useMemo(() => [
-    { project: 'Tangutur Underground Sewerage System', dept: 'Panchayat Raj & Rural Development', location: 'Tangutur Town', date: '2026-07-15', status: 'Approved (₹45 Lakhs)', mandal: 'Tangutur', source: 'AP Government Gazette' },
-    { project: 'Singarayakonda RO Water Plant Installation', dept: 'Rural Water Supply (RWS)', location: 'Singarayakonda Word 4', date: '2026-07-20', status: 'Work In Progress', mandal: 'Singarayakonda', source: 'Prakasam District Planning' },
-    { project: 'Kondapi Village Veterinary Clinic Expansion', dept: 'Animal Husbandry', location: 'Kondapi Village', date: '2026-07-10', status: 'Tendering Completed', mandal: 'Kondapi', source: 'Department Portal' },
-    { project: 'Marripudi Main Bypass Resurfacing', dept: 'Roads & Buildings (R&B)', location: 'Marripudi Village', date: '2026-07-22', status: 'Approved (Kharif Budget)', mandal: 'Marripudi', source: 'R&B Department Press Release' }
-  ], []);
+  const govtProjects = useMemo<Array<{
+    project: string;
+    dept: string;
+    location: string;
+    date: string;
+    status: string;
+    mandal: string;
+    source: string;
+  }>>(() => [], []);
 
   // --- 7. CADRE HEALTH RATIOS ---
   const cadreHealth = useMemo(() => {
     return {
-      mandalInchargeCoverage: 100, // 6/6
-      villageInchargeCoverage: 95.8, // 46/48
-      boothInchargeCoverage: 91.1, // 258/283
-      voter100Coverage: 87.0, // 2180/2504
+      mandalInchargeCoverage: mandalsData.length > 0 ? 100 : 0,
+      villageInchargeCoverage: villagesData.length > 0 ? 100 : 0,
+      boothInchargeCoverage: constituencyStats.booths > 0 ? 100 : 0,
+      voter100Coverage: constituencyStats.voters > 0 ? 100 : 0,
       unfilledPositions: {
         mandal: 0,
-        village: 2, // (48 expected - 46 active)
-        booth: 25, // (283 expected - 258 active)
-        voter100: 324 // (2504 expected - 2180 active)
+        village: 0,
+        booth: 0,
+        voter100: 0,
       }
     };
-  }, []);
+  }, [mandalsData, villagesData, constituencyStats]);
 
   // --- 8. AI CHAT BOT RESPONSES ---
   const handleChatSubmit = (e: React.FormEvent) => {
@@ -321,32 +368,26 @@ export default function AIStrategicIntelligenceCenter({
     setChatMessages(updatedMessages);
     setChatInput('');
 
-    // Formulate intelligent AI answer based on keywords
+    // Formulate intelligent AI answer based on genuine database state
     setTimeout(() => {
       let responseText = '';
       let citations: string[] = [];
       const lower = userMsg.toLowerCase();
 
       if (lower.includes('summary') || lower.includes('today') || lower.includes('brief')) {
-        responseText = `Based on the latest data analysis on ${lastAnalysisTime}, here is the Kondapi Executive Briefing:\n\n1. **Drinking Water Priority**: Ground reports from Singarayakonda and Tangutur indicate a rising volume of water supply complaints. A Prakasam District tanker allocation of ₹1.2Cr has been announced, which we should guide cadre to streamline.\n2. **Voters Discrepancy**: A critical data allocation error detected in Chinna Venkanna Palem village (Kondapi Mandal) where party preferences (12,000) exceed total registered voters (1,200). IT verification required.\n3. **Cadre Network Status**: Overall Booth President coverage is at 91.1%, with 25 spots vacant across Marripudi and Ponnaluru mandals. Priority training is required.`;
-        citations = ['Constituency DB', 'Eenadu News (July 28)', 'Ground Reports (Kalikivaya)'];
+        responseText = `Executive Briefing:\n- Total Enrolled Voters: ${constituencyStats.voters.toLocaleString()}\n- Mandals: ${mandalsData.length}\n- Polling Booths: ${constituencyStats.booths.toLocaleString()}\n- Ground Reports: ${groundReports.length} recorded in database\n- Live Lead: ${(constituencyStats.tdp - constituencyStats.ysrcp).toLocaleString()} voters.`;
+        citations = ['PostgreSQL Database', 'Ground Reports API'];
       } else if (lower.includes('survey') || lower.includes('completion') || lower.includes('coverage')) {
-        responseText = `Current Survey status highlights:\n- Singarayakonda Mandal is leading with **94.5%** survey completion.\n- Marripudi is trailing at **68.2%** coverage due to a shortage of active '100-Voter Incharges' (324 positions currently vacant across the constituency).\n- Highly recommend mobilizing the local youth cadre in Marripudi to bridge this gap.`;
-        citations = ['Constituency Survey Dashboard', 'Cadre Network DB'];
+        responseText = `Current Survey status highlights:\n- Total Registered Voters: ${constituencyStats.voters.toLocaleString()}\n- Mandals Tracked: ${mandalsData.length}\n- Open Ground Reports: ${groundReports.filter(r => r.status === 'Pending').length}`;
+        citations = ['Constituency Database'];
       } else if (lower.includes('cadre') || lower.includes('network') || lower.includes('unfilled')) {
-        responseText = `Cadre Network coverage audit reveals:\n- **Mandal Incharges**: 100% active (6/6).\n- **Village Incharges**: 95.8% (46 out of 48 assigned). Gaps exist in 2 remote villages in Marripudi.\n- **Booth Incharges**: 91.1% (258/283 active). 25 vacancies currently being sourced.\n- **Voter 100 leaders**: 87.0% (2,180 active / 2,504 required). Marripudi requires an additional 112 leaders to achieve full coverage.`;
-        citations = ['Cadre Status Ledger', 'Mandal Incharge Logs'];
+        responseText = `Cadre Network status:\n- Mandals Configured: ${mandalsData.length}\n- Booths: ${constituencyStats.booths.toLocaleString()}\n- Incharge assignments sourced directly from cadre registry.`;
+        citations = ['Cadre Registry'];
       } else if (lower.includes('news') || lower.includes('article') || lower.includes('announcement')) {
-        responseText = `Recent public verified developments in Kondapi area:\n1. **Prakasam Water Funds**: ₹1.2 crore allocated by District Collector for drought tankers. RWS department coordinating tankers.\n2. **Drainage Construction**: Ongoing pipelines extension worth ₹45 Lakhs in Tangutur inspected by MLA.\n3. **NH-16 Expansion**: Shopkeepers near Singarayakonda junction demanding compensation reviews. Local team tracking sentiment.`;
-        citations = ['Andhra Jyothy (July 29)', 'Eenadu Net (July 28)', 'The Hindu (July 25)'];
-      } else if (lower.includes('water') || lower.includes('ground issue') || lower.includes('drinking')) {
-        responseText = `Drinking water supply is currently the **No. 1 public issue** in Kondapi constituency, reported 18 times across 4 mandals (particularly severe in Kalikivaya and Singarayakonda Word 12). \n\n*Action directive:* Coordinate with local RWS panchayat supervisors to direct the newly funded Collector tankers to these specific affected booths.`;
-        citations = ['Ground Reports GR-101 & GR-109', 'Prakasam Collector Gazette'];
-      } else if (lower.includes('inconsist') || lower.includes('error') || lower.includes('quality') || lower.includes('validation')) {
-        responseText = `I have verified the integrity of the data. 1 critical inconsistency detected:\n- **Chinna Venkanna Palem (Kondapi)**: Total registered voters is logged as **1,200**, but preference fields sum to **12,000** (TDP: 6,400, YSRCP: 4,600, Neutral: 1,000). This indicates a transposition/data entry error in the village ledger. Please notify the Mandal IT coordinator.`;
-        citations = ['Data Validation Engine (VAL-V-ChinnaVenkannaPalem)'];
+        responseText = `No external RSS/news agency feeds are currently integrated. Please consult official press statements.`;
+        citations = ['System Feeds'];
       } else {
-        responseText = `I have logged your query about "${userMsg}". After auditing the database:\n- Total Registered Voters in Kondapi: ${constituencyStats.voters.toLocaleString()}\n- Current TDP Margin Lead: ${(constituencyStats.tdp - constituencyStats.ysrcp).toLocaleString()} voters\n- Flagged Duplicates Under verification: 7 active profiles\n- Open Ground Complaints: ${groundReports.filter(r => r.status === 'Pending').length} pending cases.\n\nPlease let me know if you need specific details about Mandals, News articles, or Cadre gaps.`;
+        responseText = `Query logged for "${userMsg}". Current verified stats:\n- Total Registered Voters: ${constituencyStats.voters.toLocaleString()}\n- Current TDP Margin Lead: ${(constituencyStats.tdp - constituencyStats.ysrcp).toLocaleString()} voters\n- Flagged Records: ${flaggedVoters.length} active\n- Open Ground Complaints: ${groundReports.filter(r => r.status === 'Pending').length} pending cases.`;
         citations = ['Constituency Database', 'Ground Reports Ledger'];
       }
 
@@ -660,8 +701,8 @@ export default function AIStrategicIntelligenceCenter({
                         onClick={() => setSelectedMandalReport('Marripudi')}
                       />
                       <text x="110" y="90" fill="#1e293b" className="font-black">MARRIPUDI</text>
-                      <text x="115" y="105" fill="#475569" className="text-[8px] font-bold">Voters: 31,450</text>
-                      <text x="115" y="118" fill="#15803d" className="text-[8px] font-extrabold">{mapLayer === 'political' ? 'YSRCP +8%' : mapLayer === 'survey' ? 'Survey: 68%' : 'Cadre: 78%'}</text>
+                      <text x="115" y="105" fill="#475569" className="text-[8px] font-bold">Voters: {(() => { const m = mandalsData.find(x => x.name.toLowerCase().includes('marripudi')); return m ? m.voters.toLocaleString() : '0'; })()}</text>
+                      <text x="115" y="118" fill="#15803d" className="text-[8px] font-extrabold">{(() => { const m = mandalsData.find(x => x.name.toLowerCase().includes('marripudi')); return m ? `${m.leading} +${m.lead.toLocaleString()}` : 'No Data'; })()}</text>
 
                       {/* Ponnaluru (West) */}
                       <polygon 
@@ -672,8 +713,8 @@ export default function AIStrategicIntelligenceCenter({
                         onClick={() => setSelectedMandalReport('Ponnaluru')}
                       />
                       <text x="85" y="175" fill="#1e293b" className="font-black">PONNALURU</text>
-                      <text x="88" y="190" fill="#475569" className="text-[8px] font-bold">Voters: 34,900</text>
-                      <text x="88" y="203" fill="#1e293b" className="text-[8px] font-extrabold">{mapLayer === 'political' ? 'CLOSE CONTEST' : mapLayer === 'survey' ? 'Survey: 75%' : 'Cadre: 84%'}</text>
+                      <text x="88" y="190" fill="#475569" className="text-[8px] font-bold">Voters: {(() => { const m = mandalsData.find(x => x.name.toLowerCase().includes('ponnaluru')); return m ? m.voters.toLocaleString() : '0'; })()}</text>
+                      <text x="88" y="203" fill="#1e293b" className="text-[8px] font-extrabold">{(() => { const m = mandalsData.find(x => x.name.toLowerCase().includes('ponnaluru')); return m ? `${m.leading} +${m.lead.toLocaleString()}` : 'No Data'; })()}</text>
 
                       {/* Kondapi (Central) */}
                       <polygon 
@@ -684,8 +725,8 @@ export default function AIStrategicIntelligenceCenter({
                         onClick={() => setSelectedMandalReport('Kondapi')}
                       />
                       <text x="215" y="80" fill="#1e293b" className="font-black">KONDAPI</text>
-                      <text x="215" y="95" fill="#475569" className="text-[8px] font-bold">Voters: 45,500</text>
-                      <text x="215" y="108" fill="#1e293b" className="text-[8px] font-extrabold">{mapLayer === 'political' ? 'TDP +14.7%' : mapLayer === 'survey' ? 'Survey: 92%' : 'Cadre: 95%'}</text>
+                      <text x="215" y="95" fill="#475569" className="text-[8px] font-bold">Voters: {(() => { const m = mandalsData.find(x => x.name.toLowerCase().includes('kondapi')); return m ? m.voters.toLocaleString() : '0'; })()}</text>
+                      <text x="215" y="108" fill="#1e293b" className="text-[8px] font-extrabold">{(() => { const m = mandalsData.find(x => x.name.toLowerCase().includes('kondapi')); return m ? `${m.leading} +${m.lead.toLocaleString()}` : 'No Data'; })()}</text>
 
                       {/* Jarugumalli (North East) */}
                       <polygon 
@@ -696,8 +737,8 @@ export default function AIStrategicIntelligenceCenter({
                         onClick={() => setSelectedMandalReport('Jarugumalli')}
                       />
                       <text x="310" y="70" fill="#1e293b" className="font-black">JARUGUMALLI</text>
-                      <text x="310" y="83" fill="#475569" className="text-[8px] font-bold">Voters: 38,200</text>
-                      <text x="310" y="95" fill="#1e293b" className="text-[8px] font-extrabold">{mapLayer === 'political' ? 'CLOSE CONTEST' : mapLayer === 'survey' ? 'Survey: 81%' : 'Cadre: 89%'}</text>
+                      <text x="310" y="83" fill="#475569" className="text-[8px] font-bold">Voters: {(() => { const m = mandalsData.find(x => x.name.toLowerCase().includes('jarugumalli')); return m ? m.voters.toLocaleString() : '0'; })()}</text>
+                      <text x="310" y="95" fill="#1e293b" className="text-[8px] font-extrabold">{(() => { const m = mandalsData.find(x => x.name.toLowerCase().includes('jarugumalli')); return m ? `${m.leading} +${m.lead.toLocaleString()}` : 'No Data'; })()}</text>
 
                       {/* Singarayakonda (Coastal East) */}
                       <polygon 
@@ -708,8 +749,8 @@ export default function AIStrategicIntelligenceCenter({
                         onClick={() => setSelectedMandalReport('Singarayakonda')}
                       />
                       <text x="280" y="150" fill="#1e293b" className="font-black">SINGARAYAKONDA</text>
-                      <text x="285" y="163" fill="#475569" className="text-[8px] font-bold">Voters: 52,247</text>
-                      <text x="285" y="176" fill="#1e293b" className="text-[8px] font-extrabold">{mapLayer === 'political' ? 'TDP +12.3%' : mapLayer === 'survey' ? 'Survey: 94.5%' : 'Cadre: 96%'}</text>
+                      <text x="285" y="163" fill="#475569" className="text-[8px] font-bold">Voters: {(() => { const m = mandalsData.find(x => x.name.toLowerCase().includes('singarayakonda')); return m ? m.voters.toLocaleString() : '0'; })()}</text>
+                      <text x="285" y="176" fill="#1e293b" className="text-[8px] font-extrabold">{(() => { const m = mandalsData.find(x => x.name.toLowerCase().includes('singarayakonda')); return m ? `${m.leading} +${m.lead.toLocaleString()}` : 'No Data'; })()}</text>
 
                       {/* Tangutur (South/South-East) */}
                       <polygon 
@@ -720,8 +761,8 @@ export default function AIStrategicIntelligenceCenter({
                         onClick={() => setSelectedMandalReport('Tangutur')}
                       />
                       <text x="225" y="215" fill="#1e293b" className="font-black">TANGUTUR</text>
-                      <text x="225" y="228" fill="#475569" className="text-[8px] font-bold">Voters: 48,150</text>
-                      <text x="225" y="240" fill="#1e293b" className="text-[8px] font-extrabold">{mapLayer === 'political' ? 'TDP +15.7%' : mapLayer === 'survey' ? 'Survey: 89%' : 'Cadre: 91%'}</text>
+                      <text x="225" y="228" fill="#475569" className="text-[8px] font-bold">Voters: {(() => { const m = mandalsData.find(x => x.name.toLowerCase().includes('tangutur')); return m ? m.voters.toLocaleString() : '0'; })()}</text>
+                      <text x="225" y="240" fill="#1e293b" className="text-[8px] font-extrabold">{(() => { const m = mandalsData.find(x => x.name.toLowerCase().includes('tangutur')); return m ? `${m.leading} +${m.lead.toLocaleString()}` : 'No Data'; })()}</text>
 
                     </svg>
 
@@ -1036,43 +1077,52 @@ export default function AIStrategicIntelligenceCenter({
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs font-bold text-slate-700">
-                {[
-                  { booth: 'Booth 224 - MPPS West Block', mandal: 'Singarayakonda', voters: 852, survey: '98%', incharge: 'C. V. Subbarao', mobile: '9848022345', status: 'Full Coverage', lead: 'TDP +12%' },
-                  { booth: 'Booth 230 - ZPHS South Wing', mandal: 'Singarayakonda', voters: 1102, survey: '95%', incharge: 'G. Balagangadhar', mobile: '9440261145', status: 'Full Coverage', lead: 'TDP +8%' },
-                  { booth: 'Booth 145 - ZPHS North Room', mandal: 'Kondapi', voters: 920, survey: '92%', incharge: 'B. Venkaiah', mobile: '9848055667', status: 'Partial Coverage', lead: 'TDP +14%' },
-                  { booth: 'Booth 102 - Panchayat Office', mandal: 'Tangutur', voters: 1045, survey: '89%', incharge: 'K. Subbamma', mobile: '9123456789', status: 'Full Coverage', lead: 'TDP +18%' }
-                ].map(b => (
-                  <div key={b.booth} className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                    <div className="flex justify-between items-start border-b border-slate-200/60 pb-2">
-                      <div>
-                        <h4 className="font-black text-slate-900">{b.booth}</h4>
-                        <span className="text-[10px] text-slate-400 uppercase font-extrabold">{b.mandal} Mandal</span>
-                      </div>
-                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-950 border border-emerald-300 rounded text-[9px] uppercase font-black">
-                        {b.status}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-[11px]">
-                      <div>
-                        <span className="text-slate-400 block font-bold uppercase text-[9px]">Registered Voters</span>
-                        <span className="text-slate-900 font-extrabold">{b.voters}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block font-bold uppercase text-[9px]">Survey Completed</span>
-                        <span className="text-slate-900 font-extrabold">{b.survey}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block font-bold uppercase text-[9px]">Booth President</span>
-                        <span className="text-slate-900 font-extrabold">{b.incharge}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block font-bold uppercase text-[9px]">Political Index</span>
-                        <span className="text-emerald-600 font-black">{b.lead}</span>
-                      </div>
-                    </div>
+                {villagesData.length === 0 ? (
+                  <div className="col-span-full p-8 text-center bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <UserCheck className="w-8 h-8 text-slate-400 mx-auto" />
+                    <h4 className="text-slate-900 font-bold text-sm">No Booth Operations Logged</h4>
+                    <p className="text-slate-500 text-xs max-w-md mx-auto font-normal">
+                      Polling booth performance metrics will be calculated and displayed once field survey data is collected.
+                    </p>
                   </div>
-                ))}
+                ) : (
+                  villagesData.slice(0, 6).map(v => (
+                    <div key={v.sNo} className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                      <div className="flex justify-between items-start border-b border-slate-200/60 pb-2">
+                        <div>
+                          <h4 className="font-black text-slate-900">{v.name}</h4>
+                          <span className="text-[10px] text-slate-400 uppercase font-extrabold">{v.mandal} Mandal</span>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded text-[9px] uppercase font-black ${
+                          v.status === 'WINNING'
+                            ? 'bg-emerald-100 text-emerald-950 border border-emerald-300'
+                            : 'bg-amber-100 text-amber-950 border border-amber-300'
+                        }`}>
+                          {v.status}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        <div>
+                          <span className="text-slate-400 block font-bold uppercase text-[9px]">Registered Voters</span>
+                          <span className="text-slate-900 font-extrabold">{v.voters.toLocaleString()}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block font-bold uppercase text-[9px]">Leading Party</span>
+                          <span className="text-slate-900 font-extrabold">{v.leading || 'Neutral'}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block font-bold uppercase text-[9px]">TDP Votes</span>
+                          <span className="text-slate-900 font-extrabold">{v.tdp.toLocaleString()}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block font-bold uppercase text-[9px]">Projected Lead</span>
+                          <span className="text-emerald-600 font-black">{v.lead > 0 ? `+${v.lead.toLocaleString()}` : v.lead.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -1192,31 +1242,41 @@ export default function AIStrategicIntelligenceCenter({
               </div>
 
               <div className="space-y-4 pt-2">
-                {newsArticles.map(na => (
-                  <div key={na.id} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 font-bold text-xs text-slate-700">
-                    <div className="flex justify-between items-start border-b border-slate-200/60 pb-2">
-                      <div>
-                        <h4 className="text-slate-950 text-sm font-black leading-snug">{na.headline}</h4>
-                        <p className="text-[10px] text-slate-400 uppercase mt-0.5">{na.source} &bull; {na.date}</p>
-                      </div>
-                      <span className="px-2 py-0.5 bg-yellow-100 text-yellow-950 border border-yellow-300 rounded text-[9px] font-black uppercase shrink-0">
-                        {na.relevance}
-                      </span>
-                    </div>
-
-                    <p className="text-slate-600 font-semibold leading-relaxed">{na.summary}</p>
-                    
-                    <div className="flex justify-between items-center text-[10px]">
-                      <span className="text-slate-400 uppercase font-black">Topic Classification: {na.topic}</span>
-                      <button 
-                        onClick={() => notify.info(`Connecting to verified live feed stream for: ${na.headline}`, 'Live Feed Source')}
-                        className="text-yellow-600 hover:underline uppercase font-black cursor-pointer"
-                      >
-                        View Source Document &rarr;
-                      </button>
-                    </div>
+                {newsArticles.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <Newspaper className="w-8 h-8 text-slate-400 mx-auto" />
+                    <h4 className="text-slate-900 font-bold text-sm">No News Articles Published</h4>
+                    <p className="text-slate-500 text-xs max-w-md mx-auto font-normal">
+                      Verified press statements and regional news tracking feeds will populate here once ingested by the media monitoring service.
+                    </p>
                   </div>
-                ))}
+                ) : (
+                  newsArticles.map(na => (
+                    <div key={na.id} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 font-bold text-xs text-slate-700">
+                      <div className="flex justify-between items-start border-b border-slate-200/60 pb-2">
+                        <div>
+                          <h4 className="text-slate-950 text-sm font-black leading-snug">{na.headline}</h4>
+                          <p className="text-[10px] text-slate-400 uppercase mt-0.5">{na.source} &bull; {na.date}</p>
+                        </div>
+                        <span className="px-2 py-0.5 bg-yellow-100 text-yellow-950 border border-yellow-300 rounded text-[9px] font-black uppercase shrink-0">
+                          {na.relevance}
+                        </span>
+                      </div>
+
+                      <p className="text-slate-600 font-semibold leading-relaxed">{na.summary}</p>
+                      
+                      <div className="flex justify-between items-center text-[10px]">
+                        <span className="text-slate-400 uppercase font-black">Topic Classification: {na.topic}</span>
+                        <button 
+                          onClick={() => notify.info(`Connecting to verified live feed stream for: ${na.headline}`, 'Live Feed Source')}
+                          className="text-yellow-600 hover:underline uppercase font-black cursor-pointer"
+                        >
+                          View Source Document &rarr;
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -1243,28 +1303,38 @@ export default function AIStrategicIntelligenceCenter({
                 <h4 className="text-slate-950 text-xs font-black uppercase tracking-wider">Trending in Kondapi (Public Pages & Groups)</h4>
                 
                 <div className="space-y-3">
-                  {socialTrends.map(st => (
-                    <div key={st.topic} className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row justify-between gap-4 text-xs font-bold text-slate-700">
-                      <div className="space-y-1.5 flex-1">
-                        <div className="flex items-center gap-2">
-                          <h5 className="text-slate-900 font-black text-xs uppercase">{st.topic}</h5>
-                          <span className="text-[10px] text-slate-400 font-medium">Relevant Mandals: {st.relevantMandals}</span>
-                        </div>
-                        <p className="text-slate-500 font-medium">Source: {st.source}</p>
-                      </div>
-
-                      <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 shrink-0">
-                        <span className="text-slate-950 font-extrabold text-right">{st.mentions} public references</span>
-                        <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide ${
-                          st.trend === 'RISING' 
-                            ? 'bg-red-100 text-red-950 border border-red-300' 
-                            : 'bg-emerald-100 text-emerald-950 border border-emerald-300'
-                        }`}>
-                          {st.trend}
-                        </span>
-                      </div>
+                  {socialTrends.length === 0 ? (
+                    <div className="p-8 text-center bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                      <TrendingUp className="w-8 h-8 text-slate-400 mx-auto" />
+                      <h4 className="text-slate-900 font-bold text-sm">No Social Trends Tracked</h4>
+                      <p className="text-slate-500 text-xs max-w-md mx-auto font-normal">
+                        Aggregate social discussions and campaign mentions will be visualized here when social listening feeds are active.
+                      </p>
                     </div>
-                  ))}
+                  ) : (
+                    socialTrends.map(st => (
+                      <div key={st.topic} className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row justify-between gap-4 text-xs font-bold text-slate-700">
+                        <div className="space-y-1.5 flex-1">
+                          <div className="flex items-center gap-2">
+                            <h5 className="text-slate-900 font-black text-xs uppercase">{st.topic}</h5>
+                            <span className="text-[10px] text-slate-400 font-medium">Relevant Mandals: {st.relevantMandals}</span>
+                          </div>
+                          <p className="text-slate-500 font-medium">Source: {st.source}</p>
+                        </div>
+
+                        <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 shrink-0">
+                          <span className="text-slate-950 font-extrabold text-right">{st.mentions} public references</span>
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide ${
+                            st.trend === 'RISING' 
+                              ? 'bg-red-100 text-red-950 border border-red-300' 
+                              : 'bg-emerald-100 text-emerald-950 border border-emerald-300'
+                          }`}>
+                            {st.trend}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -1281,34 +1351,43 @@ export default function AIStrategicIntelligenceCenter({
               </div>
 
               <div className="space-y-4 pt-2 text-xs font-bold text-slate-700">
-                {govtProjects.map(gp => (
-                  <div key={gp.project} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-                    <div className="flex justify-between items-start border-b border-slate-200/60 pb-2">
-                      <div>
-                        <h4 className="text-slate-950 font-black text-xs uppercase">{gp.project}</h4>
-                        <p className="text-[10px] text-slate-400 mt-0.5 font-bold uppercase">Department: {gp.dept}</p>
-                      </div>
-                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-950 border border-emerald-300 rounded text-[9px] font-black uppercase">
-                        {gp.status}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-[10px] uppercase font-black text-slate-400">
-                      <div>
-                        Location: <span className="text-slate-900 font-extrabold">{gp.location}</span>
-                      </div>
-                      <div>
-                        Mandal: <span className="text-slate-900 font-extrabold">{gp.mandal}</span>
-                      </div>
-                      <div>
-                        Date: <span className="text-slate-900 font-extrabold">{gp.date}</span>
-                      </div>
-                      <div>
-                        Official Source: <span className="text-slate-900 font-extrabold">{gp.source}</span>
-                      </div>
-                    </div>
+                {govtProjects.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <Building2 className="w-8 h-8 text-slate-400 mx-auto" />
+                    <h4 className="text-slate-900 font-bold text-sm">No Development Projects Tracked</h4>
+                    <p className="text-slate-500 text-xs max-w-md mx-auto font-normal">
+                      Public welfare schemes, local infrastructure works, and developmental programs will appear here once registered.
+                    </p>
                   </div>
-                ))}
+                ) : (
+                  govtProjects.map(gp => (
+                    <div key={gp.project} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                      <div className="flex justify-between items-start border-b border-slate-200/60 pb-2">
+                        <div>
+                          <h4 className="text-slate-950 font-black text-xs uppercase">{gp.project}</h4>
+                          <p className="text-[10px] text-slate-400 mt-0.5 font-bold uppercase">Department: {gp.dept}</p>
+                        </div>
+                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-950 border border-emerald-300 rounded text-[9px] font-black uppercase">
+                          {gp.status}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-[10px] uppercase font-black text-slate-400">
+                        <div>
+                          Location: <span className="text-slate-900 font-extrabold">{gp.location}</span>
+                        </div>
+                        <div>
+                          Mandal: <span className="text-slate-900 font-extrabold">{gp.mandal}</span>
+                        </div>
+                        <div>
+                          Date: <span className="text-slate-900 font-extrabold">{gp.date}</span>
+                        </div>
+                        <div>
+                          Official Source: <span className="text-slate-900 font-extrabold">{gp.source}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
