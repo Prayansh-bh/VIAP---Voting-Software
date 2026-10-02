@@ -47,6 +47,7 @@ interface CmsStudioProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenRoleModules?: () => void;
+  onAppBuilt?: (app: any) => Promise<void> | void;
   mode?: 'setup' | 'editor';
 }
 
@@ -185,7 +186,7 @@ const PRESET_THEMES = [
   },
 ];
 
-export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = 'setup' }: CmsStudioProps) {
+export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBuilt, mode = 'setup' }: CmsStudioProps) {
   const { config, parties: existingParties, buildApplication, updateParties } = useCms();
   const { notify } = useNotification();
 
@@ -649,6 +650,12 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
       return;
     }
 
+    const cleanMobile = candidateMobile.replace(/\D/g, '').slice(-10);
+    if (!cleanMobile || cleanMobile.length < 10) {
+      notify.warning('Please enter a valid 10-digit candidate mobile number for login portal access.', 'Valid Mobile Required');
+      return;
+    }
+
     setIsBuilding(true);
 
     try {
@@ -731,14 +738,25 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
         stateName,
         appScope,
         candidateName: activeCandidateName,
-        candidateMobile: candidateMobile.trim(),
-        password: candidatePassword.trim(),
+        candidateMobile: cleanMobile,
+        password: candidatePassword.trim() || 'Kondapi@2026',
         tenantCode: calculatedTenantCode,
         parliamentName: appScope === 'PARLIAMENT_MP' ? parliamentName.trim() : undefined,
         activePartyCode,
         activeHierarchyLevels: selectedHierarchyLevels,
         constituencies: finalConstituencies,
-        politicalParties: partyList,
+        politicalParties: (partyList || []).map((p, idx) => ({
+          name: p.name || 'Party',
+          code: p.code || `P${idx + 1}`,
+          shortName: p.shortName || p.code || undefined,
+          primaryColor: p.primaryColor || '#eab308',
+          secondaryColor: p.secondaryColor || undefined,
+          accentColor: p.accentColor || undefined,
+          symbolName: p.symbolName || undefined,
+          logoUrl: p.logoUrl || undefined,
+          isActive: p.isActive !== false,
+          sortOrder: p.sortOrder !== undefined && p.sortOrder !== null ? p.sortOrder : idx + 1,
+        })),
       };
 
       // 1. Direct local persistence for zero-lag instant UI reflection
@@ -764,6 +782,14 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
       const buildRes: any = await buildApplication(buildPayload);
       updateParties(partyList);
 
+      if (onAppBuilt) {
+        try {
+          await onAppBuilt(buildRes?.application || buildRes?.data?.application);
+        } catch (e) {
+          console.warn('onAppBuilt callback error:', e);
+        }
+      }
+
       if (mode === 'setup') {
         localStorage.setItem('kdp_party_created', 'true');
       }
@@ -772,7 +798,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
       setIsBuilding(false);
 
       const returnedCreds = buildRes?.credentials || buildRes?.data?.credentials || {
-        mobileNumber: candidateMobile.trim(),
+        mobileNumber: candidateMobile.replace(/\D/g, '').slice(-10) || candidateMobile.trim(),
         password: candidatePassword.trim(),
         role: appScope === 'STATE' ? 'STATE_ADMIN' : 'CONSTITUENCY_INCHARGE',
         tenantCode: buildRes?.application?.tenantCode || calculatedTenantCode,
@@ -1346,180 +1372,175 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
               </div>
             </div>
 
-            {/* A. SINGLE MLA SCOPE */}
-            {appScope === 'SINGLE_MLA' && (
-              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-300">Key Leader / Candidate Name</label>
-                    <input
-                      type="text"
-                      value={candidateName}
-                      onChange={(e) => setCandidateName(e.target.value)}
-                      placeholder="e.g. Dr. Dola Sree Bala Veeranjaneya Swamy"
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
-                    />
-                  </div>
+            {/* Universal Candidate / Incharge Deployment Credentials (Visible across all scopes) */}
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <Phone className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-black text-white">
+                    Primary Candidate / Leader Credentials & Verification
+                  </span>
+                </div>
+                <span className="text-[10px] text-amber-300 bg-amber-400/10 border border-amber-400/20 font-bold px-2 py-0.5 rounded-full">
+                  Primary Access Credentials
+                </span>
+              </div>
 
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-300">Assembly Constituency Name</label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300">Key Leader / Candidate Name *</label>
+                  <input
+                    type="text"
+                    value={candidateName}
+                    onChange={(e) => setCandidateName(e.target.value)}
+                    placeholder="e.g. Pawan Kalyan"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300">Mobile Number (Login ID) *</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 font-mono">
+                      +91
+                    </span>
                     <input
-                      type="text"
-                      value={constituencyName}
-                      onChange={(e) => setConstituencyName(e.target.value)}
-                      placeholder="e.g. Kondapi (SC)"
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
+                      type="tel"
+                      value={candidateMobile}
+                      onChange={(e) => {
+                        setCandidateMobile(e.target.value.replace(/\D/g, '').slice(0, 10));
+                        setRegIsVerified(false);
+                        setRegOtpSent(false);
+                      }}
+                      placeholder="e.g. 9848012345"
+                      className="w-full pl-11 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
                     />
                   </div>
                 </div>
 
-                <div className="space-y-4 pt-3 border-t border-slate-800">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                      <Phone className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Candidate / Incharge Mobile Number & Passcode</span>
-                    </label>
-                    <span className="text-[10px] text-amber-300 bg-amber-400/10 border border-amber-400/20 font-bold px-2 py-0.5 rounded-full">
-                      Primary Login ID (10-Digit)
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300">Initial Login Passcode / Password *</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={candidatePassword}
+                      onChange={(e) => setCandidatePassword(e.target.value)}
+                      placeholder="Set Initial Passcode"
+                      className="w-full pl-3 pr-10 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* WhatsApp / SMS OTP Verification Box */}
+              <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-bold text-white">
+                      Live Candidate Mobile Verification (WhatsApp / SMS)
                     </span>
                   </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-bold text-slate-400">Mobile Number (Login ID) *</label>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 font-mono">
-                          +91
-                        </span>
-                        <input
-                          type="tel"
-                          value={candidateMobile}
-                          onChange={(e) => {
-                            setCandidateMobile(e.target.value.replace(/\D/g, '').slice(0, 10));
-                            setRegIsVerified(false);
-                            setRegOtpSent(false);
-                          }}
-                          placeholder="e.g. 9848012345"
-                          className="w-full pl-11 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
-                        />
-                      </div>
-                      <p className="text-[10px] text-slate-500">
-                        Candidate will log into role dashboards using this mobile number.
-                      </p>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-bold text-slate-400">Initial Login Passcode / Password *</label>
-                      <div className="relative">
-                        <input
-                          type={showPassword ? 'text' : 'password'}
-                          value={candidatePassword}
-                          onChange={(e) => setCandidatePassword(e.target.value)}
-                          placeholder="Set Initial Passcode / Password"
-                          className="w-full pl-3 pr-10 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
-                        >
-                          {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                        </button>
-                      </div>
-                      <p className="text-[10px] text-slate-500">
-                        Passcode for password login (can also log in via WhatsApp/SMS OTP).
-                      </p>
-                    </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setRegOtpChannel('WHATSAPP')}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 ${
+                        regOtpChannel === 'WHATSAPP'
+                          ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-black'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <span>💬 WhatsApp OTP</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRegOtpChannel('SMS')}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 ${
+                        regOtpChannel === 'SMS'
+                          ? 'bg-amber-500/20 border border-amber-500/40 text-amber-300 font-black'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <span>📱 SMS OTP</span>
+                    </button>
                   </div>
+                </div>
 
-                  {/* WhatsApp / SMS OTP Verification Box */}
-                  <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                        <span className="text-xs font-bold text-white">
-                          Candidate Mobile Verification
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setRegOtpChannel('WHATSAPP')}
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 ${
-                            regOtpChannel === 'WHATSAPP'
-                              ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-black'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          <span>💬 WhatsApp OTP</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRegOtpChannel('SMS')}
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 ${
-                            regOtpChannel === 'SMS'
-                              ? 'bg-amber-500/20 border border-amber-500/40 text-amber-300 font-black'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          <span>📱 SMS OTP</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {regIsVerified ? (
-                      <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>Candidate mobile number verified via {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'}!</span>
-                      </div>
-                    ) : regOtpSent ? (
-                      <div className="flex flex-col sm:flex-row items-center gap-2">
-                        <input
-                          type="text"
-                          maxLength={6}
-                          value={regOtpCode}
-                          onChange={(e) => setRegOtpCode(e.target.value.replace(/\D/g, ''))}
-                          placeholder="Enter 6-digit OTP"
-                          className="w-full sm:w-44 px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono font-bold text-white text-center tracking-widest focus:border-emerald-400 focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleVerifyRegOtp}
-                          disabled={isVerifyingRegOtp || regOtpCode.length < 6}
-                          className="w-full sm:w-auto px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 text-xs font-black rounded-xl cursor-pointer"
-                        >
-                          {isVerifyingRegOtp ? 'Verifying...' : 'Verify OTP'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleSendRegOtp}
-                          disabled={isSendingRegOtp}
-                          className="text-[11px] text-slate-400 hover:text-white underline cursor-pointer"
-                        >
-                          Resend Code
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <p className="text-[11px] text-slate-400">
-                          Verify candidate phone receives live {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} OTP before building:
-                        </p>
-                        <button
-                          type="button"
-                          onClick={handleSendRegOtp}
-                          disabled={isSendingRegOtp || candidateMobile.length < 10}
-                          className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 hover:text-white text-xs font-bold rounded-xl border border-slate-700 cursor-pointer flex items-center gap-1.5 self-start sm:self-auto"
-                        >
-                          {isSendingRegOtp ? (
-                            <LoaderCircle className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <Send className="w-3 h-3 text-amber-400" />
-                          )}
-                          <span>Send {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} OTP</span>
-                        </button>
-                      </div>
-                    )}
+                {regIsVerified ? (
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Candidate mobile number verified via {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'}!</span>
                   </div>
+                ) : regOtpSent ? (
+                  <div className="flex flex-col sm:flex-row items-center gap-2">
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={regOtpCode}
+                      onChange={(e) => setRegOtpCode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="Enter 6-digit OTP"
+                      className="w-full sm:w-44 px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono font-bold text-white text-center tracking-widest focus:border-emerald-400 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleVerifyRegOtp}
+                      disabled={isVerifyingRegOtp || regOtpCode.length < 6}
+                      className="w-full sm:w-auto px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 text-xs font-black rounded-xl cursor-pointer"
+                    >
+                      {isVerifyingRegOtp ? 'Verifying...' : 'Verify OTP'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSendRegOtp}
+                      disabled={isSendingRegOtp}
+                      className="text-[11px] text-slate-400 hover:text-white underline cursor-pointer"
+                    >
+                      Resend Code
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <p className="text-[11px] text-slate-400">
+                      Verify candidate phone receives live {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} OTP before building:
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleSendRegOtp}
+                      disabled={isSendingRegOtp || candidateMobile.length < 10}
+                      className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 hover:text-white text-xs font-bold rounded-xl border border-slate-700 cursor-pointer flex items-center gap-1.5 self-start sm:self-auto"
+                    >
+                      {isSendingRegOtp ? (
+                        <LoaderCircle className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Send className="w-3 h-3 text-amber-400" />
+                      )}
+                      <span>Send {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} OTP</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* A. SINGLE MLA SCOPE */}
+            {appScope === 'SINGLE_MLA' && (
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300">Assembly Constituency Name *</label>
+                  <input
+                    type="text"
+                    value={constituencyName}
+                    onChange={(e) => setConstituencyName(e.target.value)}
+                    placeholder="e.g. Kondapi (SC)"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
+                  />
                 </div>
               </div>
             )}
@@ -2227,29 +2248,43 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, mode = '
                   </div>
                 </div>
 
+                {createdCredentialsModal.password && (
+                  <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+                    <div>
+                      <div className="text-[10px] text-slate-400 font-medium">Initial Passcode / Password</div>
+                      <div className="font-mono text-xs font-black text-amber-400 mt-0.5">
+                        {createdCredentialsModal.password}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(`Mobile: ${createdCredentialsModal.mobileNumber}\nPassword: ${createdCredentialsModal.password}`);
+                        notify.success('Credentials copied to clipboard!', 'Copied');
+                      }}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer flex items-center gap-1 text-[11px] font-bold"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy</span>
+                    </button>
+                  </div>
+                )}
+
                 <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
                   <div>
-                    <div className="text-[10px] text-slate-400 font-medium">Initial Passcode / Password</div>
-                    <div className="font-mono text-xs font-black text-amber-400 mt-0.5">
-                      {createdCredentialsModal.password}
+                    <div className="text-[10px] text-slate-400 font-medium">Authentication Channels</div>
+                    <div className="font-mono text-xs font-black text-emerald-400 mt-0.5">
+                      WhatsApp OTP • SMS OTP • Passcode Login
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(`Mobile: ${createdCredentialsModal.mobileNumber}\nPassword: ${createdCredentialsModal.password}`);
-                      notify.success('Credentials copied to clipboard!', 'Copied');
-                    }}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer flex items-center gap-1 text-[11px] font-bold"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Copy</span>
-                  </button>
+                  <div className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
+                    ● Active in DB
+                  </div>
                 </div>
 
                 <div className="text-[11px] text-slate-400 flex items-center gap-2 pt-1">
                   <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>Supports Mobile + Passcode or WhatsApp / SMS OTP login.</span>
+                  <span>Candidate logs in directly on Port 3000 using their verified mobile number.</span>
                 </div>
               </div>
             </div>

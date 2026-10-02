@@ -44,6 +44,7 @@ describe('P1-A Production Security Authorization Remediation Suite (16 Requireme
   let appRecord: any;
 
   let assignmentB: any;
+  let subUserB: any;
   let taskA: any;
   let taskB: any;
   let cadreUserB: any;
@@ -210,7 +211,7 @@ describe('P1-A Production Security Authorization Remediation Suite (16 Requireme
     });
 
     // Subordinate incharge in Constituency B to test cross-jurisdiction delete
-    const subUserB = await prisma.user.create({
+    subUserB = await prisma.user.create({
       data: {
         userCode: `P1-BOOTH-B-${Date.now()}`,
         name: 'Booth Incharge B',
@@ -715,5 +716,61 @@ describe('P1-A Production Security Authorization Remediation Suite (16 Requireme
       headers: { authorization: `Bearer ${superAdminToken}` },
     });
     assert.equal(saAuditRes.statusCode, 200, 'SuperAdmin must be able to view global audit logs');
+  });
+
+  after(async () => {
+    try {
+      if (taskA?.id || taskB?.id) {
+        const ids = [taskA?.id, taskB?.id].filter(Boolean);
+        await prisma.taskStatusHistory.deleteMany({ where: { taskId: { in: ids } } });
+        await prisma.taskAssignment.deleteMany({ where: { taskId: { in: ids } } });
+        await prisma.task.deleteMany({ where: { id: { in: ids } } });
+      }
+      if (pollB?.id) {
+        await prisma.pollVote.deleteMany({ where: { pollId: pollB.id } });
+        await prisma.pollOption.deleteMany({ where: { pollId: pollB.id } });
+        await prisma.poll.deleteMany({ where: { id: pollB.id } });
+      }
+      if (importB?.id) await prisma.dataImport.deleteMany({ where: { id: importB.id } });
+      if (cadreB?.id) await prisma.cadre.deleteMany({ where: { id: cadreB.id } });
+      if (cadreUserB?.id) await prisma.user.deleteMany({ where: { id: cadreUserB.id } });
+      if (subUserB?.id) {
+        await prisma.userHierarchyAssignment.deleteMany({ where: { userId: subUserB.id } });
+        await prisma.user.deleteMany({ where: { id: subUserB.id } });
+      }
+      if (ciUserA?.id || ciUserB?.id) {
+        const ciIds = [ciUserA?.id, ciUserB?.id].filter(Boolean);
+        await prisma.userHierarchyAssignment.deleteMany({ where: { userId: { in: ciIds } } });
+        await prisma.user.deleteMany({ where: { id: { in: ciIds } } });
+      }
+      if (voterA?.id || voterB?.id) {
+        const vIds = [voterA?.id, voterB?.id].filter(Boolean);
+        await prisma.voter.deleteMany({ where: { id: { in: vIds } } });
+      }
+      if (boothA?.id || boothB?.id) {
+        const bIds = [boothA?.id, boothB?.id].filter(Boolean);
+        await prisma.booth.deleteMany({ where: { id: { in: bIds } } });
+      }
+      if (villageA?.id || villageB?.id) {
+        const vilIds = [villageA?.id, villageB?.id].filter(Boolean);
+        await prisma.village.deleteMany({ where: { id: { in: vilIds } } });
+      }
+      if (mandalA?.id || mandalB?.id) {
+        const mIds = [mandalA?.id, mandalB?.id].filter(Boolean);
+        await prisma.mandal.deleteMany({ where: { id: { in: mIds } } });
+      }
+      if (orgUnitA?.id || orgUnitB?.id) {
+        const uIds = [orgUnitA?.id, orgUnitB?.id].filter(Boolean);
+        await prisma.organizationUnit.deleteMany({ where: { id: { in: uIds } } });
+      }
+      if (constituencyA?.id || constituencyB?.id) {
+        const cIds = [constituencyA?.id, constituencyB?.id].filter(Boolean);
+        await prisma.constituency.deleteMany({ where: { id: { in: cIds } } });
+      }
+    } catch {
+      // ignore errors during cleanup
+    } finally {
+      if (app) await app.close();
+    }
   });
 });

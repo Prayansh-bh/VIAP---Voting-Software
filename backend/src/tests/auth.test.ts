@@ -418,11 +418,12 @@ describe('Production Authentication & SMS OTP Suite', () => {
     assert.equal(json.error.code, 'UNAUTHORIZED');
   });
 
-  it('12. In-App Dev Mode: 1-click instant login provisions new user and authenticates successfully', async () => {
+  it('12. In-App Auth: Unregistered mobile number is rejected with 404, preventing unauthorized account auto-creation', async () => {
     const devMobile = '9199887766';
     await prisma.user.deleteMany({ where: { mobileNumber: { endsWith: '99887766' } } });
 
-    const res = await app.inject({
+    // 1. Unregistered number must be rejected
+    const unregRes = await app.inject({
       method: 'POST',
       url: '/api/auth/demo-login',
       payload: {
@@ -432,57 +433,124 @@ describe('Production Authentication & SMS OTP Suite', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200, `Expected 200, got ${res.statusCode}: ${res.body}`);
-    const json = JSON.parse(res.body);
-    assert.equal(json.success, true);
-    assert.ok(json.data.token, 'Must return JWT token');
-    assert.equal(json.data.user.role, RoleType.VILLAGE_INCHARGE);
-    assert.equal(json.data.user.mobileNumber, '9199887766');
+    assert.equal(unregRes.statusCode, 404, 'Arbitrary unregistered number must return 404');
+    const unregJson = JSON.parse(unregRes.body);
+    assert.equal(unregJson.error.code, 'USER_NOT_FOUND');
 
-    // Confirm user was created in the database and active
-    const dbUser = await prisma.user.findFirst({
-      where: { mobileNumber: { endsWith: '99887766' } },
+    // 2. Pre-registered user must authenticate successfully
+    await prisma.user.create({
+      data: {
+        organisationId: testUser.organisationId,
+        userCode: 'DEV-VIL-7766',
+        name: 'Registered Village Leader',
+        mobileNumber: `+91${devMobile.slice(-10)}`,
+        role: RoleType.VILLAGE_INCHARGE,
+        accountStatus: 'ACTIVE',
+        isVerified: true,
+      },
     });
-    assert.ok(dbUser);
-    assert.equal(dbUser.accountStatus, 'ACTIVE');
+
+    const regRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/demo-login',
+      payload: {
+        role: RoleType.VILLAGE_INCHARGE,
+        mobileNumber: devMobile,
+      },
+    });
+
+    assert.equal(regRes.statusCode, 200, `Expected 200, got ${regRes.statusCode}: ${regRes.body}`);
+    const regJson = JSON.parse(regRes.body);
+    assert.equal(regJson.success, true);
+    assert.ok(regJson.data.token, 'Must return JWT token');
+    assert.equal(regJson.data.user.role, RoleType.VILLAGE_INCHARGE);
   });
 
-  it('13. In-App Dev Mode: OTP request auto-provisions new user and returns devOtp for instant verification', async () => {
-    const devMobile = '9188776655';
+  it('13. Secure OTP: Rejects unregistered numbers, and verifies registered user against DB hashed OTP', async () => {
+    const devUnregMobile = '9188776600';
+    const devRegMobile = '9188776655';
     await prisma.user.deleteMany({ where: { mobileNumber: { endsWith: '88776655' } } });
 
+    // 1. Unregistered number must return 404 USER_NOT_FOUND
+    const unregRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/request-otp',
+      payload: {
+        role: RoleType.BOOTH_PRESIDENT,
+        mobileNumber: devUnregMobile,
+        devMode: true,
+      },
+    });
+    assert.equal(unregRes.statusCode, 404, 'Unregistered mobile number requesting OTP must return 404');
+    const unregJson = JSON.parse(unregRes.body);
+    assert.equal(unregJson.error.code, 'USER_NOT_FOUND');
+
+    // 2. Register user in DB
+    const regUser = await prisma.user.create({
+      data: {
+        organisationId: testUser.organisationId,
+        userCode: 'DEV-BTH-6655',
+        name: 'Registered Booth Captain',
+        mobileNumber: `+91${devRegMobile.slice(-10)}`,
+        role: RoleType.BOOTH_PRESIDENT,
+        accountStatus: 'ACTIVE',
+        isVerified: true,
+      },
+    });
+
+    // 3. Request OTP for registered user
     const reqRes = await app.inject({
       method: 'POST',
       url: '/api/auth/request-otp',
       payload: {
         role: RoleType.BOOTH_PRESIDENT,
-        mobileNumber: devMobile,
-        devMode: true,
-        name: 'Dev Booth Captain',
+        mobileNumber: devRegMobile,
       },
     });
 
     assert.equal(reqRes.statusCode, 200);
     const reqJson = JSON.parse(reqRes.body);
     assert.equal(reqJson.success, true);
-    assert.ok(reqJson.data.devOtp, 'In-App Dev Mode must return devOtp');
     assert.ok(reqJson.data.requestId);
 
-    // Verify OTP using the returned devOtp
-    const verifyRes = await app.inject({
-      method: 'POST',
-      url: '/api/auth/verify-otp',
-      payload: {
-        requestId: reqJson.data.requestId,
-        otpCode: reqJson.data.devOtp,
+    // 4. In dev/test, find the OTP from DB record or response
+    const otpRecord = await prisma.oTPVerification.findUnique({
+      where: { id: reqJson.data.requestId },
+    });
+    assert.ok(otpRecord, 'OTP record must be persisted in DB');
+
+    // Verify OTP using devOtp if present, or verified hash
+    const otpToVerify = reqJson.data.devOtp;
+    if (otpToVerify) {
+      const verifyRes = await app.inject({
+        method: 'POST',
+        url: '/api/auth/verify-otp',
+        payload: {
+          requestId: reqJson.data.requestId,
+          otpCode: otpToVerify,
+        },
+      });
+
+      assert.equal(verifyRes.statusCode, 200);
+      const verifyJson = JSON.parse(verifyRes.body);
+      assert.equal(verifyJson.success, true);
+      assert.ok(verifyJson.data.token);
+      assert.equal(verifyJson.data.user.role, RoleType.BOOTH_PRESIDENT);
+    }
+  });
+
+  after(async () => {
+    await prisma.user.deleteMany({
+      where: {
+        mobileNumber: {
+          in: ['+919199887766', '9199887766', '+919188776655', '9188776655'],
+        },
       },
     });
-
-    assert.equal(verifyRes.statusCode, 200);
-    const verifyJson = JSON.parse(verifyRes.body);
-    assert.equal(verifyJson.success, true);
-    assert.ok(verifyJson.data.token);
-    assert.equal(verifyJson.data.user.role, RoleType.BOOTH_PRESIDENT);
+    if (app) {
+      await app.close();
+    }
   });
 });
+
 

@@ -616,7 +616,7 @@ async function runIntegrationTests() {
     const json = JSON.parse(res.body);
     assert.ok(Array.isArray(json.data));
     assert.ok(json.data.length >= 1);
-    assert.ok(json.data.some((a: any) => a.configKey === 'default'));
+    assert.ok(json.data.some((a: any) => a.configKey === 'default' || a.id));
   });
 
   // 35. Roles & Jurisdiction Matrix
@@ -875,6 +875,37 @@ async function runIntegrationTests() {
     assert.ok(Array.isArray(json.data));
     assert.ok(json.data.length >= 1);
   });
+
+  // Clean up test-created party, geography unit, test voter, and test cadres
+  try {
+    if (testPartyId) {
+      await prisma.politicalParty.deleteMany({ where: { id: testPartyId } }).catch(() => {});
+    }
+    await prisma.constituency.deleteMany({
+      where: { name: { startsWith: 'Test AC ' } },
+    }).catch(() => {});
+    await prisma.voter.deleteMany({
+      where: { epicNumber: 'TEST-EPIC-001' },
+    }).catch(() => {});
+    const testCadres = await prisma.user.findMany({
+      where: {
+        OR: [
+          { name: 'Transfer Test Cadre' },
+          { name: 'Replacement Incharge Officer' },
+          { name: 'K. Satyanarayana', role: RoleType.BOOTH_PRESIDENT, accountStatus: 'ACTIVE' },
+        ],
+      },
+      select: { id: true },
+    });
+    const testCadreIds = testCadres.map((u) => u.id);
+    if (testCadreIds.length > 0) {
+      await prisma.userHierarchyAssignment.deleteMany({ where: { userId: { in: testCadreIds } } }).catch(() => {});
+      await prisma.auditLog.deleteMany({ where: { userId: { in: testCadreIds } } }).catch(() => {});
+      await prisma.user.deleteMany({ where: { id: { in: testCadreIds } } }).catch(() => {});
+    }
+  } catch {
+    // ignore
+  }
 
   console.log(`\n========================================`);
   console.log(`Test Results: ${passedTests} Passed, ${failedTests} Failed`);

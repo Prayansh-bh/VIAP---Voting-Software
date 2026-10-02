@@ -11,6 +11,7 @@ import { RequestOtpDto, RegisterOtpDto, VerifyRegisterOtpDto, VerifyOtpDto, Devi
 import { OtpService } from './services/otp.service.js';
 import { TokenService } from './services/token.service.js';
 import { HierarchyAssignmentService } from './services/hierarchy-assignment.service.js';
+import { PartyEligibilityService } from './services/party-eligibility.service.js';
 
 export class AuthService {
   /**
@@ -32,7 +33,7 @@ export class AuthService {
     const smsProvider = SmsProviderFactory.getProvider(channel);
     const cooldownSeconds = Math.ceil(env.OTP_RESEND_COOLDOWN_MS / 1000);
 
-    // 2. Authoritative database lookup of existing user
+    // 2. Authoritative database lookup of existing user with organisation and parties
     let user = await prisma.user.findFirst({
       where: {
         mobileNumber: {
@@ -40,51 +41,28 @@ export class AuthService {
         },
       },
       include: {
-        organisation: true,
+        organisation: {
+          include: {
+            parties: { where: { isActive: true } },
+            cmsConfigs: { select: { activePartyCode: true } },
+          },
+        },
         roleRef: true,
       },
     });
 
-    // In-App Dev Mode: Auto-provision new user or activate user when devMode is requested in non-production
-    if (dto.devMode && env.NODE_ENV !== 'production') {
-      if (!user) {
-        const org = await prisma.organisation.findFirst({ where: { isActive: true } });
-        const targetName = dto.name?.trim() || `Incharge (${cleanMobile.slice(-4)})`;
-        const devUserCode = `DEV-${dto.role.slice(0, 3)}-${cleanMobile.slice(-4)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
-        user = await prisma.user.create({
-          data: {
-            organisationId: org?.id,
-            userCode: devUserCode,
-            name: targetName,
-            mobileNumber: cleanMobile,
-            role: dto.role,
-            accountStatus: 'ACTIVE',
-            isVerified: true,
-          },
-          include: {
-            organisation: true,
-            roleRef: true,
-          },
-        });
-        await HierarchyAssignmentService.resolveUnitAndAssignment(user, user.role);
-      } else if (user.role !== dto.role || user.accountStatus !== 'ACTIVE') {
-        user = await prisma.user.update({
-          where: { id: user.id },
-          data: {
-            role: dto.role,
-            accountStatus: 'ACTIVE',
-          },
-          include: {
-            organisation: true,
-            roleRef: true,
-          },
-        });
-        await HierarchyAssignmentService.resolveUnitAndAssignment(user, user.role);
-      }
-    }
-
     // 3. Authoritative internal security checks
-    const isEligible = Boolean(user && user.accountStatus === 'ACTIVE' && (!dto.role || user.role === dto.role));
+    // The user's role and tenant MUST come authoritatively from their database record.
+    // In devMode (interactive web portal login), any active registered user attached to an active political party is eligible.
+    const isSuperAdmin = user?.role === RoleType.SUPER_ADMIN;
+    const hasActiveParty = isSuperAdmin || (await PartyEligibilityService.hasActiveParty(user?.organisationId, user?.organisation));
+
+    const isEligible = Boolean(
+      user &&
+      user.accountStatus === 'ACTIVE' &&
+      (isSuperAdmin || hasActiveParty) &&
+      (!dto.role || user.role === dto.role || dto.devMode)
+    );
 
     if (!isEligible) {
       // Diagnostic logging (sanitized, internal only - no PII or secrets leaked)
@@ -92,6 +70,8 @@ export class AuthService {
         ? 'USER_NOT_FOUND'
         : user.accountStatus !== 'ACTIVE'
         ? 'ACCOUNT_INACTIVE'
+        : !hasActiveParty && !isSuperAdmin
+        ? 'NOT_REGISTERED_TO_PARTY'
         : 'ROLE_MISMATCH';
 
       await logAudit({
@@ -108,6 +88,21 @@ export class AuthService {
         userAgent: reqInfo?.userAgent,
       });
 
+      if (dto.devMode) {
+        const error: any = new Error(
+          !user
+            ? `Mobile number +91 ${cleanMobile} is not registered in the database. Please register your candidate or tenant in CMS Studio first.`
+            : user.accountStatus !== 'ACTIVE'
+            ? `Account for +91 ${cleanMobile} is not active (Status: ${user.accountStatus}).`
+            : !hasActiveParty && !isSuperAdmin
+            ? `Mobile number +91 ${cleanMobile} is not registered with any active political party. Please register your party or contact your administrator.`
+            : `Role mismatch: Account for +91 ${cleanMobile} is registered with role ${user.role}, but login was attempted as ${dto.role}.`
+        );
+        error.statusCode = !user ? 404 : 403;
+        error.code = reason;
+        throw error;
+      }
+
       // Uniform response: Opaque crypto random request ID, no OTP generated or sent
       return {
         requestId: crypto.randomUUID(),
@@ -120,19 +115,36 @@ export class AuthService {
     }
 
     // 4. Generate and Save OTP Record (Hashed in DB) for eligible user
-    const { record, rawOtp } = await OtpService.generateAndSaveOtp(cleanMobile, dto.role, user!.id);
+    const { record, rawOtp } = await OtpService.generateAndSaveOtp(cleanMobile, user!.role, user!.id);
 
-    // If devMode is explicitly enabled in non-production, return devOtp immediately
-    if (dto.devMode && env.NODE_ENV !== 'production') {
-      console.warn(`[In-App Dev Mode OTP] Generated for mobile +91${cleanMobile}. Code: ${rawOtp} (or 123456)`);
+    // Print real OTP to backend terminal console for local dev / testing verification
+    OtpService.printTerminalOtp({
+      mobileNumber: cleanMobile,
+      rawOtp,
+      userName: user?.name,
+      role: user!.role,
+      purpose: 'Real Account Login',
+      channel,
+    });
+
+    const demoNumbers = [
+      '9848012345', '9848088888', '9848088887', '9848099998', '9848099999',
+      '9848077777', '9848010001', '9848010002', '9848010003', '9848010004',
+      '9848010005', '9998887777', '9736654406'
+    ];
+    const isDemoNumber = demoNumbers.includes(cleanMobile);
+
+    // If devMode is explicitly enabled in non-production, return devOtp ONLY for demo showcase numbers
+    if (dto.devMode && isDemoNumber && env.NODE_ENV !== 'production') {
+      console.warn(`[Demo Showcase OTP] Available for mobile +91${cleanMobile}. Code: 123456`);
       return {
         requestId: record.id,
         expiresAt: record.expiresAt,
         cooldownSeconds: 5,
-        provider: `${smsProvider.name} (In-App Dev Mode)`,
+        provider: `${smsProvider.name} (Demo Mode)`,
         channel,
-        devOtp: rawOtp,
-        message: `In-App Dev Mode OTP active. Verification code is ${rawOtp} (or 123456).`,
+        devOtp: '123456',
+        message: 'Demo showcase OTP active. Verification code is 123456.',
       };
     }
 
@@ -147,28 +159,25 @@ export class AuthService {
       smsResult = { success: false, error: dispatchErr?.message || 'Dispatch failure' };
     }
 
-    const demoNumbers = [
-      '9848012345', '9848088888', '9848088887', '9848099998', '9848099999',
-      '9848077777', '9848010001', '9848010002', '9848010003', '9848010004',
-      '9848010005', '9998887777', '9736654406'
-    ];
-    const isDemoMobileNumber = demoNumbers.includes(cleanMobile) || user?.userCode?.startsWith('DEMO-');
+    const isDemoMobileNumber = isDemoNumber || user?.userCode?.startsWith('DEMO-');
 
     if (!smsResult.success) {
-      if (isDemoMobileNumber || env.NODE_ENV !== 'production') {
-        console.warn(`[Demo OTP] Gateway failure bypassed for demo mobile +91${cleanMobile}. Code: ${rawOtp} (or 123456)`);
+      if (env.NODE_ENV !== 'production' || isDemoMobileNumber || dto.devMode) {
+        console.warn(`[Terminal OTP Active] Gateway dispatch handled. Real OTP printed to terminal console for +91${cleanMobile}.`);
         return {
           requestId: record.id,
           expiresAt: record.expiresAt,
           cooldownSeconds: 5,
-          provider: `${smsProvider.name} (Demo Auto-Bypass)`,
+          provider: `${smsProvider.name} (Terminal Output)`,
           channel,
-          devOtp: rawOtp,
-          message: `Demo OTP generated. Verification code is ${rawOtp} (or 123456).`,
+          devOtp: isDemoMobileNumber ? '123456' : (dto.devMode ? rawOtp : undefined),
+          message: isDemoMobileNumber
+            ? 'Demo showcase OTP generated. Verification code is 123456.'
+            : 'OTP printed to terminal console. Enter the 6-digit code to verify.',
         };
       }
 
-      // Invalidate pending OTP and reset cooldown on definitive provider failure
+      // Invalidate pending OTP and reset cooldown on definitive provider failure in production
       try {
         await prisma.oTPVerification.delete({ where: { id: record.id } });
       } catch {}
@@ -219,14 +228,15 @@ export class AuthService {
       userAgent: reqInfo?.userAgent,
     });
 
-    // Strip devOtp / rawOtp completely from response
+    // Strip devOtp / rawOtp completely from response in production
     return {
       requestId: record.id,
       expiresAt: record.expiresAt,
       cooldownSeconds,
       provider: smsProvider.name,
       channel,
-      message: `If an eligible account exists, an OTP has been dispatched via ${channel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'}.`,
+      devOtp: (dto.devMode && env.NODE_ENV !== 'production') ? rawOtp : undefined,
+      message: 'If an eligible account exists, an OTP has been dispatched.',
     };
   }
 
@@ -257,6 +267,15 @@ export class AuthService {
       RoleType.CONSTITUENCY_INCHARGE,
       null
     );
+
+    // Print real OTP to backend terminal console for local dev / testing verification
+    OtpService.printTerminalOtp({
+      mobileNumber: cleanMobile,
+      rawOtp,
+      role: 'CANDIDATE_REGISTRATION',
+      purpose: 'New Candidate Mobile Verification',
+      channel,
+    });
 
     let dispatchResult;
     try {
@@ -383,11 +402,26 @@ export class AuthService {
 
     const user = record.user;
     if (!user) {
-      throw new Error('User account not found for this verification.');
+      const error: any = new Error('User account not found for this verification.');
+      error.statusCode = 404;
+      throw error;
     }
 
     if (user.accountStatus !== 'ACTIVE') {
-      throw new Error('User account is currently inactive.');
+      const error: any = new Error('User account is currently inactive.');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    // Strict active political party requirement (SUPER_ADMIN exempt)
+    const isSuperAdmin = user.role === RoleType.SUPER_ADMIN;
+    const hasActiveParty = isSuperAdmin || (await PartyEligibilityService.hasActiveParty(user.organisationId));
+
+    if (!isSuperAdmin && !hasActiveParty) {
+      const error: any = new Error('User account is not associated with an active political party.');
+      error.statusCode = 403;
+      error.code = 'NOT_REGISTERED_TO_PARTY';
+      throw error;
     }
 
     // Safe post-authentication hierarchy resolution using database-assigned role only
@@ -569,6 +603,16 @@ export class AuthService {
       const err: any = new Error('Account access has been restricted or disabled by Administrator.');
       err.statusCode = 403;
       err.code = 'ACCOUNT_RESTRICTED';
+      throw err;
+    }
+
+    const isSuperAdmin = user.role === RoleType.SUPER_ADMIN;
+    const hasActiveParty = isSuperAdmin || (await PartyEligibilityService.hasActiveParty(user.organisationId));
+
+    if (!isSuperAdmin && !hasActiveParty) {
+      const err: any = new Error('User account is not associated with an active political party.');
+      err.statusCode = 403;
+      err.code = 'NOT_REGISTERED_TO_PARTY';
       throw err;
     }
 
@@ -874,18 +918,25 @@ export class AuthService {
       ? `DEV-${dto.role.slice(0, 3)}-${targetMobile.slice(-4)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`
       : targetDemo.userCode;
 
-    // Find existing demo/dev user or create on-the-fly
+    // Find existing demo user (or registered user for custom mobile)
     let user = await prisma.user.findFirst({
       where: isCustomMobile
-        ? { mobileNumber: targetMobile }
-        : {
+        ? {
             OR: [
-              { role: dto.role, accountStatus: 'ACTIVE' },
-              { mobileNumber: targetDemo.mobile },
+              { mobileNumber: targetMobile },
+              { mobileNumber: { endsWith: targetMobile } },
             ],
+          }
+        : {
+            mobileNumber: targetDemo.mobile,
           },
       include: {
-        organisation: true,
+        organisation: {
+          include: {
+            parties: { where: { isActive: true } },
+            cmsConfigs: { select: { activePartyCode: true } },
+          },
+        },
         roleRef: true,
         cadreProfile: true,
         hierarchyAssignments: {
@@ -905,41 +956,36 @@ export class AuthService {
       },
     });
 
-    if (!user) {
-      const org = await prisma.organisation.findFirst({ where: { isActive: true } });
-      user = await prisma.user.create({
-        data: {
-          organisationId: org?.id,
-          userCode,
-          name: targetName,
-          mobileNumber: targetMobile,
-          role: dto.role,
-          accountStatus: 'ACTIVE',
-          isVerified: true,
-        },
-        include: {
-          organisation: true,
-          roleRef: true,
-          cadreProfile: true,
-          hierarchyAssignments: true,
-          unit: true,
-        },
-      }) as any;
-    } else if (isCustomMobile && (user.role !== dto.role || user.accountStatus !== 'ACTIVE')) {
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          role: dto.role,
-          accountStatus: 'ACTIVE',
-        },
-        include: {
-          organisation: true,
-          roleRef: true,
-          cadreProfile: true,
-          hierarchyAssignments: { where: { isActive: true } },
-          unit: true,
-        },
-      }) as any;
+    if (isCustomMobile) {
+      if (!user) {
+        const error: any = new Error(
+          `User with mobile +91 ${targetMobile} is not registered in the database. Please register your candidate or tenant in CMS Studio first.`
+        );
+        error.statusCode = 404;
+        error.code = 'USER_NOT_FOUND';
+        throw error;
+      }
+      if (user.accountStatus !== 'ACTIVE') {
+        const error: any = new Error(`Account for +91 ${targetMobile} is not active (Status: ${user.accountStatus}).`);
+        error.statusCode = 403;
+        error.code = 'ACCOUNT_INACTIVE';
+        throw error;
+      }
+      const isSuperAdmin = user.role === RoleType.SUPER_ADMIN;
+      const hasActiveParty = isSuperAdmin || (await PartyEligibilityService.hasActiveParty(user.organisationId, user.organisation));
+      if (!isSuperAdmin && !hasActiveParty) {
+        const error: any = new Error(
+          `User with mobile +91 ${targetMobile} is not registered with any active political party.`
+        );
+        error.statusCode = 403;
+        error.code = 'NOT_REGISTERED_TO_PARTY';
+        throw error;
+      }
+    } else if (!user) {
+      const error: any = new Error(`Demo account for ${dto.role} (+91 ${targetDemo.mobile}) is not found in database.`);
+      error.statusCode = 404;
+      error.code = 'DEMO_USER_NOT_FOUND';
+      throw error;
     }
 
     if (!user!.unitId || user!.hierarchyAssignments.length === 0) {
@@ -1152,16 +1198,20 @@ export class AuthService {
    * Logs out user and revokes active sessions.
    */
   static async logout(userId: string, tokenString?: string, reqInfo?: { ip?: string; userAgent?: string }) {
+    let sessionRevoked = false;
     if (tokenString) {
       try {
         const decoded = jwt.decode(tokenString) as any;
         if (decoded?.jti) {
           await TokenService.revokeSession(decoded.jti);
+          sessionRevoked = true;
         }
       } catch {}
     }
 
-    await TokenService.revokeSessions(userId);
+    if (!sessionRevoked) {
+      await TokenService.revokeSessions(userId);
+    }
 
     await logAudit({
       action: AuditAction.LOGOUT,

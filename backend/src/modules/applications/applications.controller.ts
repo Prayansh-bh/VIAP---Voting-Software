@@ -259,4 +259,18 @@ export class ApplicationsController {
     const data = await ApplicationsService.getSummary(applicationId, req.hierarchyScope);
     return reply.send(successResponse(data));
   }
+
+  static async deleteApplication(req: FastifyRequest, reply: FastifyReply) {
+    const { id } = req.params as { id: string };
+    try {
+      const data = await ApplicationsService.deleteApplication(id);
+      return reply.send(successResponse(data, 'Application and all associated tenant hierarchy and parties permanently deleted'));
+    } catch (err: any) {
+      if (err.message && err.message.includes('not found')) {
+        return reply.status(404).send(errorResponse('NOT_FOUND', err.message));
+      }
+      return reply.status(500).send(errorResponse('INTERNAL_ERROR', err.message || 'Failed to delete application'));
+    }
+  }
 }
+

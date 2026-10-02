@@ -1,5 +1,5 @@
 import { AppInstance, InchargeRecord, ApprovalRecord, AdminUser, ApplicationSummary } from '../types';
-import { getAdminToken, setAdminToken, setAdminSession } from './auth';
+import { getAdminToken, setAdminToken, clearAdminToken, setAdminSession } from './auth';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
@@ -30,6 +30,13 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   if (!res.ok) {
+    if (res.status === 401 && typeof window !== 'undefined') {
+      const code = data?.error?.code || data?.code;
+      if (code === 'SESSION_REVOKED' || code === 'UNAUTHORIZED' || code === 'INVALID_TOKEN' || code === 'SESSION_NOT_FOUND') {
+        clearAdminToken();
+        window.dispatchEvent(new CustomEvent('admin_session_expired', { detail: { code, message: data?.error?.message || 'Session expired' } }));
+      }
+    }
     const errorMsg = data?.error?.message || data?.error || data?.message || `Request failed with status ${res.status}`;
     throw new Error(errorMsg);
   }
@@ -134,7 +141,9 @@ export async function fetchApplications(): Promise<AppInstance[]> {
         party: c.parties?.[0]?.name || c.organisationName || c.appName || 'Party Alliance',
         partyCode: c.activePartyCode || c.parties?.[0]?.code || 'APP',
         leaderName: c.candidateName || 'Party Leadership',
-        jurisdiction: c.parliamentName ? `${c.parliamentName} (${c.constituenciesCount || 1} Constituencies)` : `${c.appName || 'Assembly'} (Segment)`,
+        jurisdiction: c.appScope === 'SINGLE_MLA'
+          ? (c.parliamentName ? `${c.parliamentName} (1 MLA Segment)` : `${c.appName || 'Assembly'} (Segment)`)
+          : (c.parliamentName ? `${c.parliamentName} (${c.constituenciesCount || 7} Constituencies)` : `${c.appName || 'Assembly'} (${c.constituenciesCount || 1} Constituencies)`),
         description: `Operational Tenant for ${c.appName || 'Party'}, ${c.stateName || 'Apex'}`,
         primaryColor: c.primaryColor || c.parties?.[0]?.primaryColor || '#F59E0B',
         secondaryColor: c.secondaryColor || '#DC2626',
@@ -231,6 +240,11 @@ export async function createApplication(formData: any): Promise<AppInstance> {
     createdAt: new Date().toLocaleDateString('en-IN'),
     activeHierarchyLevels: app.activeHierarchyLevels || levels,
   };
+}
+
+export async function deleteApplication(id: string): Promise<boolean> {
+  await request(`/applications/${id}`, { method: 'DELETE' });
+  return true;
 }
 
 // ── Incharge Lifecycle & Management ──

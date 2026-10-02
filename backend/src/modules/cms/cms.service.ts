@@ -236,26 +236,40 @@ export async function persistCmsConfig(input: CmsConfigInput) {
     include: { organisation: true },
   });
 
-  if (targetKey !== 'default') {
-    const hasDefault = await prisma.cMSConfiguration.findUnique({ where: { configKey: 'default' } });
-    if (!hasDefault) {
-      await prisma.cMSConfiguration.create({
-        data: {
-          ...data,
-          configKey: 'default',
-        },
-      });
-    }
-  }
-
   return saved;
 }
 
-export async function loadCmsBundle() {
-  let config = await prisma.cMSConfiguration.findUnique({
-    where: { configKey: 'default' },
-    include: { organisation: true },
-  });
+export async function loadCmsBundle(options?: { organisationId?: string; configKey?: string }) {
+  let config: any = null;
+
+  if (options?.organisationId) {
+    config = await prisma.cMSConfiguration.findFirst({
+      where: { organisationId: options.organisationId },
+      include: { organisation: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  if (!config && options?.configKey) {
+    config = await prisma.cMSConfiguration.findFirst({
+      where: { configKey: options.configKey.toLowerCase() },
+      include: { organisation: true },
+    });
+  }
+
+  if (!config) {
+    config = await prisma.cMSConfiguration.findUnique({
+      where: { configKey: 'default' },
+      include: { organisation: true },
+    });
+  }
+
+  if (!config) {
+    config = await prisma.cMSConfiguration.findFirst({
+      orderBy: { updatedAt: 'desc' },
+      include: { organisation: true },
+    });
+  }
 
   if (!config) {
     config = await persistCmsConfig({
@@ -263,6 +277,8 @@ export async function loadCmsBundle() {
       stateName: 'Andhra Pradesh',
     });
   }
+
+  const orgId = config.organisationId || options?.organisationId;
 
   const parties = await prisma.politicalParty.findMany({
     where: {
@@ -282,17 +298,43 @@ export async function loadCmsBundle() {
     take: 10,
   });
 
-  const constituencies = await prisma.constituency.findMany({
-    select: {
-      id: true,
-      name: true,
-      code: true,
-      totalVoters: true,
-      parliament: { select: { id: true, name: true, code: true } },
-      _count: { select: { mandals: true, voters: true } },
-    },
-    orderBy: { name: 'asc' },
-  });
+  let constituencies: any[] = [];
+  if (orgId) {
+    constituencies = await prisma.constituency.findMany({
+      where: {
+        parliament: {
+          zone: {
+            state: {
+              organisationId: orgId,
+            },
+          },
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        totalVoters: true,
+        parliament: { select: { id: true, name: true, code: true } },
+        _count: { select: { mandals: true, voters: true } },
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  if (constituencies.length === 0) {
+    constituencies = await prisma.constituency.findMany({
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        totalVoters: true,
+        parliament: { select: { id: true, name: true, code: true } },
+        _count: { select: { mandals: true, voters: true } },
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
 
   return {
     config: serializeCmsConfig(config, { constituencies, parties }),

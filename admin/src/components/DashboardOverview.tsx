@@ -20,6 +20,7 @@ interface DashboardOverviewProps {
   pendingApprovals: ApprovalRecord[];
   incharges?: InchargeRecord[];
   summary?: ApplicationSummary | null;
+  selectedApp?: AppInstance | null;
   onNavigateTab: (tab: string) => void;
   onSelectApp: (app: AppInstance) => void;
   onCreateNewApp?: () => void;
@@ -30,13 +31,19 @@ export default function DashboardOverview({
   pendingApprovals,
   incharges = [],
   summary,
+  selectedApp,
   onNavigateTab,
   onSelectApp,
   onCreateNewApp,
 }: DashboardOverviewProps) {
-  const totalVoters = summary ? summary.totalVoters : apps.reduce((acc, a) => acc + (a.totalVoters || 0), 0);
+  const isTenantScoped = Boolean(selectedApp && selectedApp.id);
+  const totalVoters = isTenantScoped && summary
+    ? summary.totalVoters
+    : apps.reduce((acc, a) => acc + (a.totalVoters || 0), 0);
   const activeTenants = apps.filter((a) => a.isActive).length;
-  const inchargesCount = summary?.totalIncharges ?? incharges.length;
+  const inchargesCount = isTenantScoped && summary
+    ? summary.totalIncharges
+    : (summary?.totalIncharges ?? incharges.length);
 
   return (
     <div className="space-y-6">

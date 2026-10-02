@@ -18,6 +18,7 @@ import {
 import {
   fetchApplications,
   createApplication,
+  deleteApplication,
   fetchApplicationSummary,
   fetchIncharges,
   transferIncharge,
@@ -50,20 +51,41 @@ export default function App() {
   const [summary, setSummary] = useState<ApplicationSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Load initial data from Postgres backend
+  // Listen for session expiry to reset auth state cleanly
+  useEffect(() => {
+    const handleExpired = () => {
+      setAdminUser(null);
+    };
+    window.addEventListener('admin_session_expired', handleExpired);
+    return () => window.removeEventListener('admin_session_expired', handleExpired);
+  }, []);
+
+  // Load initial data from Postgres backend with localStorage tenant memory
   useEffect(() => {
     async function loadData() {
       setLoading(true);
       try {
         const loadedApps = await fetchApplications();
         setApps(loadedApps);
-        const defaultApp = loadedApps.find((a) => a.isDefault) || loadedApps[0] || null;
-        setSelectedApp(defaultApp);
+
+        const savedTenantId = localStorage.getItem('pc_admin_active_tenant_id');
+        const savedDefaultId = localStorage.getItem('pc_admin_default_tenant_id');
+        const activeApp =
+          (savedTenantId && loadedApps.find((a) => a.id === savedTenantId)) ||
+          (savedDefaultId && loadedApps.find((a) => a.id === savedDefaultId)) ||
+          loadedApps.find((a) => a.isDefault) ||
+          loadedApps[0] ||
+          null;
+
+        setSelectedApp(activeApp);
+        if (activeApp?.id) {
+          localStorage.setItem('pc_admin_active_tenant_id', activeApp.id);
+        }
 
         const [loadedIncharges, loadedApprovals, loadedSummary] = await Promise.all([
-          fetchIncharges(defaultApp?.id),
+          fetchIncharges(activeApp?.id),
           fetchApprovals(),
-          fetchApplicationSummary(defaultApp?.id || 'default'),
+          fetchApplicationSummary(activeApp?.id || 'default'),
         ]);
         setIncharges(loadedIncharges);
         setApprovals(loadedApprovals);
@@ -80,9 +102,19 @@ export default function App() {
     }
   }, [adminUser]);
 
+  // Dynamically refresh applications list whenever admin switches to applications or dashboard tab
+  useEffect(() => {
+    if (adminUser && (activeTab === 'applications' || activeTab === 'dashboard')) {
+      fetchApplications().then((loaded) => {
+        setApps(loaded);
+      }).catch((err) => console.error('Failed to sync applications list:', err));
+    }
+  }, [activeTab, adminUser]);
+
   // Dynamically refresh incharges and summary when active application changes
   useEffect(() => {
     if (!selectedApp?.id) return;
+    localStorage.setItem('pc_admin_active_tenant_id', selectedApp.id);
     async function refreshActiveAppData() {
       try {
         const [loadedIncharges, loadedSummary] = await Promise.all([
@@ -108,22 +140,43 @@ export default function App() {
     setAdminUser(null);
   };
 
+  const handleSelectApp = (app: AppInstance | null) => {
+    setSelectedApp(app);
+    if (app?.id) {
+      localStorage.setItem('pc_admin_active_tenant_id', app.id);
+    }
+  };
+
   const handleCreateApp = async (formData: Partial<AppInstance>) => {
     const created = await createApplication(formData);
     const refreshed = await fetchApplications();
     setApps(refreshed);
-    setSelectedApp(created);
+    handleSelectApp(created);
   };
 
-  const handleDeleteApp = (id: string) => {
-    const updated = apps.filter((a) => a.id !== id);
-    setApps(updated);
-    if (selectedApp?.id === id) {
-      setSelectedApp(updated[0] || null);
+  const handleDeleteApp = async (id: string) => {
+    try {
+      await deleteApplication(id);
+      const refreshed = await fetchApplications();
+      setApps(refreshed);
+      if (selectedApp?.id === id) {
+        const nextApp = refreshed[0] || null;
+        handleSelectApp(nextApp);
+      }
+    } catch (err) {
+      console.error('Failed to delete application from DB:', err);
+      const refreshed = await fetchApplications();
+      setApps(refreshed);
+      if (selectedApp?.id === id) {
+        const nextApp = refreshed[0] || null;
+        handleSelectApp(nextApp);
+      }
     }
   };
 
   const handleSetDefault = (id: string) => {
+    localStorage.setItem('pc_admin_default_tenant_id', id);
+    localStorage.setItem('pc_admin_active_tenant_id', id);
     const updated = apps.map((a) => ({ ...a, isDefault: a.id === id }));
     setApps(updated);
     const target = updated.find((a) => a.id === id) || null;
@@ -228,6 +281,7 @@ export default function App() {
               apps={apps}
               incharges={incharges}
               summary={summary}
+              selectedApp={selectedApp}
               pendingApprovals={approvals}
               onNavigateTab={setActiveTab}
               onCreateNewApp={() => {
@@ -235,7 +289,7 @@ export default function App() {
                 setIsCreateAppModalOpen(true);
               }}
               onSelectApp={(app) => {
-                setSelectedApp(app);
+                handleSelectApp(app);
                 setActiveTab('applications');
               }}
             />
@@ -245,7 +299,7 @@ export default function App() {
             <ApplicationManagement
               apps={apps}
               selectedApp={selectedApp}
-              onSelectApp={setSelectedApp}
+              onSelectApp={handleSelectApp}
               onCreateApp={handleCreateApp}
               onDeleteApp={handleDeleteApp}
               onSetDefault={handleSetDefault}
@@ -261,6 +315,14 @@ export default function App() {
                 isOpen={true}
                 mode="editor"
                 onClose={() => setActiveTab('dashboard')}
+                onAppBuilt={async (newAppData) => {
+                  const loaded = await fetchApplications();
+                  setApps(loaded);
+                  if (newAppData?.id) {
+                    const found = loaded.find((a) => a.id === newAppData.id || a.name === newAppData.appName);
+                    if (found) handleSelectApp(found);
+                  }
+                }}
                 onOpenRoleModules={async () => {
                   const loaded = await fetchApplications();
                   setApps(loaded);

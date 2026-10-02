@@ -6,6 +6,7 @@ import { AuthenticatedUserPayload } from '../common/types.js';
 import { errorResponse } from '../common/response.js';
 import { prisma } from '../lib/prisma.js';
 import { TokenService } from '../modules/auth/services/token.service.js';
+import { PartyEligibilityService } from '../modules/auth/services/party-eligibility.service.js';
 import { hashOtp } from '../lib/crypto.js';
 
 import { isOriginAllowed } from '../common/origin.js';
@@ -42,7 +43,7 @@ export async function verifyTokenAndSession(token: string): Promise<TokenVerific
       return { valid: false, code: sessionCheck.code || 'UNAUTHORIZED', error: sessionCheck.message || 'Session invalid.' };
     }
 
-    // Ensure user is still active in database
+    // Ensure user is still active in database and attached to active political party
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
       select: {
@@ -53,11 +54,31 @@ export async function verifyTokenAndSession(token: string): Promise<TokenVerific
         accountStatus: true,
         organisationId: true,
         unitId: true,
+        organisation: {
+          select: {
+            id: true,
+            isActive: true,
+            parties: {
+              where: { isActive: true },
+              select: { id: true, isActive: true },
+            },
+            cmsConfigs: {
+              select: { activePartyCode: true },
+            },
+          },
+        },
       },
     });
 
     if (!user || user.accountStatus !== 'ACTIVE') {
       return { valid: false, code: 'ACCOUNT_INACTIVE', error: 'Account is inactive or suspended.' };
+    }
+
+    const isSuperAdmin = user.role === 'SUPER_ADMIN';
+    const hasActiveParty = isSuperAdmin || (await PartyEligibilityService.hasActiveParty(user.organisationId, user.organisation));
+
+    if (!isSuperAdmin && !hasActiveParty) {
+      return { valid: false, code: 'NOT_REGISTERED_TO_PARTY', error: 'User is not associated with an active political party.' };
     }
 
     return {

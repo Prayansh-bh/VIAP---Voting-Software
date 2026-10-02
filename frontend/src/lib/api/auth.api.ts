@@ -231,3 +231,24 @@ export async function revokeDeviceApi(deviceId: string, reason?: string): Promis
     body: JSON.stringify({ reason }),
   });
 }
+
+export async function requestRegistrationOtp(
+  mobileNumber: string,
+  channel: 'SMS' | 'WHATSAPP' = 'WHATSAPP'
+): Promise<{ requestId: string; expiresAt?: string; message?: string; devOtp?: string }> {
+  return apiFetch('/api/auth/register-otp', {
+    method: 'POST',
+    body: JSON.stringify({ mobileNumber, channel }),
+  });
+}
+
+export async function verifyRegistrationOtp(
+  requestId: string,
+  otpCode: string
+): Promise<{ verified: boolean; mobileNumber?: string; message?: string }> {
+  return apiFetch('/api/auth/verify-register-otp', {
+    method: 'POST',
+    body: JSON.stringify({ requestId, otpCode }),
+  });
+}
+

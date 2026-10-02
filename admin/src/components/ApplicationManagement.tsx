@@ -272,28 +272,26 @@ export default function ApplicationManagement({
                   >
                     <ExternalLink className="w-4 h-4" />
                   </a>
-                  {apps.length > 1 && (
-                    <button
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        const confirmed = await confirmDialog({
-                          title: 'Delete Party Application',
-                          message: `Are you sure you want to permanently delete "${app.name}" (${app.party})? All associated tenant hierarchy configuration will be purged.`,
-                          confirmText: 'Delete Application',
-                          danger: true,
-                          icon: 'trash',
-                        });
-                        if (confirmed) {
-                          onDeleteApp(app.id);
-                          notify.success(`Application "${app.name}" has been deleted.`);
-                        }
-                      }}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
-                      title="Delete application"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const confirmed = await confirmDialog({
+                        title: 'Delete Party Application',
+                        message: `Are you sure you want to permanently delete "${app.name}" (${app.party})? All associated tenant hierarchy configuration will be purged.`,
+                        confirmText: 'Delete Application',
+                        danger: true,
+                        icon: 'trash',
+                      });
+                      if (confirmed) {
+                        onDeleteApp(app.id);
+                        notify.success(`Application "${app.name}" has been deleted.`);
+                      }
+                    }}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+                    title="Delete application"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             </div>

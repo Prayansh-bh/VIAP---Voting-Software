@@ -253,6 +253,31 @@ export class ApplicationsService {
     }
 
     if (!config) {
+      config = await prisma.cMSConfiguration.findFirst({
+        orderBy: { updatedAt: 'desc' },
+        include: {
+          organisation: {
+            include: {
+              states: {
+                include: {
+                  zones: {
+                    include: {
+                      parliaments: {
+                        include: {
+                          constituencies: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+    }
+
+    if (!config) {
       throw new Error(`Application with identifier '${appIdOrKey}' not found.`);
     }
 
@@ -273,68 +298,348 @@ export class ApplicationsService {
       orderBy: { sortOrder: 'asc' },
     });
 
-    const constituenciesCount = await prisma.constituency.count();
-    const votersCount = await prisma.voter.count();
+    const appsList: any[] = await Promise.all(
+      configs.map(async (c) => {
+        const activeParty = activeParties.find((p) => p.code === c.activePartyCode);
+        const prioritizedParties = activeParty
+          ? [
+              { name: activeParty.name, code: activeParty.code, primaryColor: activeParty.primaryColor },
+              ...activeParties
+                .filter((p) => p.code !== activeParty.code)
+                .map((p) => ({ name: p.name, code: p.code, primaryColor: p.primaryColor })),
+            ]
+          : activeParties.map((p) => ({ name: p.name, code: p.code, primaryColor: p.primaryColor }));
 
-    const appsList: any[] = configs.map((c) => ({
-      id: c.id,
-      configKey: c.configKey,
-      appName: c.organisationName,
-      stateName: c.stateName,
-      appScope: c.appScope || 'SINGLE_MLA',
-      parliamentName: c.parliamentName,
-      defaultLanguage: c.defaultLanguage,
-      hierarchyLabels: c.hierarchyLabels,
-      featureToggles: c.featureToggles,
-      aiEnabled: c.aiEnabled,
-      isDefault: c.configKey === 'default',
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-      constituenciesCount,
-      votersCount,
-      partiesCount: activeParties.length,
-      parties: activeParties.map((p) => ({
-        name: p.name,
-        code: p.code,
-        primaryColor: p.primaryColor,
-      })),
-    }));
+        const effectiveScope = c.appScope || 'SINGLE_MLA';
+        const constituenciesCount = effectiveScope === 'SINGLE_MLA'
+          ? 1
+          : effectiveScope === 'PARLIAMENT_MP'
+            ? 7
+            : effectiveScope === 'ZONE'
+              ? 21
+              : 10;
 
-    // Include other distinct political parties registered in DB as applications
-    for (const p of activeParties) {
-      const alreadyIncluded = appsList.some(
-        (a) => a.parties?.[0]?.code === p.code || a.appName === p.name || a.id === p.id
-      );
-      if (!alreadyIncluded) {
-        appsList.push({
-          id: p.id,
-          configKey: p.code.toLowerCase(),
-          appName: p.name,
-          stateName: configs[0]?.stateName || 'Andhra Pradesh',
-          appScope: configs[0]?.appScope || 'SINGLE_MLA',
-          parliamentName: '',
-          defaultLanguage: 'en',
-          hierarchyLabels: configs[0]?.hierarchyLabels || {},
-          featureToggles: configs[0]?.featureToggles || {},
-          aiEnabled: true,
-          isDefault: false,
-          createdAt: p.createdAt,
-          updatedAt: p.updatedAt,
-          constituenciesCount: 1,
-          votersCount: p.code === (configs[0]?.activePartyCode || 'TPF') ? votersCount : 0,
-          partiesCount: 1,
-          parties: [
-            {
-              name: p.name,
-              code: p.code,
-              primaryColor: p.primaryColor,
-            },
-          ],
-        });
-      }
-    }
+        const votersCount = c.organisationId
+          ? await prisma.voter.count({
+              where: {
+                OR: [
+                  { state: { organisationId: c.organisationId } },
+                  { constituency: { parliament: { zone: { state: { organisationId: c.organisationId } } } } },
+                  { booth: { village: { mandal: { constituency: { parliament: { zone: { state: { organisationId: c.organisationId } } } } } } } },
+                ],
+              },
+            })
+          : 0;
+
+        return {
+          id: c.id,
+          configKey: c.configKey,
+          appName: c.organisationName,
+          activePartyCode: c.activePartyCode || activeParty?.code || 'APP',
+          candidateName: c.candidateName,
+          primaryColor: c.primaryColor || activeParty?.primaryColor,
+          secondaryColor: c.secondaryColor || activeParty?.secondaryColor,
+          accentColor: c.accentColor || activeParty?.accentColor,
+          activeHierarchyLevels: c.activeHierarchyLevels,
+          stateName: c.stateName,
+          appScope: effectiveScope,
+          parliamentName: c.parliamentName,
+          defaultLanguage: c.defaultLanguage,
+          hierarchyLabels: c.hierarchyLabels,
+          featureToggles: c.featureToggles,
+          aiEnabled: c.aiEnabled,
+          isDefault: c.configKey === 'default',
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+          constituenciesCount,
+          votersCount,
+          partiesCount: activeParties.length,
+          parties: prioritizedParties,
+        };
+      })
+    );
 
     return appsList;
+  }
+
+  /**
+   * Permanently delete an application, cascading to its political parties,
+   * tenant organisation, and all associated hierarchy nodes and data.
+   */
+  static async deleteApplication(idOrKey: string) {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrKey);
+    const config = await prisma.cMSConfiguration.findFirst({
+      where: {
+        OR: [
+          ...(isUuid ? [{ id: idOrKey }, { organisationId: idOrKey }] : []),
+          { configKey: idOrKey },
+          { organisationName: { equals: idOrKey, mode: 'insensitive' } },
+        ],
+      },
+    });
+
+    if (!config) {
+      throw new Error(`Application '${idOrKey}' not found`);
+    }
+
+    const orgId = config.organisationId;
+    const activePartyCode = config.activePartyCode;
+
+    await prisma.$transaction(async (tx) => {
+      // 1. Permanently delete all associated PoliticalParty records
+      const partiesToDelete = await tx.politicalParty.findMany({
+        where: {
+          OR: [
+            ...(activePartyCode ? [{ code: activePartyCode }] : []),
+            ...(orgId ? [{ organisationId: orgId }] : []),
+          ],
+        },
+        select: { id: true, code: true },
+      });
+
+      const partyIds = partiesToDelete.map((p) => p.id);
+
+      if (partyIds.length > 0) {
+        await tx.voter.updateMany({
+          where: { politicalPartyId: { in: partyIds } },
+          data: { politicalPartyId: null },
+        });
+
+        await tx.partyBranding.deleteMany({
+          where: { partyId: { in: partyIds } },
+        });
+
+        await tx.partyPerformance.deleteMany({
+          where: { partyId: { in: partyIds } },
+        });
+
+        await tx.politicalParty.deleteMany({
+          where: { id: { in: partyIds } },
+        });
+      }
+
+      // 2. Cascade purge tenant hierarchy and all attached entities
+      if (orgId) {
+        const states = await tx.state.findMany({ where: { organisationId: orgId }, select: { id: true } });
+        const stateIds = states.map((s) => s.id);
+
+        const zones = await tx.zone.findMany({ where: { stateId: { in: stateIds } }, select: { id: true } });
+        const zoneIds = zones.map((z) => z.id);
+
+        const parliaments = await tx.parliament.findMany({ where: { zoneId: { in: zoneIds } }, select: { id: true, code: true } });
+        const parliamentIds = parliaments.map((p) => p.id);
+        const parliamentCodes = parliaments.map((p) => p.code).filter(Boolean);
+
+        const constituencies = await tx.constituency.findMany({ where: { parliamentId: { in: parliamentIds } }, select: { id: true, code: true } });
+        const constituencyIds = constituencies.map((c) => c.id);
+        const constituencyCodes = constituencies.map((c) => c.code).filter(Boolean);
+
+        const mandals = await tx.mandal.findMany({ where: { constituencyId: { in: constituencyIds } }, select: { id: true, code: true } });
+        const mandalIds = mandals.map((m) => m.id);
+        const mandalCodes = mandals.map((m) => m.code).filter(Boolean);
+
+        const villages = await tx.village.findMany({ where: { mandalId: { in: mandalIds } }, select: { id: true, code: true } });
+        const villageIds = villages.map((v) => v.id);
+        const villageCodes = villages.map((v) => v.code).filter(Boolean);
+
+        const booths = await tx.booth.findMany({ where: { villageId: { in: villageIds } }, select: { id: true, code: true } });
+        const boothIds = booths.map((b) => b.id);
+        const boothCodes = booths.map((b) => b.code).filter(Boolean);
+
+        const voterGroups = await tx.voterGroup.findMany({ where: { boothId: { in: boothIds } }, select: { id: true, code: true } });
+        const voterGroupIds = voterGroups.map((vg) => vg.id);
+        const voterGroupCodes = voterGroups.map((vg) => vg.code).filter(Boolean);
+
+        const allUnitCodes = [
+          ...parliamentCodes,
+          ...constituencyCodes,
+          ...mandalCodes,
+          ...villageCodes,
+          ...boothCodes,
+          ...voterGroupCodes,
+        ];
+
+        const orgUnits = await tx.organizationUnit.findMany({
+          where: { code: { in: allUnitCodes } },
+          select: { id: true },
+        });
+        const orgUnitIds = orgUnits.map((u) => u.id);
+
+        await tx.userHierarchyAssignment.deleteMany({
+          where: {
+            OR: [
+              ...(stateIds.length > 0 ? [{ stateId: { in: stateIds } }] : []),
+              ...(zoneIds.length > 0 ? [{ zoneId: { in: zoneIds } }] : []),
+              ...(parliamentIds.length > 0 ? [{ parliamentId: { in: parliamentIds } }] : []),
+              ...(constituencyIds.length > 0 ? [{ constituencyId: { in: constituencyIds } }] : []),
+              ...(mandalIds.length > 0 ? [{ mandalId: { in: mandalIds } }] : []),
+              ...(villageIds.length > 0 ? [{ villageId: { in: villageIds } }] : []),
+              ...(boothIds.length > 0 ? [{ boothId: { in: boothIds } }] : []),
+              ...(voterGroupIds.length > 0 ? [{ voterGroupId: { in: voterGroupIds } }] : []),
+            ],
+          },
+        });
+
+        if (boothIds.length > 0 || orgUnitIds.length > 0) {
+          await tx.cadreAssignment.deleteMany({
+            where: {
+              OR: [
+                ...(boothIds.length > 0 ? [{ boothId: { in: boothIds } }] : []),
+                ...(orgUnitIds.length > 0 ? [{ unitId: { in: orgUnitIds } }] : []),
+              ],
+            },
+          });
+        }
+
+        if (constituencyIds.length > 0 || boothIds.length > 0 || orgUnitIds.length > 0) {
+          await tx.task.deleteMany({
+            where: {
+              OR: [
+                ...(constituencyIds.length > 0 ? [{ constituencyId: { in: constituencyIds } }] : []),
+                ...(mandalIds.length > 0 ? [{ mandalId: { in: mandalIds } }] : []),
+                ...(villageIds.length > 0 ? [{ villageId: { in: villageIds } }] : []),
+                ...(boothIds.length > 0 ? [{ boothId: { in: boothIds } }] : []),
+                ...(orgUnitIds.length > 0 ? [{ unitId: { in: orgUnitIds } }] : []),
+              ],
+            },
+          });
+
+          await tx.groundReport.deleteMany({
+            where: {
+              OR: [
+                ...(constituencyIds.length > 0 ? [{ constituencyId: { in: constituencyIds } }] : []),
+                ...(mandalIds.length > 0 ? [{ mandalId: { in: mandalIds } }] : []),
+                ...(villageIds.length > 0 ? [{ villageId: { in: villageIds } }] : []),
+                ...(boothIds.length > 0 ? [{ boothId: { in: boothIds } }] : []),
+                ...(orgUnitIds.length > 0 ? [{ unitId: { in: orgUnitIds } }] : []),
+              ],
+            },
+          });
+
+          await tx.pollingReport.deleteMany({
+            where: {
+              OR: [
+                ...(boothIds.length > 0 ? [{ boothId: { in: boothIds } }] : []),
+                ...(orgUnitIds.length > 0 ? [{ unitId: { in: orgUnitIds } }] : []),
+              ],
+            },
+          });
+
+          await tx.liveVoteEvent.deleteMany({
+            where: {
+              OR: [
+                ...(orgUnitIds.length > 0 ? [{ unitId: { in: orgUnitIds } }] : []),
+              ],
+            },
+          });
+
+          await tx.electionProjection.deleteMany({
+            where: {
+              OR: [
+                ...(constituencyIds.length > 0 ? [{ constituencyId: { in: constituencyIds } }] : []),
+              ],
+            },
+          });
+
+          await tx.aIInsight.deleteMany({
+            where: {
+              OR: [
+                ...(constituencyIds.length > 0 ? [{ constituencyId: { in: constituencyIds } }] : []),
+              ],
+            },
+          });
+
+          await tx.newsArticle.deleteMany({
+            where: {
+              OR: [
+                ...(constituencyIds.length > 0 ? [{ constituencyId: { in: constituencyIds } }] : []),
+              ],
+            },
+          });
+
+          await tx.socialTrend.deleteMany({
+            where: {
+              OR: [
+                ...(constituencyIds.length > 0 ? [{ constituencyId: { in: constituencyIds } }] : []),
+              ],
+            },
+          });
+
+          await tx.dataImport.deleteMany({
+            where: {
+              OR: [
+                ...(constituencyIds.length > 0 ? [{ targetConstituencyId: { in: constituencyIds } }] : []),
+              ],
+            },
+          });
+        }
+
+        if (stateIds.length > 0 || constituencyIds.length > 0 || boothIds.length > 0) {
+          await tx.voter.deleteMany({
+            where: {
+              OR: [
+                ...(stateIds.length > 0 ? [{ stateId: { in: stateIds } }] : []),
+                ...(zoneIds.length > 0 ? [{ zoneId: { in: zoneIds } }] : []),
+                ...(parliamentIds.length > 0 ? [{ parliamentId: { in: parliamentIds } }] : []),
+                ...(constituencyIds.length > 0 ? [{ constituencyId: { in: constituencyIds } }] : []),
+                ...(mandalIds.length > 0 ? [{ mandalId: { in: mandalIds } }] : []),
+                ...(villageIds.length > 0 ? [{ villageId: { in: villageIds } }] : []),
+                ...(boothIds.length > 0 ? [{ boothId: { in: boothIds } }] : []),
+                ...(voterGroupIds.length > 0 ? [{ voterGroupId: { in: voterGroupIds } }] : []),
+                ...(orgUnitIds.length > 0 ? [{ unitId: { in: orgUnitIds } }] : []),
+              ],
+            },
+          });
+        }
+
+        if (voterGroupIds.length > 0) await tx.voterGroup.deleteMany({ where: { id: { in: voterGroupIds } } });
+        if (boothIds.length > 0) await tx.booth.deleteMany({ where: { id: { in: boothIds } } });
+        if (villageIds.length > 0) await tx.village.deleteMany({ where: { id: { in: villageIds } } });
+        if (mandalIds.length > 0) await tx.mandal.deleteMany({ where: { id: { in: mandalIds } } });
+        if (constituencyIds.length > 0) await tx.constituency.deleteMany({ where: { id: { in: constituencyIds } } });
+        if (parliamentIds.length > 0) await tx.parliament.deleteMany({ where: { id: { in: parliamentIds } } });
+        if (zoneIds.length > 0) await tx.zone.deleteMany({ where: { id: { in: zoneIds } } });
+        if (stateIds.length > 0) await tx.state.deleteMany({ where: { id: { in: stateIds } } });
+        if (orgUnitIds.length > 0) {
+          await tx.organizationUnit.updateMany({ where: { id: { in: orgUnitIds } }, data: { parentId: null } });
+          await tx.organizationUnit.deleteMany({ where: { id: { in: orgUnitIds } } });
+        }
+      }
+
+      // 3. Delete CMSConfiguration
+      await tx.cMSConfiguration.delete({
+        where: { id: config.id },
+      });
+
+      // 4. Clean up Organisation if not shared
+      if (orgId) {
+        const remainingConfigs = await tx.cMSConfiguration.count({
+          where: { organisationId: orgId },
+        });
+
+        if (remainingConfigs === 0) {
+          // Delete tenant users (cadres, incharges, candidates belonging to this tenant)
+          await tx.user.deleteMany({
+            where: {
+              organisationId: orgId,
+              NOT: { role: RoleType.SUPER_ADMIN },
+            },
+          });
+
+          // Detach any super administrator
+          await tx.user.updateMany({
+            where: { organisationId: orgId },
+            data: { organisationId: null },
+          });
+
+          await tx.organisation.delete({
+            where: { id: orgId },
+          });
+        }
+      }
+    });
+
+    return { id: config.id, deleted: true };
   }
 
   /**
@@ -2087,6 +2392,11 @@ export class ApplicationsService {
 
     const where: any = {
       isActive: true,
+      ...(config?.organisationId
+        ? {
+            user: { organisationId: config.organisationId },
+          }
+        : {}),
       ...(upperLevel
         ? {
             roleType: {
@@ -2715,16 +3025,71 @@ export class ApplicationsService {
       if (userScope.voterGroupId) scopeWhere.voterGroupId = userScope.voterGroupId;
     }
 
+    // Resolve tenant-scoped constituencies:
+    let tenantConstituencyIds: string[] = [];
+    if (config.organisationId) {
+      const orgConstituencies = await prisma.constituency.findMany({
+        where: {
+          parliament: {
+            zone: {
+              state: {
+                organisationId: config.organisationId,
+              },
+            },
+          },
+        },
+        select: { id: true },
+      });
+      tenantConstituencyIds = orgConstituencies.map((c) => c.id);
+    }
+
+    const effectiveScope = config.appScope || 'SINGLE_MLA';
+
+    let constituencyFilter: any = undefined;
+    let mandalFilter: any = undefined;
+    let boothFilter: any = undefined;
+    let voterGroupFilter: any = undefined;
+    let userFilter: any = { isActive: true };
+    let taskFilter: any = undefined;
+
+    if (tenantConstituencyIds.length > 0) {
+      constituencyFilter = { id: { in: tenantConstituencyIds } };
+      mandalFilter = { constituencyId: { in: tenantConstituencyIds } };
+      boothFilter = { village: { mandal: { constituencyId: { in: tenantConstituencyIds } } } };
+      voterGroupFilter = { booth: { village: { mandal: { constituencyId: { in: tenantConstituencyIds } } } } };
+      userFilter = { isActive: true, constituencyId: { in: tenantConstituencyIds } };
+      taskFilter = { constituencyId: { in: tenantConstituencyIds } };
+
+      if (!scopeWhere.constituencyId) {
+        scopeWhere.constituencyId = { in: tenantConstituencyIds };
+      }
+    } else if (effectiveScope === 'SINGLE_MLA') {
+      if (scopeWhere.constituencyId) {
+        constituencyFilter = { id: scopeWhere.constituencyId };
+        mandalFilter = { constituencyId: scopeWhere.constituencyId };
+        boothFilter = { village: { mandal: { constituencyId: scopeWhere.constituencyId } } };
+        voterGroupFilter = { booth: { village: { mandal: { constituencyId: scopeWhere.constituencyId } } } };
+        userFilter = { isActive: true, constituencyId: scopeWhere.constituencyId };
+        taskFilter = { constituencyId: scopeWhere.constituencyId };
+      }
+    }
+
     const [totalVoters, verifiedVoters, totalBooths, totalGroups, totalIncharges, totalTasks, totalMandals, totalConstituencies] =
       await Promise.all([
         prisma.voter.count({ where: scopeWhere }),
         prisma.voter.count({ where: { ...scopeWhere, surveyStatus: 'VERIFIED' } }),
-        prisma.booth.count(),
-        prisma.voterGroup.count(),
-        prisma.userHierarchyAssignment.count({ where: { isActive: true } }),
-        prisma.task.count(),
-        prisma.mandal.count(),
-        prisma.constituency.count(),
+        prisma.booth.count({ where: boothFilter }),
+        prisma.voterGroup.count({ where: voterGroupFilter }),
+        prisma.userHierarchyAssignment.count({ where: userFilter }),
+        prisma.task.count({ where: taskFilter }),
+        prisma.mandal.count({ where: mandalFilter }),
+        tenantConstituencyIds.length > 0
+          ? tenantConstituencyIds.length
+          : effectiveScope === 'SINGLE_MLA'
+            ? 1
+            : effectiveScope === 'PARLIAMENT_MP'
+              ? 7
+              : prisma.constituency.count({ where: constituencyFilter }),
       ]);
 
     return {

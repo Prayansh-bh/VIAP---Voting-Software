@@ -200,12 +200,7 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
   };
 
   const buildApplication = async (payload: any) => {
-    let res: any = {};
-    try {
-      res = await buildApplicationApi(payload);
-    } catch (err) {
-      console.warn('Backend buildApplicationApi warning:', err);
-    }
+    const res: any = await buildApplicationApi(payload);
 
     const app = res?.application || payload;
     const activeHierarchyLevels = payload.activeHierarchyLevels && payload.activeHierarchyLevels.length > 0

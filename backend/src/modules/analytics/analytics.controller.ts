@@ -7,7 +7,18 @@ import { AnalyticsService } from './analytics.service.js';
 
 export class AnalyticsController {
   static async getStateAnalytics(req: FastifyRequest, reply: FastifyReply) {
-    const stateUnit = await prisma.organizationUnit.findFirst({ where: { level: OrgHierarchyLevel.STATE } });
+    let stateUnit: any = null;
+    if (req.user?.organisationId) {
+      const state = await prisma.state.findFirst({ where: { organisationId: req.user.organisationId } });
+      if (state) {
+        stateUnit = await prisma.organizationUnit.findFirst({
+          where: { code: state.code, level: OrgHierarchyLevel.STATE },
+        });
+      }
+    }
+    if (!stateUnit) {
+      stateUnit = await prisma.organizationUnit.findFirst({ where: { level: OrgHierarchyLevel.STATE } });
+    }
     if (!stateUnit) {
       return reply.status(404).send({ success: false, error: { message: 'State unit not found' } });
     }

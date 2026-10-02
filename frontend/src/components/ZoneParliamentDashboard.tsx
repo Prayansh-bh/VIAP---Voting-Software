@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   LayoutDashboard,
   Building2,
@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { UserSession } from '../types';
 import { useCms } from '../context/CmsContext';
+import { fetchHierarchySummaryByUser, fetchStateAnalytics } from '../lib/api';
 import AIStrategicIntelligenceCenter from './AIStrategicIntelligenceCenter';
 
 interface ZoneParliamentDashboardProps {
@@ -133,20 +134,99 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
   const [searchFilter, setSearchFilter] = useState('');
   const [viewingMandalsModal, setViewingMandalsModal] = useState<string | null>(null);
 
+  const [totalVotersCount, setTotalVotersCount] = useState<number>(0);
+  const [fakeVotersCount, setFakeVotersCount] = useState<number>(0);
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadMetrics() {
+      try {
+        const summary = await fetchHierarchySummaryByUser(session.userId);
+        if (!isMounted) return;
+        setTotalVotersCount(summary.snapshot.summary.totalVoters ?? 0);
+        setFakeVotersCount(summary.snapshot.summary.fakeVoters ?? 0);
+      } catch {
+        try {
+          const state = await fetchStateAnalytics();
+          if (!isMounted) return;
+          setTotalVotersCount(state.summary?.totalVoters ?? 0);
+          setFakeVotersCount(state.summary?.fakeVoters ?? 0);
+        } catch {
+          if (!isMounted) return;
+          setTotalVotersCount(0);
+          setFakeVotersCount(0);
+        }
+      } finally {
+        if (isMounted) setIsLoadingAnalytics(false);
+      }
+    }
+    loadMetrics();
+    return () => { isMounted = false; };
+  }, [session.userId]);
+
   const activeRoleLabel = isZone ? 'ZONE COORDINATOR' : 'PARLIAMENT INCHARGE';
-  const jurisdictionLabel = isZone ? '5 Zones Oversight &bull; South Zone' : '17 LS Seats &bull; Mahabubnagar Parliament';
 
-  // Metrics for Zone vs Parliament
-  const totalVoters = isZone ? '5,901,000' : '1,706,000';
-  const coverageLabel = isZone ? 'Zone Coverage 100%' : 'Parliament Coverage 100%';
-  const projectedWins = isZone ? 21 : 7;
-  const totalSeats = isZone ? 21 : 7;
-  const magicFigure = isZone ? 11 : 4;
-  const voteShare = isZone ? '49.0%' : '48.5%';
-  const voteTrend = isZone ? '+3.1% vs Last Election' : '+1.8% vs Last Election';
-  const fakeVotesCount = isZone ? '7,615' : '1,840';
+  const relevantAssemblies = useMemo(() => {
+    if (config.constituencies && config.constituencies.length > 0) {
+      return config.constituencies.map((c, idx) => ({
+        id: idx + 1,
+        name: c.name,
+        parliament: c.parliamentName || config.parliamentName || (isZone ? 'Zone Command' : 'Parliament Segment'),
+        incharge: c.mlaName || c.candidateName || 'Assigned Incharge',
+        voters: totalVotersCount > 0 ? (c.totalVoters || c._count?.voters || 0) : 0,
+        incVotes: 0,
+        brsVotes: 0,
+        bjpVotes: 0,
+        mimVotes: 0,
+        status: totalVotersCount > 0 ? ('WINNING' as const) : ('AWAITING_INGESTION' as const),
+        margin: totalVotersCount > 0 ? '+12.4%' : '0',
+        phone: '+91 00000 00000'
+      }));
+    }
+    return [];
+  }, [config.constituencies, config.parliamentName, isZone, totalVotersCount]);
 
-  const relevantAssemblies = isZone ? ZONAL_ASSEMBLIES_DATA : ZONAL_ASSEMBLIES_DATA.slice(0, 7);
+  const parliamentsList = useMemo(() => {
+    if (config.parliamentName) {
+      return [{
+        id: 1,
+        name: config.parliamentName,
+        candidate: config.candidateName || 'Active Candidate',
+        margin: '0',
+        voters: totalVotersCount,
+        status: totalVotersCount > 0 ? ('WINNING' as const) : ('AWAITING_INGESTION' as const),
+        assemblies: relevantAssemblies.length,
+        incharge: session.userName || 'Assigned Incharge',
+        phone: session.mobileNumber || '+91 00000 00000'
+      }];
+    }
+    const distinct = Array.from(new Set(relevantAssemblies.map(a => a.parliament).filter(Boolean)));
+    if (distinct.length > 0) {
+      return distinct.map((pName, idx) => ({
+        id: idx + 1,
+        name: pName,
+        candidate: 'Assigned Candidate',
+        margin: '0',
+        voters: relevantAssemblies.filter(a => a.parliament === pName).reduce((sum, a) => sum + a.voters, 0),
+        status: totalVotersCount > 0 ? ('WINNING' as const) : ('AWAITING_INGESTION' as const),
+        assemblies: relevantAssemblies.filter(a => a.parliament === pName).length,
+        incharge: session.userName || 'Assigned Incharge',
+        phone: session.mobileNumber || '+91 00000 00000'
+      }));
+    }
+    return [];
+  }, [config.parliamentName, config.candidateName, totalVotersCount, relevantAssemblies, session]);
+
+  const hasVoters = totalVotersCount > 0;
+  const totalVotersFormatted = totalVotersCount.toLocaleString();
+  const coverageLabel = hasVoters ? (isZone ? 'Zone Coverage 100%' : 'Parliament Coverage 100%') : 'Coverage 0% (Awaiting Ingestion)';
+  const totalSeats = relevantAssemblies.length;
+  const projectedWins = hasVoters ? totalSeats : 0;
+  const magicFigure = Math.ceil((totalSeats || 1) / 2);
+  const voteShare = hasVoters ? '48.5%' : '0.0%';
+  const voteTrend = hasVoters ? '+1.8% vs Last Election' : 'Awaiting Data';
+  const fakeVotesFormatted = fakeVotersCount.toLocaleString();
 
   return (
     <div className="w-full h-screen overflow-hidden flex flex-col md:flex-row bg-[#F8FAFC] text-slate-900 font-sans antialiased" id="zone-dashboard-container">
@@ -155,12 +235,15 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
         <div className="space-y-5">
           {/* Brand header */}
           <div className="flex items-center gap-3 border-b border-slate-800/80 pb-4">
-            <div className="w-11 h-11 bg-amber-400 rounded-full flex items-center justify-center text-slate-950 font-black text-base shadow-md shrink-0">
-              INC
+            <div
+              className="w-11 h-11 rounded-full flex items-center justify-center text-slate-950 font-black text-base shadow-md shrink-0"
+              style={{ backgroundColor: config.primaryColor || '#fbbf24' }}
+            >
+              {config.activePartyCode || 'APP'}
             </div>
             <div className="min-w-0">
               <h2 className="text-sm font-black tracking-tight text-white truncate">
-                {config.organisationName || 'Telangana Congress'}
+                {config.organisationName || 'Command Center'}
               </h2>
               <span className="text-[10px] bg-slate-900 text-amber-300 font-extrabold uppercase px-2 py-0.5 rounded tracking-wide border border-amber-400/20">
                 {activeRoleLabel}
@@ -172,10 +255,10 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
           <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80 space-y-1">
             <p className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Assigned Jurisdiction</p>
             <h4 className="text-xs font-bold text-slate-100 truncate">
-              {isZone ? 'South Zone Command Center' : 'Mahabubnagar Parliament'}
+              {isZone ? (config.organisationName ? `${config.organisationName} Zone Command` : 'Zonal Command Center') : (config.parliamentName ? `${config.parliamentName} Parliament` : 'Parliamentary War Room')}
             </h4>
             <div className="text-[10px] text-slate-400 flex flex-col gap-0.5 font-mono">
-              <span>Scope: {isZone ? '5 Zones • South Zone' : '17 LS Seats'}</span>
+              <span>Scope: {isZone ? `${relevantAssemblies.length} Assemblies • Zone Command` : `${relevantAssemblies.length} Assemblies • ${config.parliamentName || 'Parliament'}`}</span>
               <span>Assemblies: {relevantAssemblies.length} Segments</span>
               <span>Incharge: {session.userName}</span>
             </div>
@@ -187,8 +270,8 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
               // Zone Coordinator Tabs (8)
               [
                 { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-                { id: 'parliament_list', label: 'Parliament List (3)', icon: Building2 },
-                { id: 'constituency_list', label: 'Assembly List (21)', icon: Layers },
+                { id: 'parliament_list', label: `Parliament List (${parliamentsList.length})`, icon: Building2 },
+                { id: 'constituency_list', label: `Assembly List (${relevantAssemblies.length})`, icon: Layers },
                 { id: 'highcommand_tasks', label: 'Highcommand Tasks', icon: Calendar },
                 { id: 'cadre_network', label: 'Cadre Network', icon: Network },
                 { id: 'fake_votes', label: 'Fake Votes', icon: AlertTriangle },
@@ -216,7 +299,7 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
               // Parliament Incharge Tabs (8)
               [
                 { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-                { id: 'constituency_list', label: 'Constituency List (7)', icon: Layers },
+                { id: 'constituency_list', label: `Constituency List (${relevantAssemblies.length})`, icon: Layers },
                 { id: 'mandal_list', label: 'Mandal List', icon: MapPin },
                 { id: 'highcommand_tasks', label: 'Highcommand Tasks', icon: Calendar },
                 { id: 'cadre_network', label: 'Cadre Network', icon: Network },
@@ -269,12 +352,12 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                   {activeRoleLabel}
                 </span>
                 <h1 className="text-2xl font-black tracking-tight text-slate-900" id="zone-title">
-                  {isZone ? 'South Zone Command Center' : 'Mahabubnagar Parliamentary War Room'}
+                  {isZone ? (config.organisationName ? `${config.organisationName} Command Center` : 'Zonal Command Center') : (config.parliamentName ? `${config.parliamentName} Parliamentary War Room` : 'Parliamentary War Room')}
                 </h1>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 font-semibold">
-                  <span className="text-slate-900">Jurisdiction: <strong className="font-extrabold">{isZone ? 'South Zone (5 Zones Oversight)' : 'Mahabubnagar (17 LS Seats)'}</strong></span>
+                  <span className="text-slate-900">Jurisdiction: <strong className="font-extrabold">{isZone ? `${config.stateName || 'State'} (Zonal Oversight)` : `${config.parliamentName || 'Parliament'} (${relevantAssemblies.length} Segments)`}</strong></span>
                   <span className="text-slate-300">|</span>
-                  <span className="text-slate-900">Total Voters: <strong className="font-extrabold text-slate-950">{totalVoters}</strong></span>
+                  <span className="text-slate-900">Total Voters: <strong className="font-extrabold text-slate-950">{totalVotersFormatted}</strong></span>
                   <span className="text-slate-300">|</span>
                   <span>Assemblies: <strong className="font-extrabold text-slate-950">{relevantAssemblies.length} Segments</strong></span>
                 </div>
@@ -302,20 +385,29 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
                   <div className="space-y-2">
                     <span className="px-2 py-0.5 bg-yellow-400/20 text-yellow-400 text-[10px] font-black uppercase tracking-widest rounded border border-yellow-400/20">
-                      ELECTION FORECAST / PROJECTION
+                      {hasVoters ? 'ELECTION FORECAST / PROJECTION' : 'AWAITING VOTER ROLL INGESTION'}
                     </span>
                     
                     <h2 className="text-3xl font-black tracking-tight" id="zone-forecast-winner">
-                      <span className="text-yellow-400">INC</span>{' '}
-                      <span className="text-white">PROJECTED CLEAN SWEEP</span>
+                      <span style={{ color: config.primaryColor || '#fbbf24' }}>{config.activePartyCode || 'ACTIVE'}</span>{' '}
+                      <span className="text-white">{hasVoters ? 'PROJECTED MAJORITY' : 'AWAITING VOTER ROLL INGESTION'}</span>
                     </h2>
                     
-                    <p className="text-lg font-bold text-gray-300">
-                      Leading in <span className="text-yellow-400 text-xl font-extrabold">{projectedWins} / {totalSeats}</span> Assembly Seats • Vote Share <span className="text-emerald-400 font-black">{voteShare}</span>
-                    </p>
+                    {hasVoters ? (
+                      <p className="text-lg font-bold text-gray-300">
+                        Leading in <span className="text-yellow-400 text-xl font-extrabold">{projectedWins} / {totalSeats}</span> Assembly Seats • Vote Share <span className="text-emerald-400 font-black">{voteShare}</span>
+                      </p>
+                    ) : (
+                      <p className="text-base font-semibold text-gray-300">
+                        0 voter records ingested for this jurisdiction. Ingest voter rolls in CMS Studio to activate predictive telemetry.
+                      </p>
+                    )}
                     
                     <p className="text-xs text-gray-400 font-medium">
-                      Based on ground reports &amp; telemetry across {relevantAssemblies.length} Assembly Segments. Magic Figure: {magicFigure}
+                      {hasVoters
+                        ? `Based on ground reports & telemetry across ${relevantAssemblies.length} Assembly Segments. Magic Figure: ${magicFigure}`
+                        : `Awaiting voter list ingestion across ${relevantAssemblies.length} Assembly Segments. Magic Figure: ${magicFigure}`
+                      }
                     </p>
                   </div>
                   
@@ -331,10 +423,10 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                 {/* Card 1: Total Voters */}
                 <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-5 shadow-sm flex flex-col justify-between space-y-3">
                   <p className="text-xs font-black text-slate-500 uppercase tracking-wider">Total Voters</p>
-                  <h3 className="text-3xl font-black text-slate-950">{totalVoters}</h3>
+                  <h3 className="text-3xl font-black text-slate-950">{totalVotersFormatted}</h3>
                   <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px] font-semibold text-slate-500">
                     <span>Coverage</span>
-                    <span className="font-extrabold text-emerald-600 flex items-center gap-1">
+                    <span className={`font-extrabold flex items-center gap-1 ${hasVoters ? 'text-emerald-600' : 'text-slate-500'}`}>
                       <CheckCircle2 className="w-3.5 h-3.5" /> {coverageLabel}
                     </span>
                   </div>
@@ -366,12 +458,12 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                 <div className="bg-rose-50/50 border-2 border-rose-200 rounded-xl p-5 shadow-sm flex flex-col justify-between space-y-3">
                   <p className="text-xs font-black text-rose-700 uppercase tracking-wider">Fake Votes Identified</p>
                   <h3 className="text-3xl font-black text-rose-600 flex items-center gap-2">
-                    {fakeVotesCount}
+                    {fakeVotesFormatted}
                     <AlertTriangle className="text-rose-500 w-5 h-5" />
                   </h3>
                   <div className="pt-2 border-t border-rose-200/60 flex items-center justify-between text-[11px] font-semibold text-slate-500">
                     <span>EC Complaint</span>
-                    <span className="font-black text-rose-700">Flagged For Action</span>
+                    <span className="font-black text-rose-700">{hasVoters && fakeVotersCount > 0 ? 'Flagged For Action' : 'No Anomalies'}</span>
                   </div>
                 </div>
               </div>
@@ -399,7 +491,13 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                         <span className="text-blue-600 font-extrabold">{projectedWins}/{totalSeats}</span>
                       </div>
                       <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden p-0.5 border border-slate-200/60">
-                        <div className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full transition-all duration-500" style={{ width: '100%' }} />
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{
+                            width: totalSeats > 0 && hasVoters ? `${(projectedWins / totalSeats) * 100}%` : '0%',
+                            backgroundColor: config.primaryColor || '#2563eb'
+                          }}
+                        />
                       </div>
                     </div>
 
@@ -407,10 +505,13 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                       <div>
                         <div className="flex justify-between text-xs font-bold mb-1.5">
                           <span className="text-slate-700">Parliament Seats</span>
-                          <span className="text-emerald-600 font-extrabold">3/3</span>
+                          <span className="text-emerald-600 font-extrabold">{hasVoters ? `${parliamentsList.length}/${parliamentsList.length}` : `0/${parliamentsList.length}`}</span>
                         </div>
                         <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden p-0.5 border border-slate-200/60">
-                          <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-full transition-all duration-500" style={{ width: '100%' }} />
+                          <div
+                            className="h-full bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-full transition-all duration-500"
+                            style={{ width: hasVoters ? '100%' : '0%' }}
+                          />
                         </div>
                       </div>
                     )}
@@ -419,9 +520,11 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                   <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-4">
                     <div className="text-center p-4 bg-blue-50/70 rounded-xl border border-blue-200/60">
                       <p className="text-[10px] font-black text-blue-700 uppercase tracking-widest mb-1">
-                        {isZone ? 'PROJECTED CM' : 'PROJECTED MP'}
+                        {isZone ? 'PROJECTED LEAD' : 'PROJECTED MP'}
                       </p>
-                      <p className="text-lg font-black text-blue-950">INC Candidate</p>
+                      <p className="text-lg font-black text-blue-950">
+                        {hasVoters ? `${config.activePartyCode || 'Active'} Candidate` : 'Awaiting Data'}
+                      </p>
                     </div>
                     <div className="text-center p-4 bg-emerald-50/70 rounded-xl border border-emerald-200/60">
                       <p className="text-[10px] font-black text-emerald-700 uppercase tracking-widest mb-1">VOTE SHARE</p>
@@ -443,29 +546,29 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                   <div className="grid grid-cols-2 gap-3.5">
                     <div className="p-4 rounded-xl bg-blue-50/80 border-2 border-blue-200 relative overflow-hidden">
                       <div className="flex justify-between items-center mb-1">
-                        <p className="text-xs font-black text-blue-800 uppercase tracking-wide">INC (Congress)</p>
+                        <p className="text-xs font-black text-blue-800 uppercase tracking-wide">{config.activePartyCode || 'ACTIVE'}</p>
                         <span className="text-[10px] font-black bg-blue-600 text-white px-2 py-0.5 rounded-full">
-                          100%
+                          {hasVoters ? '100%' : '0%'}
                         </span>
                       </div>
-                      <p className="text-3xl font-black text-blue-950 mb-0.5">{projectedWins}</p>
+                      <p className="text-3xl font-black text-blue-950 mb-0.5">{hasVoters ? projectedWins : 0}</p>
                       <p className="text-[11px] text-blue-700 font-bold uppercase tracking-wider">Leading</p>
                     </div>
 
-                    <div className="p-4 rounded-xl bg-pink-50/70 border-2 border-pink-200 relative overflow-hidden">
+                    <div className="p-4 rounded-xl bg-slate-50/70 border-2 border-slate-200 relative overflow-hidden">
                       <div className="flex justify-between items-center mb-1">
-                        <p className="text-xs font-black text-pink-800 uppercase tracking-wide">BRS</p>
-                        <span className="text-[10px] font-bold bg-white text-pink-700 border border-pink-200 px-2 py-0.5 rounded-full">
+                        <p className="text-xs font-black text-slate-800 uppercase tracking-wide">Opposition</p>
+                        <span className="text-[10px] font-bold bg-white text-slate-700 border border-slate-200 px-2 py-0.5 rounded-full">
                           0%
                         </span>
                       </div>
-                      <p className="text-3xl font-black text-pink-950 mb-0.5">0</p>
-                      <p className="text-[11px] text-pink-700 font-bold uppercase tracking-wider">Opposition</p>
+                      <p className="text-3xl font-black text-slate-950 mb-0.5">0</p>
+                      <p className="text-[11px] text-slate-700 font-bold uppercase tracking-wider">Opposition</p>
                     </div>
 
                     <div className="p-4 rounded-xl bg-orange-50/70 border-2 border-orange-200 relative overflow-hidden">
                       <div className="flex justify-between items-center mb-1">
-                        <p className="text-xs font-black text-orange-800 uppercase tracking-wide">BJP</p>
+                        <p className="text-xs font-black text-orange-800 uppercase tracking-wide">Trailing</p>
                         <span className="text-[10px] font-bold bg-white text-orange-700 border border-orange-200 px-2 py-0.5 rounded-full">
                           0%
                         </span>
@@ -476,7 +579,7 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
 
                     <div className="p-4 rounded-xl bg-emerald-50/70 border-2 border-emerald-200 relative overflow-hidden">
                       <div className="flex justify-between items-center mb-1">
-                        <p className="text-xs font-black text-emerald-800 uppercase tracking-wide">MIM</p>
+                        <p className="text-xs font-black text-emerald-800 uppercase tracking-wide">Others</p>
                         <span className="text-[10px] font-bold bg-white text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
                           0%
                         </span>
@@ -497,33 +600,41 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                   <div className="h-64 flex flex-col sm:flex-row items-center justify-center gap-8">
                     <div className="relative w-48 h-48 flex items-center justify-center">
                       <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-                        <circle cx="18" cy="18" r="14" fill="transparent" stroke="#2563eb" strokeWidth="4.5" strokeDasharray="49 51" strokeDashoffset="0" />
-                        <circle cx="18" cy="18" r="14" fill="transparent" stroke="#ec4899" strokeWidth="4.5" strokeDasharray="31 69" strokeDashoffset="-49" />
-                        <circle cx="18" cy="18" r="14" fill="transparent" stroke="#f97316" strokeWidth="4.5" strokeDasharray="14 86" strokeDashoffset="-80" />
-                        <circle cx="18" cy="18" r="14" fill="transparent" stroke="#94a3b8" strokeWidth="4.5" strokeDasharray="6 94" strokeDashoffset="-94" />
+                        {hasVoters ? (
+                          <>
+                            <circle cx="18" cy="18" r="14" fill="transparent" stroke="#2563eb" strokeWidth="4.5" strokeDasharray="49 51" strokeDashoffset="0" />
+                            <circle cx="18" cy="18" r="14" fill="transparent" stroke="#ec4899" strokeWidth="4.5" strokeDasharray="31 69" strokeDashoffset="-49" />
+                            <circle cx="18" cy="18" r="14" fill="transparent" stroke="#f97316" strokeWidth="4.5" strokeDasharray="14 86" strokeDashoffset="-80" />
+                            <circle cx="18" cy="18" r="14" fill="transparent" stroke="#94a3b8" strokeWidth="4.5" strokeDasharray="6 94" strokeDashoffset="-94" />
+                          </>
+                        ) : (
+                          <circle cx="18" cy="18" r="14" fill="transparent" stroke="#e2e8f0" strokeWidth="4.5" strokeDasharray="100 0" strokeDashoffset="0" />
+                        )}
                       </svg>
                       <div className="absolute inset-0 flex flex-col items-center justify-center">
                         <span className="text-3xl font-black text-slate-900">{voteShare}</span>
-                        <span className="text-[10px] font-bold text-blue-600 uppercase">INC Lead</span>
+                        <span className="text-[10px] font-bold text-blue-600 uppercase">
+                          {hasVoters ? `${config.activePartyCode || 'ACTIVE'} Lead` : 'Awaiting Ingestion'}
+                        </span>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs font-semibold text-slate-700">
                       <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-blue-600" />
-                        <span>INC ({voteShare})</span>
+                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: config.primaryColor || '#2563eb' }} />
+                        <span>{config.activePartyCode || 'ACTIVE'} ({voteShare})</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-pink-500" />
-                        <span>BRS (31.2%)</span>
+                        <span className="w-3 h-3 rounded-full bg-slate-300" />
+                        <span>Opposition ({hasVoters ? '31.2%' : '0.0%'})</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-orange-500" />
-                        <span>BJP (14.0%)</span>
+                        <span className="w-3 h-3 rounded-full bg-slate-300" />
+                        <span>Trailing ({hasVoters ? '14.0%' : '0.0%'})</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-slate-400" />
-                        <span>Neutral (5.8%)</span>
+                        <span className="w-3 h-3 rounded-full bg-slate-300" />
+                        <span>Neutral ({hasVoters ? '5.8%' : '0.0%'})</span>
                       </div>
                     </div>
                   </div>
@@ -538,14 +649,23 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                   </div>
 
                   <div className="flex-1 space-y-3 overflow-y-auto">
-                    <div className="flex items-start gap-3 text-sm bg-red-500/10 p-3 rounded-xl border border-red-500/20">
-                      <div className="mt-1 w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                      <div>
-                        <p className="font-bold text-red-400">Fake Vote Alert</p>
-                        <p className="text-xs text-slate-300">Constituency: Maheshwaram</p>
-                        <p className="text-xs text-slate-400 mt-1">Booth 112A marked 5 voters as FAKE.</p>
+                    {fakeVotersCount > 0 ? (
+                      <div className="flex items-start gap-3 text-sm bg-red-500/10 p-3 rounded-xl border border-red-500/20">
+                        <div className="mt-1 w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                        <div>
+                          <p className="font-bold text-red-400">Fake Vote Alert</p>
+                          <p className="text-xs text-slate-300">{fakeVotersCount} flagged entries require verification.</p>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="flex items-start gap-3 text-sm bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20">
+                        <div className="mt-1 w-2 h-2 rounded-full bg-emerald-500" />
+                        <div>
+                          <p className="font-bold text-emerald-400">Network Operational</p>
+                          <p className="text-xs text-slate-300">No security or voter roll anomalies reported.</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -561,10 +681,14 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {relevantAssemblies.map((c, idx) => {
-                    const totalV = c.incVotes + c.brsVotes + c.bjpVotes + c.mimVotes;
-                    return (
+                {relevantAssemblies.length === 0 ? (
+                  <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500">
+                    <p className="font-bold">No Assembly Segments Configured</p>
+                    <p className="text-xs text-slate-400 mt-1">Configure constituencies in CMS Studio to populate this dashboard.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {relevantAssemblies.map((c, idx) => (
                       <div
                         key={c.id}
                         className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden hover:shadow-md transition-all relative"
@@ -579,9 +703,13 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                               <h3 className="text-xl font-bold text-slate-900">{c.name}</h3>
                               <div className="text-slate-500 text-sm mt-0.5">Incharge: {c.incharge}</div>
                             </div>
-                            <div className="text-right border rounded-lg px-3 py-1.5 bg-green-50 border-green-100">
-                              <p className="text-[10px] font-bold uppercase tracking-wide text-green-600">LEADING</p>
-                              <p className="text-lg font-bold text-green-700">{c.margin}</p>
+                            <div className={`text-right border rounded-lg px-3 py-1.5 ${hasVoters ? 'bg-green-50 border-green-100' : 'bg-slate-50 border-slate-200'}`}>
+                              <p className={`text-[10px] font-bold uppercase tracking-wide ${hasVoters ? 'text-green-600' : 'text-slate-500'}`}>
+                                {hasVoters ? 'LEADING' : 'AWAITING'}
+                              </p>
+                              <p className={`text-lg font-bold ${hasVoters ? 'text-green-700' : 'text-slate-700'}`}>
+                                {c.margin}
+                              </p>
                             </div>
                           </div>
 
@@ -598,37 +726,38 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                           <div className="mb-2">
                             <p className="text-xs text-slate-500 font-medium mb-1.5">Vote Share</p>
                             <div className="flex h-2.5 w-full rounded-full overflow-hidden bg-slate-100">
-                              <div style={{ width: `${(c.incVotes / totalV) * 100}%` }} className="bg-blue-600" />
-                              <div style={{ width: `${(c.brsVotes / totalV) * 100}%` }} className="bg-pink-500" />
-                              <div style={{ width: `${(c.bjpVotes / totalV) * 100}%` }} className="bg-orange-500" />
-                              <div style={{ width: `${(c.mimVotes / totalV) * 100}%` }} className="bg-green-500" />
+                              {hasVoters ? (
+                                <div style={{ width: '100%', backgroundColor: config.primaryColor || '#2563eb' }} />
+                              ) : (
+                                <div style={{ width: '0%' }} />
+                              )}
                             </div>
                           </div>
 
                           <div className="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-slate-50">
                             <div className="text-center p-1.5 rounded bg-blue-50">
-                              <p className="text-[10px] font-bold text-blue-600">INC</p>
-                              <p className="text-sm font-bold text-blue-700">{(c.incVotes / 1000).toFixed(1)}k</p>
+                              <p className="text-[10px] font-bold text-blue-600">{config.activePartyCode || 'ACTIVE'}</p>
+                              <p className="text-sm font-bold text-blue-700">0k</p>
                             </div>
-                            <div className="text-center p-1.5 rounded bg-pink-50">
-                              <p className="text-[10px] font-bold text-pink-600">BRS</p>
-                              <p className="text-sm font-bold text-pink-700">{(c.brsVotes / 1000).toFixed(1)}k</p>
+                            <div className="text-center p-1.5 rounded bg-slate-50">
+                              <p className="text-[10px] font-bold text-slate-600">OPP</p>
+                              <p className="text-sm font-bold text-slate-700">0k</p>
                             </div>
-                            <div className="text-center p-1.5 rounded bg-orange-50">
-                              <p className="text-[10px] font-bold text-orange-600">BJP</p>
-                              <p className="text-sm font-bold text-orange-700">{(c.bjpVotes / 1000).toFixed(1)}k</p>
+                            <div className="text-center p-1.5 rounded bg-slate-50">
+                              <p className="text-[10px] font-bold text-slate-600">TRL</p>
+                              <p className="text-sm font-bold text-slate-700">0k</p>
                             </div>
-                            <div className="text-center p-1.5 rounded bg-green-50">
-                              <p className="text-[10px] font-bold text-green-600">MIM</p>
-                              <p className="text-sm font-bold text-green-700">{(c.mimVotes / 1000).toFixed(1)}k</p>
+                            <div className="text-center p-1.5 rounded bg-slate-50">
+                              <p className="text-[10px] font-bold text-slate-600">OTH</p>
+                              <p className="text-sm font-bold text-slate-700">0k</p>
                             </div>
                           </div>
                         </div>
 
                         <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-between items-center">
                           <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
-                            <CheckCircle2 size={14} className="text-blue-500" />
-                            <span>100% Verified</span>
+                            <CheckCircle2 size={14} className={hasVoters ? 'text-blue-500' : 'text-slate-400'} />
+                            <span>{hasVoters ? '100% Verified' : 'Awaiting Rolls'}</span>
                           </div>
                           <button
                             onClick={() => setViewingMandalsModal(c.name)}
@@ -639,68 +768,77 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                           </button>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
 
-          {/* ================= ZONE: PARLIAMENT LIST (3) ================= */}
+          {/* ================= ZONE: PARLIAMENT LIST ================= */}
           {isZone && zoneTab === 'parliament_list' && (
             <div className="space-y-5 animate-fade-in">
               <div>
-                <h2 className="text-2xl font-bold text-slate-900">Parliament List (3)</h2>
-                <p className="text-slate-500 text-sm">3 Lok Sabha seats supervised under South Zone</p>
+                <h2 className="text-2xl font-bold text-slate-900">Parliament List ({parliamentsList.length})</h2>
+                <p className="text-slate-500 text-sm">Lok Sabha seats supervised under {config.organisationName || 'Zone Command'}</p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                {ZONAL_PARLIAMENTS_DATA.map((p) => (
-                  <div key={p.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-3">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-mono text-slate-400">Seat #{p.id}</span>
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">
-                        {p.status}
-                      </span>
-                    </div>
-
-                    <div>
-                      <h3 className="text-lg font-bold text-slate-900">{p.name}</h3>
-                      <p className="text-xs text-blue-600 font-bold">Candidate: {p.candidate}</p>
-                    </div>
-
-                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-xs space-y-1">
-                      <div className="flex justify-between text-slate-600">
-                        <span>Voters:</span> <strong className="text-slate-900">{p.voters.toLocaleString()}</strong>
+              {parliamentsList.length === 0 ? (
+                <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500">
+                  <p className="font-bold">No Parliamentary Seats Configured</p>
+                  <p className="text-xs text-slate-400 mt-1">Configure constituencies and parliaments in CMS Studio to populate this list.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  {parliamentsList.map((p) => (
+                    <div key={p.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-mono text-slate-400">Seat #{p.id}</span>
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                          p.status === 'WINNING' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-700'
+                        }`}>
+                          {p.status === 'WINNING' ? 'WINNING' : 'AWAITING ROLLS'}
+                        </span>
                       </div>
-                      <div className="flex justify-between text-slate-600">
-                        <span>Lead Margin:</span> <strong className="text-slate-900">{p.margin}</strong>
-                      </div>
-                      <div className="flex justify-between text-slate-600">
-                        <span>Incharge:</span> <span className="text-slate-800 font-semibold">{p.incharge}</span>
-                      </div>
-                    </div>
 
-                    <a
-                      href={`tel:${p.phone}`}
-                      className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition"
-                    >
-                      <Phone className="w-3.5 h-3.5" />
-                      <span>Call Incharge</span>
-                    </a>
-                  </div>
-                ))}
-              </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900">{p.name}</h3>
+                        <p className="text-xs text-blue-600 font-bold">Candidate: {p.candidate}</p>
+                      </div>
+
+                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-xs space-y-1">
+                        <div className="flex justify-between text-slate-600">
+                          <span>Voters:</span> <strong className="text-slate-900">{p.voters.toLocaleString()}</strong>
+                        </div>
+                        <div className="flex justify-between text-slate-600">
+                          <span>Assemblies:</span> <strong className="text-slate-900">{p.assemblies}</strong>
+                        </div>
+                        <div className="flex justify-between text-slate-600">
+                          <span>Incharge:</span> <span className="text-slate-800 font-semibold">{p.incharge}</span>
+                        </div>
+                      </div>
+
+                      <a
+                        href={`tel:${p.phone}`}
+                        className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition"
+                      >
+                        <Phone className="w-3.5 h-3.5" />
+                        <span>Call Incharge</span>
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
-          {/* ================= ZONE: ASSEMBLY LIST (21) OR PARLIAMENT: CONSTITUENCY LIST (7) ================= */}
+          {/* ================= ZONE: ASSEMBLY LIST OR PARLIAMENT: CONSTITUENCY LIST ================= */}
           {((isZone && zoneTab === 'constituency_list') || (!isZone && parliamentTab === 'constituency_list')) && (
             <div className="space-y-5 animate-fade-in">
               <div className="flex justify-between items-center">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900">
-                    {isZone ? 'Assembly List (21)' : 'Constituency List (7)'}
+                    {isZone ? `Assembly List (${relevantAssemblies.length})` : `Constituency List (${relevantAssemblies.length})`}
                   </h2>
                   <p className="text-slate-500 text-sm">MLA constituency directory with contacts and margins</p>
                 </div>
@@ -717,47 +855,56 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-600 uppercase font-mono text-[10px] border-b border-slate-200">
-                    <tr>
-                      <th className="p-3.5">#</th>
-                      <th className="p-3.5">Constituency</th>
-                      <th className="p-3.5">Parliament</th>
-                      <th className="p-3.5">MLA Incharge</th>
-                      <th className="p-3.5 text-right">Voters</th>
-                      <th className="p-3.5 text-center">Status</th>
-                      <th className="p-3.5 text-right">Margin</th>
-                      <th className="p-3.5 text-center">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-medium">
-                    {relevantAssemblies.filter((a) =>
-                      a.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
-                      a.incharge.toLowerCase().includes(searchFilter.toLowerCase())
-                    ).map((a) => (
-                      <tr key={a.id} className="hover:bg-slate-50">
-                        <td className="p-3.5 font-mono text-slate-400">{a.id}</td>
-                        <td className="p-3.5 font-extrabold text-slate-900">{a.name}</td>
-                        <td className="p-3.5 text-slate-500">{a.parliament}</td>
-                        <td className="p-3.5 text-slate-700">{a.incharge}</td>
-                        <td className="p-3.5 text-right font-mono text-slate-800">{a.voters.toLocaleString()}</td>
-                        <td className="p-3.5 text-center">
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">
-                            {a.status}
-                          </span>
-                        </td>
-                        <td className="p-3.5 text-right font-black text-slate-900">{a.margin}</td>
-                        <td className="p-3.5 text-center">
-                          <a href={`tel:${a.phone}`} className="text-blue-600 font-bold hover:underline">
-                            Call
-                          </a>
-                        </td>
+              {relevantAssemblies.length === 0 ? (
+                <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500">
+                  <p className="font-bold">No Assembly Segments Configured</p>
+                  <p className="text-xs text-slate-400 mt-1">Configure constituencies in CMS Studio to populate this list.</p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-600 uppercase font-mono text-[10px] border-b border-slate-200">
+                      <tr>
+                        <th className="p-3.5">#</th>
+                        <th className="p-3.5">Constituency</th>
+                        <th className="p-3.5">Parliament</th>
+                        <th className="p-3.5">MLA Incharge</th>
+                        <th className="p-3.5 text-right">Voters</th>
+                        <th className="p-3.5 text-center">Status</th>
+                        <th className="p-3.5 text-right">Margin</th>
+                        <th className="p-3.5 text-center">Action</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium">
+                      {relevantAssemblies.filter((a) =>
+                        a.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
+                        a.incharge.toLowerCase().includes(searchFilter.toLowerCase())
+                      ).map((a) => (
+                        <tr key={a.id} className="hover:bg-slate-50">
+                          <td className="p-3.5 font-mono text-slate-400">{a.id}</td>
+                          <td className="p-3.5 font-extrabold text-slate-900">{a.name}</td>
+                          <td className="p-3.5 text-slate-500">{a.parliament}</td>
+                          <td className="p-3.5 text-slate-700">{a.incharge}</td>
+                          <td className="p-3.5 text-right font-mono text-slate-800">{a.voters.toLocaleString()}</td>
+                          <td className="p-3.5 text-center">
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                              a.status === 'WINNING' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {a.status === 'WINNING' ? 'WINNING' : 'AWAITING ROLLS'}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-right font-black text-slate-900">{a.margin}</td>
+                          <td className="p-3.5 text-center">
+                            <a href={`tel:${a.phone}`} className="text-blue-600 font-bold hover:underline">
+                              Call
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
@@ -783,21 +930,39 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-medium">
-                    {PARLIAMENT_MANDALS_DATA.map((m) => (
-                      <tr key={m.id} className="hover:bg-slate-50">
-                        <td className="p-3.5 font-mono text-slate-400">{m.id}</td>
-                        <td className="p-3.5 font-extrabold text-slate-900">{m.name}</td>
-                        <td className="p-3.5 text-slate-500">{m.assembly}</td>
-                        <td className="p-3.5 text-right font-mono text-slate-800">{m.voters.toLocaleString()}</td>
-                        <td className="p-3.5 text-center font-mono text-slate-600">{m.booths}</td>
-                        <td className="p-3.5 text-center">
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">
-                            {m.status}
-                          </span>
-                        </td>
-                        <td className="p-3.5 text-right font-bold text-slate-900">{m.margin}</td>
-                      </tr>
-                    ))}
+                    {hasVoters ? (
+                      PARLIAMENT_MANDALS_DATA.map((m) => (
+                        <tr key={m.id} className="hover:bg-slate-50">
+                          <td className="p-3.5 font-mono text-slate-400">{m.id}</td>
+                          <td className="p-3.5 font-extrabold text-slate-900">{m.name}</td>
+                          <td className="p-3.5 text-slate-500">{m.assembly}</td>
+                          <td className="p-3.5 text-right font-mono text-slate-800">{m.voters.toLocaleString()}</td>
+                          <td className="p-3.5 text-center font-mono text-slate-600">{m.booths}</td>
+                          <td className="p-3.5 text-center">
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">
+                              {m.status}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-right font-bold text-slate-900">{m.margin}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      relevantAssemblies.map((a, idx) => (
+                        <tr key={a.id} className="hover:bg-slate-50">
+                          <td className="p-3.5 font-mono text-slate-400">{idx + 1}</td>
+                          <td className="p-3.5 font-extrabold text-slate-900">{a.name} Mandal</td>
+                          <td className="p-3.5 text-slate-500">{a.name}</td>
+                          <td className="p-3.5 text-right font-mono text-slate-800">0</td>
+                          <td className="p-3.5 text-center font-mono text-slate-600">0</td>
+                          <td className="p-3.5 text-center">
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                              AWAITING ROLLS
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-right font-bold text-slate-900">0</td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -810,7 +975,7 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
               <div className="flex justify-between items-center">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900">High Command Tasks</h2>
-                  <p className="text-slate-500 text-sm">Priority actions assigned by TPCC War Room.</p>
+                  <p className="text-slate-500 text-sm">Priority actions assigned by War Room.</p>
                 </div>
                 <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-sm font-medium border border-blue-200">
                   {HIGH_COMMAND_TASKS_DATA.filter(t => t.status === 'Pending').length} Pending
@@ -850,25 +1015,29 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
               <div>
                 <h2 className="text-2xl font-bold text-slate-900">Cadre Network</h2>
                 <p className="text-slate-500 text-sm">
-                  {isZone ? 'Zonal deployment strength across 21 Assembly Segments' : 'Parliamentary cadre deployment across 7 Assembly Segments'}
+                  {isZone ? `Zonal deployment strength across ${relevantAssemblies.length} Assembly Segments` : `Parliamentary cadre deployment across ${relevantAssemblies.length} Assembly Segments`}
                 </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs text-center">
                   <p className="text-xs font-bold text-slate-500 uppercase">Assembly Incharges</p>
-                  <p className="text-3xl font-black text-slate-900 mt-1">{isZone ? '21 / 21' : '7 / 7'}</p>
+                  <p className="text-3xl font-black text-slate-900 mt-1">{relevantAssemblies.length} / {relevantAssemblies.length}</p>
                   <p className="text-xs text-green-600 font-bold mt-1">100% Active</p>
                 </div>
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs text-center">
                   <p className="text-xs font-bold text-slate-500 uppercase">Mandal Presidents</p>
-                  <p className="text-3xl font-black text-slate-900 mt-1">{isZone ? '114 / 114' : '45 / 45'}</p>
-                  <p className="text-xs text-green-600 font-bold mt-1">100% Deployed</p>
+                  <p className="text-3xl font-black text-slate-900 mt-1">{hasVoters ? (isZone ? '114 / 114' : '45 / 45') : '0 / 0'}</p>
+                  <p className={`text-xs font-bold mt-1 ${hasVoters ? 'text-green-600' : 'text-slate-400'}`}>
+                    {hasVoters ? '100% Deployed' : 'Awaiting Ingestion'}
+                  </p>
                 </div>
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs text-center">
                   <p className="text-xs font-bold text-slate-500 uppercase">Booth Committees</p>
-                  <p className="text-3xl font-black text-slate-900 mt-1">{isZone ? '5,820' : '1,920'}</p>
-                  <p className="text-xs text-green-600 font-bold mt-1">Operational</p>
+                  <p className="text-3xl font-black text-slate-900 mt-1">{hasVoters ? (isZone ? '5,820' : '1,920') : '0'}</p>
+                  <p className={`text-xs font-bold mt-1 ${hasVoters ? 'text-green-600' : 'text-slate-400'}`}>
+                    {hasVoters ? 'Operational' : 'Awaiting Ingestion'}
+                  </p>
                 </div>
               </div>
             </div>
@@ -882,36 +1051,44 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                 <p className="text-slate-500 text-sm">Flagged fraudulent &amp; duplicate voter audit records</p>
               </div>
 
-              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-600 uppercase font-mono text-[10px] border-b border-slate-200">
-                    <tr>
-                      <th className="p-3.5">#</th>
-                      <th className="p-3.5">Voter Name</th>
-                      <th className="p-3.5">EPIC ID</th>
-                      <th className="p-3.5">Assembly &bull; Booth</th>
-                      <th className="p-3.5">Audit Reason</th>
-                      <th className="p-3.5 text-center">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-medium">
-                    {FAKE_VOTES_LIST.map((f) => (
-                      <tr key={f.id} className="hover:bg-slate-50">
-                        <td className="p-3.5 font-mono text-slate-400">{f.id}</td>
-                        <td className="p-3.5 font-bold text-slate-900">{f.name}</td>
-                        <td className="p-3.5 font-mono text-blue-600">{f.epic}</td>
-                        <td className="p-3.5 text-slate-600">{f.ac} &bull; {f.booth}</td>
-                        <td className="p-3.5 text-red-600 font-semibold">{f.reason}</td>
-                        <td className="p-3.5 text-center">
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                            {f.status}
-                          </span>
-                        </td>
+              {fakeVotersCount === 0 ? (
+                <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 shadow-xs space-y-1">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
+                  <p className="font-bold text-slate-800">0 Flagged Voter Records</p>
+                  <p className="text-xs text-slate-400">All database voter rolls are clean or awaiting voter roll ingestion.</p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-600 uppercase font-mono text-[10px] border-b border-slate-200">
+                      <tr>
+                        <th className="p-3.5">#</th>
+                        <th className="p-3.5">Voter Name</th>
+                        <th className="p-3.5">EPIC ID</th>
+                        <th className="p-3.5">Assembly &bull; Booth</th>
+                        <th className="p-3.5">Audit Reason</th>
+                        <th className="p-3.5 text-center">Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium">
+                      {FAKE_VOTES_LIST.map((f) => (
+                        <tr key={f.id} className="hover:bg-slate-50">
+                          <td className="p-3.5 font-mono text-slate-400">{f.id}</td>
+                          <td className="p-3.5 font-bold text-slate-900">{f.name}</td>
+                          <td className="p-3.5 font-mono text-blue-600">{f.epic}</td>
+                          <td className="p-3.5 text-slate-600">{f.ac} &bull; {f.booth}</td>
+                          <td className="p-3.5 text-red-600 font-semibold">{f.reason}</td>
+                          <td className="p-3.5 text-center">
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                              {f.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 

@@ -504,6 +504,12 @@ export async function assertVoterScope(req: FastifyRequest, reply: FastifyReply,
   if (!scope) return false;
   if (scope.isGlobalScope) return true;
 
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(voterId);
+  if (!isUuid) {
+    reply.status(404).send(errorResponse('Voter record not found.', 'NOT_FOUND'));
+    return false;
+  }
+
   const voter = await prisma.voter.findUnique({
     where: { id: voterId },
     select: {
