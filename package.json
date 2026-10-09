@@ -11,17 +11,24 @@
     "dev": "npm --prefix backend run dev & npm --prefix frontend run dev",
     "dev:admin": "npm --prefix admin run dev",
     "dev:all": "npm --prefix backend run dev & npm --prefix frontend run dev & npm --prefix admin run dev",
-    "start": "npm --prefix backend run start & npm --prefix frontend run start",
-    "build": "npm --prefix frontend run build && node scripts/prepare_dist.mjs",
+    "start": "npm --prefix backend run start",
+    "start:backend": "npm --prefix backend run start",
+    "start:frontend": "npm --prefix frontend run start",
+    "start:all": "npm --prefix backend run start & npm --prefix frontend run start",
+    "build": "npm --prefix backend run prisma:generate && npm --prefix backend run build && npm --prefix frontend run build && node scripts/prepare_dist.mjs",
+    "build:backend": "npm --prefix backend run prisma:generate && npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build",
     "build:admin": "npm --prefix admin run build",
-    "vercel-build": "npm run build",
+    "vercel-build": "npm --prefix frontend run build && node scripts/prepare_dist.mjs",
     "install:all": "npm install --workspaces",
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:backend": "npm --prefix backend run dev",
-    "build:frontend": "npm --prefix frontend run build",
     "lint:frontend": "npm --prefix frontend run lint",
     "prisma:generate": "npm --prefix backend run prisma:generate",
     "prisma:migrate": "npm --prefix backend run prisma:migrate",
     "prisma:seed": "npm --prefix backend run prisma:seed"
+  },
+  "devDependencies": {
+    "@neon/config": "^1.8.6"
   }
 }
