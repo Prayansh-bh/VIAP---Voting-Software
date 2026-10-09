@@ -1,4 +1,5 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
+import QRCode from 'qrcode';
 import { errorResponse, successResponse } from '../../common/response.js';
 import { isOriginAllowed } from '../../common/origin.js';
 import { AuthService } from './auth.service.js';
@@ -338,7 +339,8 @@ export class AuthController {
   }
 
   /**
-   * Serves an interactive HTML page displaying the WhatsApp QR code for easy scanning via browser.
+   * Serves an interactive, responsive HTML page displaying the WhatsApp QR code,
+   * customizable sizing (compact/medium/large), raw image link, and direct Phone Pairing Code.
    */
   static async getWhatsAppQr(_req: FastifyRequest, reply: FastifyReply) {
     const { SmsProviderFactory } = await import('../../lib/sms/factory.js');
@@ -350,12 +352,26 @@ export class AuthController {
       return reply.type('text/html').send(`
         <!DOCTYPE html>
         <html>
-        <head><title>WhatsApp Gateway Status</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-        <body style="font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f0f2f5;">
-          <div style="background:#fff;padding:36px;border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,0.08);text-align:center;max-width:420px;width:90%;">
-            <div style="font-size:48px;margin-bottom:12px;">✅</div>
-            <h2 style="color:#0f5132;margin:0 0 8px 0;">WhatsApp is Connected!</h2>
-            <p style="color:#495057;font-size:14px;line-height:1.5;">Session active for <b>${status.user || 'Linked Phone'}</b>.<br/>All OTPs for WhatsApp channel will be dispatched directly to recipients.</p>
+        <head>
+          <title>WhatsApp Gateway - Active</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f0f2f5; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+            .card { background: white; border-radius: 20px; padding: 40px 32px; max-width: 440px; width: 100%; text-align: center; box-shadow: 0 12px 32px rgba(0,0,0,0.08); }
+            .badge { display: inline-flex; align-items: center; gap: 8px; background: #e8f5e9; color: #2e7d32; font-weight: 600; padding: 6px 16px; border-radius: 20px; font-size: 14px; margin-bottom: 20px; }
+            h2 { color: #111b21; font-size: 24px; margin-bottom: 12px; }
+            p { color: #667781; font-size: 15px; line-height: 1.5; margin-bottom: 24px; }
+            .user-tag { background: #f0f2f5; color: #111b21; padding: 12px; border-radius: 12px; font-family: monospace; font-size: 14px; word-break: break-all; margin-bottom: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="badge">● Online & Ready</div>
+            <h2>WhatsApp is Connected!</h2>
+            <p>Authentication and OTP dispatch are fully active and connected to your linked phone.</p>
+            <div class="user-tag">JID: ${status.user || 'Connected Device'}</div>
+            <p style="font-size: 13px; color: #8696a0;">All OTP requests will be sent instantly via WhatsApp.</p>
           </div>
         </body>
         </html>
@@ -366,47 +382,289 @@ export class AuthController {
       return reply.type('text/html').send(`
         <!DOCTYPE html>
         <html>
-        <head><title>WhatsApp Gateway Status</title><meta http-equiv="refresh" content="2"></head>
-        <body style="font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f0f2f5;">
-          <div style="background:#fff;padding:36px;border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,0.08);text-align:center;max-width:420px;width:90%;">
-            <div style="font-size:48px;margin-bottom:12px;">⏳</div>
-            <h2 style="color:#212529;margin:0 0 8px 0;">Initializing WhatsApp QR...</h2>
-            <p style="color:#6c757d;font-size:14px;">Generating fresh link code. Page will refresh automatically in 2 seconds.</p>
+        <head>
+          <title>WhatsApp Gateway - Initializing</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <meta http-equiv="refresh" content="3">
+          <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f0f2f5; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+            .card { background: white; border-radius: 20px; padding: 40px 32px; max-width: 440px; width: 100%; text-align: center; box-shadow: 0 12px 32px rgba(0,0,0,0.08); }
+            .spinner { width: 44px; height: 44px; border: 4px solid #e9edef; border-top-color: #00a884; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+            @keyframes spin { to { transform: rotate(360deg); } }
+            h2 { color: #111b21; font-size: 22px; margin-bottom: 10px; }
+            p { color: #667781; font-size: 14px; line-height: 1.5; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="spinner"></div>
+            <h2>Initializing WhatsApp Gateway</h2>
+            <p>Generating new secure authentication token. This page will refresh automatically in 3 seconds...</p>
           </div>
         </body>
         </html>
       `);
     }
 
+    // Generate high-resolution server-side QR data URI
+    let qrDataUrl = '';
+    try {
+      qrDataUrl = await QRCode.toDataURL(qr, {
+        margin: 2,
+        scale: 8,
+        color: {
+          dark: '#000000',
+          light: '#ffffff',
+        },
+      });
+    } catch {
+      qrDataUrl = '';
+    }
+
     return reply.type('text/html').send(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Scan WhatsApp QR Code</title>
+        <title>Link WhatsApp OTP Gateway</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #eae6df; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+          .container { background: white; border-radius: 24px; max-width: 480px; width: 100%; box-shadow: 0 16px 40px rgba(0,0,0,0.12); overflow: hidden; }
+          .header { background: #00a884; color: white; padding: 24px 28px; text-align: left; }
+          .header h1 { font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+          .header p { font-size: 13px; opacity: 0.9; margin-top: 6px; }
+          .tabs { display: flex; border-bottom: 1px solid #e9edef; background: #f0f2f5; }
+          .tab { flex: 1; padding: 14px 16px; font-size: 14px; font-weight: 600; text-align: center; color: #54656f; cursor: pointer; border: none; background: transparent; transition: all 0.2s; }
+          .tab.active { background: white; color: #00a884; border-bottom: 2px solid #00a884; }
+          .tab-content { padding: 28px 24px; text-align: center; display: none; }
+          .tab-content.active { display: block; }
+          
+          /* QR Section */
+          .instructions { text-align: left; background: #f0f2f5; padding: 14px 18px; border-radius: 12px; margin-bottom: 20px; font-size: 13px; color: #3b4a54; line-height: 1.6; }
+          .instructions ol { padding-left: 20px; }
+          .qr-wrapper { display: inline-block; padding: 12px; background: white; border: 2px solid #e9edef; border-radius: 16px; margin: 8px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
+          .qr-image { display: block; border-radius: 8px; transition: width 0.2s, height 0.2s; }
+          
+          /* Sizing Controls */
+          .size-controls { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 16px 0 12px; font-size: 13px; color: #667781; }
+          .size-btn { padding: 6px 14px; border: 1px solid #d1d7db; border-radius: 20px; background: white; color: #54656f; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+          .size-btn.active { background: #00a884; color: white; border-color: #00a884; }
+          .size-btn:hover:not(.active) { background: #f5f6f6; }
+          
+          /* Phone Pairing Section */
+          .pair-form { text-align: left; }
+          .form-group { margin-bottom: 16px; }
+          .form-label { display: block; font-size: 13px; font-weight: 600; color: #3b4a54; margin-bottom: 6px; }
+          .phone-input-wrap { display: flex; align-items: center; border: 2px solid #d1d7db; border-radius: 12px; overflow: hidden; background: white; }
+          .prefix { background: #f0f2f5; padding: 12px 14px; font-size: 14px; color: #54656f; font-weight: 600; border-right: 1px solid #d1d7db; }
+          .phone-input { border: none; padding: 12px 16px; font-size: 15px; width: 100%; outline: none; }
+          .pair-btn { width: 100%; background: #00a884; color: white; border: none; padding: 14px; font-size: 15px; font-weight: 600; border-radius: 12px; cursor: pointer; transition: background 0.2s; margin-top: 6px; }
+          .pair-btn:hover { background: #008f72; }
+          .code-display { display: none; margin-top: 20px; background: #e8f5e9; border: 2px dashed #00a884; border-radius: 14px; padding: 20px; text-align: center; }
+          .code-text { font-family: monospace; font-size: 32px; font-weight: 700; letter-spacing: 4px; color: #00a884; margin: 10px 0; }
+          
+          .footer-note { font-size: 12px; color: #8696a0; margin-top: 18px; }
+          .raw-link { color: #00a884; text-decoration: none; font-weight: 500; font-size: 12px; }
+          .raw-link:hover { text-decoration: underline; }
+        </style>
       </head>
-      <body style="font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f0f2f5;">
-        <div style="background:#fff;padding:32px;border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,0.08);text-align:center;max-width:420px;width:90%;">
-          <h2 style="color:#128c7e;margin:0 0 8px 0;">📲 Link WhatsApp for OTP</h2>
-          <p style="color:#495057;font-size:13px;line-height:1.5;margin:0 0 20px 0;">
-            1. Open WhatsApp on your phone.<br/>
-            2. Tap <b>Settings / Menu (⋮)</b> &gt; <b>Linked Devices</b>.<br/>
-            3. Tap <b>Link a Device</b> and scan this code:
-          </p>
-          <div id="qr" style="display:inline-block;padding:12px;background:#fff;border:1px solid #dee2e6;border-radius:8px;"></div>
-          <p style="color:#868e96;font-size:12px;margin:16px 0 0 0;">Auto-refreshes every 20 seconds.</p>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>📲 Link WhatsApp OTP Gateway</h1>
+            <p>Connect your phone to dispatch real SMS / WhatsApp OTPs</p>
+          </div>
+          
+          <div class="tabs">
+            <button class="tab active" onclick="switchTab('qrTab', this)">📷 Scan QR Code</button>
+            <button class="tab" onclick="switchTab('pairTab', this)">🔢 Phone Pairing Code</button>
+          </div>
+
+          <!-- TAB 1: QR CODE -->
+          <div id="qrTab" class="tab-content active">
+            <div class="instructions">
+              <ol>
+                <li>Open <b>WhatsApp</b> on your phone</li>
+                <li>Tap <b>Menu (⋮)</b> or <b>Settings</b> &gt; <b>Linked Devices</b></li>
+                <li>Tap <b>Link a Device</b> and point camera at the barcode below</li>
+              </ol>
+            </div>
+
+            <div class="size-controls">
+              <span>QR Size:</span>
+              <button class="size-btn" onclick="setQrSize(160, this)">Compact (160px)</button>
+              <button class="size-btn active" onclick="setQrSize(220, this)">Standard (220px)</button>
+              <button class="size-btn" onclick="setQrSize(280, this)">Large (280px)</button>
+            </div>
+
+            <div class="qr-wrapper">
+              <img id="qrImg" class="qr-image" src="${qrDataUrl}" width="220" height="220" alt="WhatsApp Link QR" />
+            </div>
+
+            <div style="margin-top: 10px;">
+              <a href="/api/auth/whatsapp/qr.png" target="_blank" class="raw-link">🔍 Open Raw Image (.png)</a>
+            </div>
+
+            <p class="footer-note">⚡ Auto-refreshes every 20 seconds. Automatically confirms when connected.</p>
+          </div>
+
+          <!-- TAB 2: PAIRING CODE -->
+          <div id="pairTab" class="tab-content">
+            <div class="instructions">
+              <p><b>Link without scanning:</b></p>
+              <ol style="margin-top: 6px;">
+                <li>Open <b>WhatsApp</b> &gt; <b>Linked Devices</b> &gt; <b>Link a Device</b></li>
+                <li>Tap <b>"Link with phone number instead"</b> at the bottom</li>
+                <li>Enter the 8-character pairing code generated below</li>
+              </ol>
+            </div>
+
+            <form class="pair-form" onsubmit="getPairingCode(event)">
+              <div class="form-group">
+                <label class="form-label">Enter Your WhatsApp Mobile Number</label>
+                <div class="phone-input-wrap">
+                  <span class="prefix">+91</span>
+                  <input type="tel" id="pairPhone" class="phone-input" placeholder="e.g. 9848012345" maxlength="10" required />
+                </div>
+              </div>
+              <button type="submit" id="pairSubmitBtn" class="pair-btn">Generate Pairing Code</button>
+            </form>
+
+            <div id="codeDisplay" class="code-display">
+              <p style="font-size: 13px; color: #54656f;">Enter this code on your WhatsApp mobile screen:</p>
+              <div id="pairingCodeVal" class="code-text">---- ----</div>
+              <p style="font-size: 12px; color: #667781;">Valid for 60 seconds.</p>
+            </div>
+
+            <div id="pairError" style="display:none; color:#d32f2f; font-size:13px; margin-top:12px;"></div>
+          </div>
         </div>
+
         <script>
-          new QRCode(document.getElementById("qr"), {
-            text: ${JSON.stringify(qr)},
-            width: 240,
-            height: 240
-          });
+          function switchTab(tabId, el) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            el.classList.add('active');
+            document.getElementById(tabId).classList.add('active');
+          }
+
+          function setQrSize(px, btn) {
+            const img = document.getElementById('qrImg');
+            img.style.width = px + 'px';
+            img.style.height = px + 'px';
+            document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            localStorage.setItem('wa_qr_size', px);
+          }
+
+          // Restore saved size preference if any
+          const savedSize = localStorage.getItem('wa_qr_size');
+          if (savedSize) {
+            const matchedBtn = Array.from(document.querySelectorAll('.size-btn')).find(b => b.textContent.includes(savedSize));
+            if (matchedBtn) setQrSize(parseInt(savedSize, 10), matchedBtn);
+          }
+
+          async function getPairingCode(e) {
+            e.preventDefault();
+            const phone = document.getElementById('pairPhone').value.trim();
+            const btn = document.getElementById('pairSubmitBtn');
+            const errDiv = document.getElementById('pairError');
+            const codeBox = document.getElementById('codeDisplay');
+            const codeVal = document.getElementById('pairingCodeVal');
+
+            errDiv.style.display = 'none';
+            btn.disabled = true;
+            btn.textContent = 'Requesting code...';
+
+            try {
+              const res = await fetch('/api/auth/whatsapp/pair', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phoneNumber: phone })
+              });
+              const json = await res.json();
+              if (json.success && json.data?.pairingCode) {
+                const raw = json.data.pairingCode;
+                codeVal.textContent = raw.length === 8 ? raw.slice(0, 4) + ' - ' + raw.slice(4) : raw;
+                codeBox.style.display = 'block';
+              } else {
+                errDiv.textContent = json.error?.message || json.message || 'Failed to generate code. Please try again.';
+                errDiv.style.display = 'block';
+              }
+            } catch (err) {
+              errDiv.textContent = 'Network error while requesting pairing code.';
+              errDiv.style.display = 'block';
+            } finally {
+              btn.disabled = false;
+              btn.textContent = 'Generate Pairing Code';
+            }
+          }
+
+          // Auto-poll status every 3 seconds to transition to connected state
+          setInterval(async () => {
+            try {
+              const res = await fetch('/api/auth/whatsapp/status');
+              const json = await res.json();
+              if (json.data?.isConnected) {
+                location.reload();
+              }
+            } catch {}
+          }, 3000);
+
+          // Auto-refresh page every 20 seconds for fresh QR if not connected
           setTimeout(() => location.reload(), 20000);
         </script>
       </body>
       </html>
     `);
+  }
+
+  /**
+   * Serves direct raw PNG image of the WhatsApp QR code.
+   */
+  static async getWhatsAppQrImage(_req: FastifyRequest, reply: FastifyReply) {
+    const { SmsProviderFactory } = await import('../../lib/sms/factory.js');
+    const wa = SmsProviderFactory.getProvider('WHATSAPP') as any;
+    const qr = wa.getQrCode ? wa.getQrCode() : null;
+
+    if (!qr) {
+      return reply.status(404).send({ success: false, error: 'QR code not available or WhatsApp already connected.' });
+    }
+
+    try {
+      const buffer = await QRCode.toBuffer(qr, {
+        margin: 2,
+        scale: 6,
+        color: { dark: '#000000', light: '#ffffff' },
+      });
+      return reply.type('image/png').send(buffer);
+    } catch (err: any) {
+      return reply.status(500).send({ success: false, error: err?.message || 'Failed to generate QR buffer' });
+    }
+  }
+
+  /**
+   * Generates an 8-character pairing code for linking with a phone number.
+   */
+  static async requestWhatsAppPairingCode(req: FastifyRequest, reply: FastifyReply) {
+    const body = req.body as { phoneNumber?: string };
+    if (!body?.phoneNumber) {
+      return reply.status(400).send(errorResponse('phoneNumber is required', 'VALIDATION_ERROR'));
+    }
+
+    try {
+      const { SmsProviderFactory } = await import('../../lib/sms/factory.js');
+      const wa = SmsProviderFactory.getProvider('WHATSAPP') as any;
+      if (!wa.requestPairingCode) {
+        return reply.status(400).send(errorResponse('Pairing code not supported', 'NOT_SUPPORTED'));
+      }
+
+      const pairingCode = await wa.requestPairingCode(body.phoneNumber);
+      return reply.status(200).send(successResponse({ pairingCode }, 'Pairing code generated successfully.'));
+    } catch (err: any) {
+      return reply.status(400).send(errorResponse(err?.message || 'Failed to generate pairing code', 'PAIRING_FAILED'));
+    }
   }
 }

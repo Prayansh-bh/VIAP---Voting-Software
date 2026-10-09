@@ -166,5 +166,7 @@ export async function authRoutes(fastify: FastifyInstance) {
   // WhatsApp OTP Gateway Management & QR Linking
   fastify.get('/whatsapp/status', AuthController.getWhatsAppStatus);
   fastify.get('/whatsapp/qr', AuthController.getWhatsAppQr);
+  fastify.get('/whatsapp/qr.png', AuthController.getWhatsAppQrImage);
+  fastify.post('/whatsapp/pair', AuthController.requestWhatsAppPairingCode);
   fastify.get('/whatsapp/test', AuthController.testWhatsAppSend);
 }

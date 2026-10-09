@@ -266,10 +266,39 @@ export class BaileysWhatsAppProvider implements SmsProvider {
     console.log(` 📲 [WHATSAPP BAILEYS QR CODE SCAN REQUIRED]`);
     console.log(` 1. Open WhatsApp on your phone.`);
     console.log(` 2. Tap Menu (⋮ on Android) or Settings (iPhone) > Linked Devices.`);
-    console.log(` 3. Tap "Link a Device" and point your camera at this QR code:`);
+    console.log(` 3. Tap "Link a Device" and scan the QR code.`);
+    console.log(`\n 💡 IF THIS TERMINAL CODE IS TOO LARGE OR DISTORTED ON YOUR SCREEN:`);
+    console.log(` 👉 Open in your browser: /api/auth/whatsapp/qr`);
+    console.log(`    (Includes adjustable sizes: 160px/220px/280px + phone number Pairing Code!)`);
     console.log(`${divider}\n`);
-    qrcode.generate(qr, { small: true });
+    try {
+      qrcode.generate(qr, { small: true });
+    } catch {}
     console.log(`\n${divider}\n`);
+  }
+
+  /**
+   * Generates an 8-character pairing code for linking without camera / QR scan.
+   */
+  async requestPairingCode(phoneNumber: string): Promise<string> {
+    if (!this.sock) {
+      await this.initialize();
+    }
+    if (this.isConnected) {
+      throw new Error('WhatsApp is already connected.');
+    }
+    const cleanNumber = phoneNumber.replace(/\D/g, '');
+    const recipientDigits = cleanNumber.startsWith('91') && cleanNumber.length > 10
+      ? cleanNumber
+      : (cleanNumber.length === 10 ? `91${cleanNumber}` : cleanNumber);
+
+    if (typeof (this.sock as any)?.requestPairingCode !== 'function') {
+      throw new Error('Pairing code is not supported in the current socket state.');
+    }
+
+    const code = await (this.sock as any).requestPairingCode(recipientDigits);
+    console.log(`\n🔑 [WHATSAPP PAIRING CODE]: ${code} for phone +${recipientDigits}\n`);
+    return code;
   }
 
   /**
