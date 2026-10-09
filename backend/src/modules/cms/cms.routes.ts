@@ -149,8 +149,9 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // PUBLIC / APP CONFIG ENDPOINT (Consumed dynamically by Frontend)
   // --------------------------------------------------------------------------
   fastify.get('/config', { preHandler: [optionalAuthenticate] }, async (req: FastifyRequest, reply: FastifyReply) => {
-    const orgId = (req as any).user?.organisationId || (req.headers['x-organisation-id'] as string);
-    const tenantCode = req.headers['x-tenant-code'] as string;
+    const query = (req.query || {}) as Record<string, string>;
+    const orgId = (req as any).user?.organisationId || (req.headers['x-organisation-id'] as string) || query.organisationId || query.orgId;
+    const tenantCode = (req.headers['x-tenant-code'] as string) || query.app || query.tenant || query.tenantCode;
     const bundle = await loadCmsBundle({ organisationId: orgId, configKey: tenantCode });
     return reply.send(
       successResponse({
@@ -1038,26 +1039,17 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     },
   );
 
-  // Delete Party (Forbidden if LOCKED or referenced)
+  // Delete Party (Transactional cascade cleanup)
   fastify.delete(
     '/parties/:id',
     {
-      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND)],
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const params = req.params as { id: string };
 
       const existingParty = await prisma.politicalParty.findUnique({
         where: { id: params.id },
-        include: {
-          _count: {
-            select: {
-              voterPreferences: true,
-              brandings: true,
-              performances: true,
-            },
-          },
-        },
       });
 
       if (!existingParty) {
@@ -1067,45 +1059,26 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         });
       }
 
-      // STRICT IMMUTABILITY CHECK
-      if (existingParty.isLocked || existingParty.lifecycleStatus === 'LOCKED') {
-        await logAudit({
-          action: AuditAction.DELETE,
-          entityType: 'PoliticalParty',
-          entityId: existingParty.id,
-          req,
-          changes: {
-            status: 'BLOCKED',
-            reason: 'Party is published and immutable (LOCKED)',
-          } as unknown as Prisma.InputJsonValue,
+      await prisma.$transaction(async (tx) => {
+        // 1. Detach voters preferring this party
+        await tx.voter.updateMany({
+          where: { politicalPartyId: existingParty.id },
+          data: { politicalPartyId: null },
         });
 
-        return reply.status(403).send({
-          success: false,
-          error: {
-            code: 'PARTY_CONFIGURATION_LOCKED',
-            message: 'Party configuration is published, locked and immutable. Deletion is forbidden.',
-          },
+        // 2. Clean up branding and performance records
+        await tx.partyBranding.deleteMany({
+          where: { partyId: existingParty.id },
         });
-      }
 
-      // DEPENDENCY CHECK
-      if (
-        existingParty._count.voterPreferences > 0 ||
-        existingParty._count.brandings > 0 ||
-        existingParty._count.performances > 0
-      ) {
-        return reply.status(400).send({
-          success: false,
-          error: {
-            code: 'PARTY_IN_USE',
-            message: `Cannot delete party with active references (${existingParty._count.voterPreferences} voters, ${existingParty._count.brandings} brandings).`,
-          },
+        await tx.partyPerformance.deleteMany({
+          where: { partyId: existingParty.id },
         });
-      }
 
-      await prisma.politicalParty.delete({
-        where: { id: params.id },
+        // 3. Delete the political party record
+        await tx.politicalParty.delete({
+          where: { id: existingParty.id },
+        });
       });
 
       await logAudit({
@@ -1113,9 +1086,10 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         entityType: 'PoliticalParty',
         entityId: existingParty.id,
         req,
+        changes: { name: existingParty.name, code: existingParty.code } as unknown as Prisma.InputJsonValue,
       });
 
-      return reply.send(successResponse({ id: params.id }, 'Draft party deleted'));
+      return reply.send(successResponse({ id: params.id }, `Political party '${existingParty.name}' permanently deleted`));
     },
   );
 

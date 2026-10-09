@@ -832,11 +832,9 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
       const res: any = await requestRegistrationOtp(clean, regOtpChannel);
       setRegRequestId(res?.requestId || res?.data?.requestId || 'reg-req');
       setRegOtpSent(true);
-      if (res?.devOtp) {
-        setRegOtpCode(res.devOtp);
-      }
+      setRegOtpCode('');
       notify.success(
-        `OTP code dispatched via ${regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} to +91 ${clean}${res?.devOtp ? ` (Dev Code: ${res.devOtp})` : ''}`,
+        `OTP code dispatched via ${regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} to +91 ${clean}. Please check WhatsApp.`,
         'OTP Sent'
       );
     } catch (err: any) {
@@ -2291,7 +2289,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
 
             <div className="flex flex-col sm:flex-row gap-3 pt-2">
               <a
-                href="http://localhost:3000"
+                href={`http://localhost:3000/?app=${encodeURIComponent((createdCredentialsModal.tenantCode || '').toLowerCase())}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex-1 py-3 px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs text-center flex items-center justify-center gap-2 shadow-lg shadow-amber-400/20 cursor-pointer"

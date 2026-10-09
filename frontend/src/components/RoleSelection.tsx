@@ -10,8 +10,35 @@ interface RoleSelectionProps {
   isPanelLocked: boolean;
 }
 
+const ROLE_TO_LEVEL: Record<string, string> = {
+  STATE_ADMIN: 'STATE',
+  ZONE_INCHARGE: 'ZONE',
+  PARLIAMENT_INCHARGE: 'PARLIAMENT',
+  CONSTITUENCY_INCHARGE: 'CONSTITUENCY',
+  MANDAL_INCHARGE: 'MANDAL',
+  VILLAGE_INCHARGE: 'VILLAGE',
+  BOOTH_PRESIDENT: 'BOOTH',
+  VOTER_100_INCHARGE: 'VOTER_GROUP',
+};
+
 export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, isPanelLocked }: RoleSelectionProps) {
   const { config, t } = useCms();
+
+  const enabledLevels = useMemo(() => {
+    if (Array.isArray(config.activeHierarchyLevels) && config.activeHierarchyLevels.length > 0) {
+      return config.activeHierarchyLevels;
+    }
+    try {
+      const saved = localStorage.getItem('kdp_cms_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.activeHierarchyLevels) && parsed.activeHierarchyLevels.length > 0) {
+          return parsed.activeHierarchyLevels;
+        }
+      }
+    } catch {}
+    return ['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
+  }, [config.activeHierarchyLevels]);
 
   const activeRoles = useMemo<CommandRole[]>(() => {
     const allRoles: CommandRole[] = [
@@ -89,8 +116,12 @@ export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, 
       },
     ];
 
-    return allRoles;
-  }, [config, t]);
+    // Filter strictly by enabled hierarchy tiers for this party application
+    return allRoles.filter((role) => {
+      const level = ROLE_TO_LEVEL[role.id];
+      return !level || enabledLevels.includes(level);
+    });
+  }, [config, t, enabledLevels]);
 
   const scopeLabel = useMemo(() => {
     switch (config.appScope) {

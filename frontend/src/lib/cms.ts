@@ -374,9 +374,18 @@ export function applyThemeVariables(primaryColor: string, secondaryColor?: strin
   root.style.setProperty('--party-glow', `${primaryColor}4d`);
 }
 
-export async function fetchCmsConfig(): Promise<{ config: CmsConfig; parties: CmsParty[]; announcements: any[] }> {
+export async function fetchCmsConfig(options?: { organisationId?: string; tenantCode?: string }): Promise<{ config: CmsConfig; parties: CmsParty[]; announcements: any[] }> {
   try {
-    const payload = await apiFetch<any>('/api/cms/config');
+    const headers: Record<string, string> = {};
+    if (options?.organisationId) headers['x-organisation-id'] = options.organisationId;
+    if (options?.tenantCode) headers['x-tenant-code'] = options.tenantCode;
+
+    const queryParams = new URLSearchParams();
+    if (options?.tenantCode) queryParams.set('app', options.tenantCode);
+    if (options?.organisationId) queryParams.set('orgId', options.organisationId);
+
+    const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
+    const payload = await apiFetch<any>(`/api/cms/config${queryString}`, { headers });
     const rawConfig = payload?.config || payload || {};
     const parties = (payload?.parties as CmsParty[]) || [];
     const announcements = payload?.announcements || [];

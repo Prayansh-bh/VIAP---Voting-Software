@@ -382,40 +382,53 @@ export class ApplicationsService {
       throw new Error(`Application '${idOrKey}' not found`);
     }
 
+    const totalConfigs = await prisma.cMSConfiguration.count();
+    if (totalConfigs <= 1) {
+      throw new Error('Cannot delete the sole remaining application. At least one party application must remain active.');
+    }
+
     const orgId = config.organisationId;
-    const activePartyCode = config.activePartyCode;
 
     await prisma.$transaction(async (tx) => {
-      // 1. Permanently delete all associated PoliticalParty records
-      const partiesToDelete = await tx.politicalParty.findMany({
-        where: {
-          OR: [
-            ...(activePartyCode ? [{ code: activePartyCode }] : []),
-            ...(orgId ? [{ organisationId: orgId }] : []),
-          ],
-        },
-        select: { id: true, code: true },
-      });
+      // 1. Permanently delete PoliticalParty records owned exclusively by this organisation
+      // and not in use by any other tenant configuration
+      if (orgId) {
+        const otherConfigs = await tx.cMSConfiguration.findMany({
+          where: { id: { not: config.id } },
+          select: { activePartyCode: true },
+        });
+        const otherActiveCodes: string[] = otherConfigs
+          .map((c) => c.activePartyCode)
+          .filter((code): code is string => typeof code === 'string' && code.length > 0);
 
-      const partyIds = partiesToDelete.map((p) => p.id);
-
-      if (partyIds.length > 0) {
-        await tx.voter.updateMany({
-          where: { politicalPartyId: { in: partyIds } },
-          data: { politicalPartyId: null },
+        const partiesToDelete = await tx.politicalParty.findMany({
+          where: {
+            organisationId: orgId,
+            code: { notIn: otherActiveCodes },
+          },
+          select: { id: true, code: true },
         });
 
-        await tx.partyBranding.deleteMany({
-          where: { partyId: { in: partyIds } },
-        });
+        const partyIds = partiesToDelete.map((p) => p.id);
 
-        await tx.partyPerformance.deleteMany({
-          where: { partyId: { in: partyIds } },
-        });
+        if (partyIds.length > 0) {
+          await tx.voter.updateMany({
+            where: { politicalPartyId: { in: partyIds } },
+            data: { politicalPartyId: null },
+          });
 
-        await tx.politicalParty.deleteMany({
-          where: { id: { in: partyIds } },
-        });
+          await tx.partyBranding.deleteMany({
+            where: { partyId: { in: partyIds } },
+          });
+
+          await tx.partyPerformance.deleteMany({
+            where: { partyId: { in: partyIds } },
+          });
+
+          await tx.politicalParty.deleteMany({
+            where: { id: { in: partyIds } },
+          });
+        }
       }
 
       // 2. Cascade purge tenant hierarchy and all attached entities
@@ -611,27 +624,39 @@ export class ApplicationsService {
         where: { id: config.id },
       });
 
-      // 4. Clean up Organisation if not shared
+      // If the deleted application was default, promote the next available application
+      if (config.configKey === 'default') {
+        const nextConfig = await tx.cMSConfiguration.findFirst({
+          where: { id: { not: config.id } },
+          orderBy: { createdAt: 'asc' },
+        });
+        if (nextConfig) {
+          await tx.cMSConfiguration.update({
+            where: { id: nextConfig.id },
+            data: { configKey: 'default' },
+          });
+        }
+      }
+
+      // 4. Clean up Organisation if no remaining configs reference it
       if (orgId) {
         const remainingConfigs = await tx.cMSConfiguration.count({
           where: { organisationId: orgId },
         });
 
         if (remainingConfigs === 0) {
-          // Delete tenant users (cadres, incharges, candidates belonging to this tenant)
-          await tx.user.deleteMany({
-            where: {
-              organisationId: orgId,
-              NOT: { role: RoleType.SUPER_ADMIN },
-            },
-          });
-
-          // Detach any super administrator
+          // Detach users from this organisation to preserve relational integrity across sessions, logs, and devices
           await tx.user.updateMany({
             where: { organisationId: orgId },
-            data: { organisationId: null },
+            data: { organisationId: null, unitId: null },
           });
 
+          // Delete organisation custom roles if any
+          await tx.role.deleteMany({
+            where: { organisationId: orgId },
+          });
+
+          // Delete organisation record cleanly
           await tx.organisation.delete({
             where: { id: orgId },
           });

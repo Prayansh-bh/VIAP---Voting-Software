@@ -26,6 +26,32 @@ export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}
     headers.set('Authorization', `Bearer ${token}`);
   }
 
+  // Inject multi-tenant context headers from session or URL parameters if not explicitly provided
+  if (typeof window !== 'undefined') {
+    try {
+      const sessionStr = localStorage.getItem('kdp_active_session');
+      if (sessionStr) {
+        const session = JSON.parse(sessionStr);
+        const orgId = session?.organisationId || session?.organisation?.id;
+        const tenantCode = session?.organisation?.code;
+        if (orgId && !headers.has('x-organisation-id')) {
+          headers.set('x-organisation-id', orgId);
+        }
+        if (tenantCode && !headers.has('x-tenant-code')) {
+          headers.set('x-tenant-code', tenantCode);
+        }
+      }
+
+      if (!headers.has('x-tenant-code')) {
+        const urlParams = new URLSearchParams(window.location.search || window.location.hash.split('?')[1] || '');
+        const urlTenant = urlParams.get('app') || urlParams.get('tenant');
+        if (urlTenant) {
+          headers.set('x-tenant-code', urlTenant);
+        }
+      }
+    } catch {}
+  }
+
   if (init.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }

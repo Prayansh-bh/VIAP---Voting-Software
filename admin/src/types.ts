@@ -37,6 +37,9 @@ export interface AppInstance {
   isDefault: boolean;
   createdAt: string;
   activeHierarchyLevels?: HierarchyLevelKey[];
+  tenantCode?: string;
+  configKey?: string;
+  appKey?: string;
 }
 
 export interface InchargeRecord {

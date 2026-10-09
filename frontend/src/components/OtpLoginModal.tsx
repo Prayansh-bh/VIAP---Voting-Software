@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   AlertTriangle,
   KeyRound,
@@ -15,6 +15,18 @@ import {
 } from 'lucide-react';
 import { CommandRole, UserSession } from '../types';
 import { requestOtp, verifyOtp, loginAsDemoRole } from '../lib/api';
+import { useCms } from '../context/CmsContext';
+
+const ROLE_TO_LEVEL: Record<string, string> = {
+  STATE_ADMIN: 'STATE',
+  ZONE_INCHARGE: 'ZONE',
+  PARLIAMENT_INCHARGE: 'PARLIAMENT',
+  CONSTITUENCY_INCHARGE: 'CONSTITUENCY',
+  MANDAL_INCHARGE: 'MANDAL',
+  VILLAGE_INCHARGE: 'VILLAGE',
+  BOOTH_PRESIDENT: 'BOOTH',
+  VOTER_100_INCHARGE: 'VOTER_GROUP',
+};
 
 interface OtpLoginModalProps {
   role: CommandRole;
@@ -108,6 +120,30 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
   // Tab: 'login' = Registered Mobile Login, 'demo' = 1-Click Demo Accounts
   const [activeTab, setActiveTab] = useState<'login' | 'demo'>('login');
 
+  const { config } = useCms();
+  const enabledLevels = useMemo(() => {
+    if (Array.isArray(config.activeHierarchyLevels) && config.activeHierarchyLevels.length > 0) {
+      return config.activeHierarchyLevels;
+    }
+    try {
+      const saved = localStorage.getItem('kdp_cms_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.activeHierarchyLevels) && parsed.activeHierarchyLevels.length > 0) {
+          return parsed.activeHierarchyLevels;
+        }
+      }
+    } catch {}
+    return ['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
+  }, [config.activeHierarchyLevels]);
+
+  const filteredDemoProfiles = useMemo(() => {
+    return ROLE_DEMO_PROFILES.filter((item) => {
+      const level = ROLE_TO_LEVEL[item.roleId];
+      return !level || enabledLevels.includes(level);
+    });
+  }, [enabledLevels]);
+
   // Login form state
   const [mobileInput, setMobileInput] = useState('');
   const [channel, setChannel] = useState<'SMS' | 'WHATSAPP'>('WHATSAPP');
@@ -120,8 +156,6 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
   const [requestId, setRequestId] = useState<string | null>(null);
   const [mobileNumber, setMobileNumber] = useState('');
   const [otpCode, setOtpCode] = useState('');
-  const [devOtpDisplay, setDevOtpDisplay] = useState('');
-  const [copied, setCopied] = useState(false);
 
   const isVerifying = Boolean(requestId);
 
@@ -149,24 +183,12 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
     setIsSubmitting(true);
 
     try {
-      const response = await requestOtp(targetNum, role.id, channel, {
-        devMode: true,
-      });
+      const response = await requestOtp(targetNum, role.id, channel, { devMode: true });
 
       setRequestId(response.requestId);
       setCooldown(response.cooldownSeconds || 30);
       setMobileNumber(targetNum);
-
-      if (response.devOtp) {
-        setDevOtpDisplay(response.devOtp);
-        setOtpCode(response.devOtp);
-      } else if (DEMO_MOBILE_SET.has(targetNum)) {
-        setDevOtpDisplay('123456');
-        setOtpCode('123456');
-      } else {
-        setDevOtpDisplay('');
-        setOtpCode('');
-      }
+      setOtpCode('');
     } catch (err: any) {
       setError(
         err?.message ||
@@ -212,14 +234,6 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
     } finally {
       setIsSubmitting(false);
       setSubmittingRoleId(null);
-    }
-  };
-
-  const handleCopyOtp = (code: string) => {
-    if (navigator?.clipboard) {
-      navigator.clipboard.writeText(code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -448,7 +462,7 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {ROLE_DEMO_PROFILES.map((item) => {
+                  {filteredDemoProfiles.map((item) => {
                     const isCurrent = item.roleId === role.id;
                     const isItemSubmitting = isSubmitting && submittingRoleId === item.roleId;
 
@@ -503,47 +517,12 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
           {/* ========================================================== */}
           {isVerifying && (
             <form onSubmit={handleVerifyOtp} className="space-y-4">
-              {/* Demo Helper Banner for Preset Numbers Only */}
-              {devOtpDisplay && (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 space-y-2 animate-fade-in">
-                  <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-1.5 text-xs font-black text-emerald-950 uppercase tracking-wide">
-                      <Sparkles className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
-                      Demo Showcase OTP
-                    </span>
-                    <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-200/80 text-emerald-900 px-2 py-0.5 rounded-full">
-                      Preset Demo
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between bg-white border border-emerald-200 rounded-xl p-2.5">
-                    <div className="space-y-0.5">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                        Verification Code
-                      </span>
-                      <span className="font-mono text-xl font-black text-emerald-700 tracking-[0.25em]">
-                        {devOtpDisplay}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleCopyOtp(devOtpDisplay)}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
-                    >
-                      {copied ? (
-                        <>
-                          <Check className="w-3 h-3 text-white" />
-                          <span>Copied</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3 text-white" />
-                          <span>Copy Code</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
+              <div className="bg-emerald-50/80 border border-emerald-200/80 rounded-xl p-3 text-[12px] text-emerald-950 flex items-center gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>
+                  A 6-digit verification code has been dispatched to your <strong>WhatsApp</strong> (+91 {mobileNumber}). Please check your WhatsApp app and enter the code below.
+                </span>
+              </div>
 
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-700 font-semibold flex items-center justify-between">
                 <div>
@@ -554,15 +533,6 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
                   {role.name}
                 </span>
               </div>
-
-              {!devOtpDisplay && (
-                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 text-[11px] text-slate-600 flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>
-                    A 6-digit code has been dispatched via <strong>{channel}</strong>. (In local development, the code is also printed live to your backend terminal.)
-                  </span>
-                </div>
-              )}
 
               <div>
                 <div className="flex items-center justify-between mb-1.5">
@@ -594,7 +564,6 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
                   onClick={() => {
                     setRequestId(null);
                     setOtpCode('');
-                    setDevOtpDisplay('');
                     setError('');
                   }}
                   className="flex-1 py-2.5 bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 font-bold rounded-xl text-xs transition-colors cursor-pointer"

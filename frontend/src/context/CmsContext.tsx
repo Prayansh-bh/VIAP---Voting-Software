@@ -36,7 +36,7 @@ interface CmsContextValue {
   updateParties: (nextParties: CmsParty[]) => void;
   updateFeatureToggles: (toggles: Partial<CmsConfig['featureToggles']>) => Promise<void>;
   updateHierarchyLabels: (labels: Record<string, string>) => Promise<void>;
-  reloadConfig: () => Promise<void>;
+  reloadConfig: (options?: { organisationId?: string; tenantCode?: string }) => Promise<void>;
   t: (hierarchyLevel: string, fallback?: string) => string;
   isFeatureEnabled: (feature: keyof CmsConfig['featureToggles']) => boolean;
 }
@@ -92,9 +92,29 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
   const [constituencies, setConstituencies] = useState<ConstituencyItem[]>(config.constituencies || DEFAULT_CONFIG.constituencies);
   const [isReady, setIsReady] = useState(false);
 
-  const loadData = async () => {
+  const loadData = async (options?: { organisationId?: string; tenantCode?: string }) => {
     try {
-      const data = await fetchCmsConfig();
+      // Auto-detect tenant options from session or URL if not explicitly passed
+      let effectiveOptions = options;
+      if (!effectiveOptions && typeof window !== 'undefined') {
+        const urlParams = new URLSearchParams(window.location.search || window.location.hash.split('?')[1] || '');
+        const urlTenant = urlParams.get('app') || urlParams.get('tenant');
+        const sessionStr = localStorage.getItem('kdp_active_session');
+        let session: any = null;
+        if (sessionStr) {
+          try { session = JSON.parse(sessionStr); } catch {}
+        }
+        const sessionOrgId = session?.organisationId || session?.organisation?.id;
+        const sessionTenant = session?.organisation?.code;
+        if (sessionOrgId || urlTenant || sessionTenant) {
+          effectiveOptions = {
+            organisationId: sessionOrgId,
+            tenantCode: urlTenant || sessionTenant,
+          };
+        }
+      }
+
+      const data = await fetchCmsConfig(effectiveOptions);
       const constList = await fetchConstituenciesApi();
 
       const mergedLabels = {
@@ -270,8 +290,8 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
     await saveCmsConfig(merged);
   };
 
-  const reloadConfig = async () => {
-    await loadData();
+  const reloadConfig = async (options?: { organisationId?: string; tenantCode?: string }) => {
+    await loadData(options);
   };
 
   const t = (hierarchyLevel: string, fallback?: string): string => {

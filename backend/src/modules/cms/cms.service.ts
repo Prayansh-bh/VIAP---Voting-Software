@@ -251,9 +251,18 @@ export async function loadCmsBundle(options?: { organisationId?: string; configK
   }
 
   if (!config && options?.configKey) {
+    const searchKey = options.configKey.trim();
     config = await prisma.cMSConfiguration.findFirst({
-      where: { configKey: options.configKey.toLowerCase() },
+      where: {
+        OR: [
+          { configKey: searchKey.toLowerCase() },
+          { activePartyCode: { equals: searchKey, mode: 'insensitive' } },
+          { organisation: { code: { equals: searchKey, mode: 'insensitive' } } },
+          { organisationName: { contains: searchKey, mode: 'insensitive' } },
+        ],
+      },
       include: { organisation: true },
+      orderBy: { updatedAt: 'desc' },
     });
   }
 
@@ -286,6 +295,11 @@ export async function loadCmsBundle(options?: { organisationId?: string; configK
       NOT: {
         code: { startsWith: 'TEST_' },
       },
+      ...(orgId
+        ? {
+            OR: [{ organisationId: orgId }, { organisationId: null }],
+          }
+        : {}),
     },
     orderBy: { sortOrder: 'asc' },
   });

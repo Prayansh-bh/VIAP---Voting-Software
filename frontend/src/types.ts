@@ -40,6 +40,8 @@ export interface UserSession {
   assignedVoterGroup?: string;
   userId: string;
   accountStatus: 'Active' | 'Pending' | 'Suspended';
+  organisationId?: string;
+  organisation?: { id: string; name: string; code: string };
 }
 
 export interface MandalData {

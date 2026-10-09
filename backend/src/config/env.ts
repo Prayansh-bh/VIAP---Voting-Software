@@ -29,7 +29,9 @@ const envSchema = z.object({
   MSG91_TEMPLATE_ID: z.string().optional(),
   SMS_SENDER_ID: z.string().default('KNDTDP'),
 
-  // WhatsApp Cloud Gateway Configuration (Meta Graph API)
+  // WhatsApp Gateway Configuration (Baileys / Cloud / Twilio)
+  WHATSAPP_PROVIDER: z.string().default('baileys'),
+  WHATSAPP_BAILEYS_AUTH_DIR: z.string().optional(),
   WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
   WHATSAPP_ACCESS_TOKEN: z.string().optional(),
   WHATSAPP_OTP_TEMPLATE: z.string().default('auth_otp_code'),

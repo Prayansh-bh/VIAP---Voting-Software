@@ -51,7 +51,7 @@ const ROUTE_BY_ROLE: Record<RoleType, string> = {
 };
 
 export default function App({ initialPath }: { initialPath?: string } = {}) {
-  const { config } = useCms();
+  const { config, reloadConfig } = useCms();
   const [isPartyCreated, setIsPartyCreated] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('kdp_party_created') === 'true';
@@ -245,12 +245,26 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
         return;
       }
 
-      if (activeSession.role !== currentRouteRole) {
+      const routeLevel = roleLevelMap[currentRouteRole];
+      const isLevelAllowed = !routeLevel || enabledLevels.includes(routeLevel);
+
+      // If the hierarchy tier is restricted for this party application, redirect away
+      if (!isLevelAllowed) {
         window.location.hash = ROUTE_BY_ROLE[activeSession.role] || '/roles';
         return;
       }
+
+      // If accessing an allotted tier, align the activeSession role if different
+      if (activeSession.role !== currentRouteRole) {
+        const updatedSession: UserSession = {
+          ...activeSession,
+          role: currentRouteRole,
+        };
+        setActiveSession(updatedSession);
+        localStorage.setItem('kdp_active_session', JSON.stringify(updatedSession));
+      }
     }
-  }, [currentRouteRole, activeSession]);
+  }, [currentRouteRole, activeSession, enabledLevels]);
 
   const isLandingRoute = currentPath === '/' || currentPath === '' || currentPath === '/landing';
   const isRolesRoute = currentPath === '/app' || currentPath === '/app/' || currentPath === '/roles';
@@ -297,12 +311,22 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     setSelectedRole(role);
   };
 
-  const handleLoginSuccess = (session: UserSession, token: string) => {
+  const handleLoginSuccess = async (session: UserSession, token: string) => {
     setAuthToken(token);
     setActiveSession(session);
     localStorage.setItem('kdp_active_session', JSON.stringify(session));
     localStorage.removeItem('kdp_logged_out');
     setSelectedRole(null);
+
+    // Dynamically switch CMS configuration to the authenticated user's organization
+    const orgId = session.organisationId || (session as any).organisation?.id;
+    const tenantCode = (session as any).organisation?.code;
+    try {
+      await reloadConfig({ organisationId: orgId, tenantCode });
+    } catch (e) {
+      console.warn('Tenant config reload error:', e);
+    }
+
     const targetRoute = ROUTE_BY_ROLE[session.role] || '/roles';
     setCurrentPath(targetRoute);
     window.location.hash = targetRoute;
@@ -320,6 +344,13 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     localStorage.setItem('kdp_logged_out', 'true');
     localStorage.removeItem('kdp_active_session');
     setActiveSession(null);
+
+    try {
+      await reloadConfig();
+    } catch (e) {
+      console.warn('Default config reload error:', e);
+    }
+
     window.location.hash = '/roles';
   };
 
@@ -428,6 +459,13 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
           currentRole={activeSession?.role}
           currentPath={currentPath}
           onLogout={handleLogout}
+          onSwitchRole={(newRole) => {
+            if (activeSession) {
+              const updatedSession = { ...activeSession, role: newRole };
+              setActiveSession(updatedSession);
+              localStorage.setItem('kdp_active_session', JSON.stringify(updatedSession));
+            }
+          }}
         />
       )}
 

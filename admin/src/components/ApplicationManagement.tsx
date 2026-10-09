@@ -12,6 +12,7 @@ import {
   Users,
   Settings2,
   AlertCircle,
+  Loader2,
 } from 'lucide-react';
 import { AppInstance, HierarchyLevelKey, HierarchyTierConfig } from '../types';
 import Pagination from './Pagination';
@@ -22,7 +23,7 @@ interface ApplicationManagementProps {
   selectedApp: AppInstance | null;
   onSelectApp: (app: AppInstance) => void;
   onCreateApp: (app: Partial<AppInstance>) => Promise<void>;
-  onDeleteApp: (id: string) => void;
+  onDeleteApp: (id: string) => Promise<void> | void;
   onSetDefault: (id: string) => void;
   isCreateModalOpen?: boolean;
   onOpenCreateModal?: () => void;
@@ -64,6 +65,7 @@ export default function ApplicationManagement({
 
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
   const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(6);
 
@@ -263,7 +265,7 @@ export default function ApplicationManagement({
 
                 <div className="flex items-center gap-1.5">
                   <a
-                    href="http://localhost:3000"
+                    href={app.tenantCode || app.configKey ? `http://localhost:3000/?app=${encodeURIComponent(((app.tenantCode || app.configKey) || '').toLowerCase())}` : 'http://localhost:3000'}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
@@ -273,24 +275,40 @@ export default function ApplicationManagement({
                     <ExternalLink className="w-4 h-4" />
                   </a>
                   <button
+                    disabled={deletingId === app.id}
                     onClick={async (e) => {
                       e.stopPropagation();
+                      if (apps.length <= 1) {
+                        notify.warning('Cannot delete the sole application. At least one party application must remain active.', 'Action Not Allowed');
+                        return;
+                      }
                       const confirmed = await confirmDialog({
                         title: 'Delete Party Application',
-                        message: `Are you sure you want to permanently delete "${app.name}" (${app.party})? All associated tenant hierarchy configuration will be purged.`,
+                        message: `Are you sure you want to permanently delete "${app.name}" (${app.party})? All associated tenant hierarchy configuration will be purged from PostgreSQL.`,
                         confirmText: 'Delete Application',
                         danger: true,
                         icon: 'trash',
                       });
                       if (confirmed) {
-                        onDeleteApp(app.id);
-                        notify.success(`Application "${app.name}" has been deleted.`);
+                        setDeletingId(app.id);
+                        try {
+                          await onDeleteApp(app.id);
+                          notify.success(`Application "${app.name}" has been permanently deleted from PostgreSQL.`, 'Deleted Successfully');
+                        } catch (err: any) {
+                          notify.error(err.message || 'Failed to delete application.', 'Deletion Error');
+                        } finally {
+                          setDeletingId(null);
+                        }
                       }
                     }}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer disabled:opacity-50"
                     title="Delete application"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    {deletingId === app.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-rose-400" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
                   </button>
                 </div>
               </div>

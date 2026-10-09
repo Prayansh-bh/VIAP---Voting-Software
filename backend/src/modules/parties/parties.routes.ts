@@ -34,7 +34,7 @@ export async function partiesRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/',
     {
-      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND)],
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN)],
       preValidation: [validateBody(partySchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
@@ -69,7 +69,7 @@ export async function partiesRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/:id/publish',
     {
-      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND)],
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const params = req.params as { id: string };
@@ -109,7 +109,7 @@ export async function partiesRoutes(fastify: FastifyInstance) {
   fastify.patch(
     '/:id',
     {
-      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND)],
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN)],
       preValidation: [validateBody(partySchema.partial())],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
@@ -154,7 +154,7 @@ export async function partiesRoutes(fastify: FastifyInstance) {
   fastify.delete(
     '/:id',
     {
-      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND)],
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const params = req.params as { id: string };
@@ -166,26 +166,37 @@ export async function partiesRoutes(fastify: FastifyInstance) {
         return reply.status(404).send({ success: false, error: { code: 'NOT_FOUND', message: 'Party not found' } });
       }
 
-      if (existingParty.isLocked || existingParty.lifecycleStatus === 'LOCKED') {
-        await logAudit({
-          action: AuditAction.DELETE,
-          entityType: 'PoliticalParty',
-          entityId: existingParty.id,
-          req,
-          changes: { status: 'BLOCKED', reason: 'Party is locked and immutable' } as unknown as Prisma.InputJsonValue,
+      await prisma.$transaction(async (tx) => {
+        // 1. Detach voters preferring this party
+        await tx.voter.updateMany({
+          where: { politicalPartyId: existingParty.id },
+          data: { politicalPartyId: null },
         });
 
-        return reply.status(403).send({
-          success: false,
-          error: {
-            code: 'PARTY_CONFIGURATION_LOCKED',
-            message: 'Party configuration is published, locked and immutable. Deletion is forbidden.',
-          },
+        // 2. Delete branding and performance metrics
+        await tx.partyBranding.deleteMany({
+          where: { partyId: existingParty.id },
         });
-      }
 
-      await prisma.politicalParty.delete({ where: { id: params.id } });
-      return reply.send(successResponse({ id: params.id }, 'Draft party deleted'));
+        await tx.partyPerformance.deleteMany({
+          where: { partyId: existingParty.id },
+        });
+
+        // 3. Delete the political party record
+        await tx.politicalParty.delete({
+          where: { id: existingParty.id },
+        });
+      });
+
+      await logAudit({
+        action: AuditAction.DELETE,
+        entityType: 'PoliticalParty',
+        entityId: existingParty.id,
+        req,
+        changes: { name: existingParty.name, code: existingParty.code } as unknown as Prisma.InputJsonValue,
+      });
+
+      return reply.send(successResponse({ id: params.id }, `Political party '${existingParty.name}' permanently deleted`));
     },
   );
 }

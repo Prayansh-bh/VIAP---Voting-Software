@@ -155,22 +155,12 @@ export default function App() {
   };
 
   const handleDeleteApp = async (id: string) => {
-    try {
-      await deleteApplication(id);
-      const refreshed = await fetchApplications();
-      setApps(refreshed);
-      if (selectedApp?.id === id) {
-        const nextApp = refreshed[0] || null;
-        handleSelectApp(nextApp);
-      }
-    } catch (err) {
-      console.error('Failed to delete application from DB:', err);
-      const refreshed = await fetchApplications();
-      setApps(refreshed);
-      if (selectedApp?.id === id) {
-        const nextApp = refreshed[0] || null;
-        handleSelectApp(nextApp);
-      }
+    await deleteApplication(id);
+    const refreshed = await fetchApplications();
+    setApps(refreshed);
+    if (selectedApp?.id === id) {
+      const nextApp = refreshed.find((a) => a.isDefault) || refreshed[0] || null;
+      handleSelectApp(nextApp);
     }
   };
 

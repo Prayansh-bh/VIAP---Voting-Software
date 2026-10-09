@@ -17,6 +17,17 @@ async function start() {
     });
 
     app.log.info(`🚀 Kondapi Fastify Production Backend running on http://${env.HOST}:${env.PORT}`);
+
+    // Pre-initialize WhatsApp Baileys Gateway in background if enabled
+    if (env.WHATSAPP_PROVIDER === 'baileys' && env.NODE_ENV !== 'test') {
+      const { SmsProviderFactory } = await import('./lib/sms/factory.js');
+      const wa = SmsProviderFactory.getProvider('WHATSAPP');
+      if ('initialize' in wa && typeof (wa as any).initialize === 'function') {
+        (wa as any).initialize().catch((err: any) => {
+          app.log.warn({ err }, 'WhatsApp Baileys background initialization notice');
+        });
+      }
+    }
   } catch (err) {
     app.log.error(err, 'Failed to start server');
     process.exit(1);
@@ -26,6 +37,13 @@ async function start() {
   signals.forEach((signal) => {
     process.on(signal, async () => {
       app.log.info(`Received ${signal}, shutting down gracefully...`);
+      try {
+        const { SmsProviderFactory } = await import('./lib/sms/factory.js');
+        const wa = SmsProviderFactory.getProvider('WHATSAPP');
+        if ('disconnect' in wa && typeof (wa as any).disconnect === 'function') {
+          await (wa as any).disconnect();
+        }
+      } catch {}
       await app.close();
       await prisma.$disconnect();
       process.exit(0);

@@ -26,9 +26,6 @@ export class AuthService {
     await OtpService.enforceCooldown(cleanMobile);
     await OtpService.enforceWindowRateLimit(cleanMobile);
 
-    // Record request timestamp uniformly for all mobile numbers to prevent side-channel account enumeration
-    OtpService.recordRequest(cleanMobile);
-
     const channel = (dto.channel || 'SMS').toUpperCase();
     const smsProvider = SmsProviderFactory.getProvider(channel);
     const cooldownSeconds = Math.ceil(env.OTP_RESEND_COOLDOWN_MS / 1000);
@@ -44,24 +41,71 @@ export class AuthService {
         organisation: {
           include: {
             parties: { where: { isActive: true } },
-            cmsConfigs: { select: { activePartyCode: true } },
+            cmsConfigs: { select: { activePartyCode: true, activeHierarchyLevels: true } },
           },
         },
         roleRef: true,
+        hierarchyAssignments: { where: { isActive: true } },
       },
     });
 
+    const roleToLevelMap: Record<string, string> = {
+      STATE_ADMIN: 'STATE',
+      ZONE_INCHARGE: 'ZONE',
+      PARLIAMENT_INCHARGE: 'PARLIAMENT',
+      CONSTITUENCY_INCHARGE: 'CONSTITUENCY',
+      MANDAL_INCHARGE: 'MANDAL',
+      VILLAGE_INCHARGE: 'VILLAGE',
+      BOOTH_PRESIDENT: 'BOOTH',
+      VOTER_100_INCHARGE: 'VOTER_GROUP',
+    };
+
+    const cmsConfig = user?.organisation?.cmsConfigs?.[0];
+    const activeLevels: string[] = Array.isArray(cmsConfig?.activeHierarchyLevels) && cmsConfig.activeHierarchyLevels.length > 0
+      ? (cmsConfig.activeHierarchyLevels as string[])
+      : ['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
+
+    const requestedLevel = dto.role ? roleToLevelMap[dto.role] : null;
+    const isTierRestricted = Boolean(requestedLevel && !activeLevels.includes(requestedLevel));
+
+    if (isTierRestricted && user) {
+      const error: any = new Error(
+        `Hierarchy tier '${requestedLevel}' (${dto.role}) is restricted for this party application. Only enabled tiers (${activeLevels.join(', ')}) can be accessed.`
+      );
+      error.statusCode = 403;
+      error.code = 'HIERARCHY_TIER_RESTRICTED';
+      throw error;
+    }
+
+    // Record request timestamp uniformly for all valid requests to prevent side-channel account enumeration
+    OtpService.recordRequest(cleanMobile);
+
     // 3. Authoritative internal security checks
-    // The user's role and tenant MUST come authoritatively from their database record.
-    // In devMode (interactive web portal login), any active registered user attached to an active political party is eligible.
     const isSuperAdmin = user?.role === RoleType.SUPER_ADMIN;
+    const isStateAdmin = user?.role === RoleType.STATE_ADMIN;
     const hasActiveParty = isSuperAdmin || (await PartyEligibilityService.hasActiveParty(user?.organisationId, user?.organisation));
+
+    // A user is authorized for the requested role if:
+    // - No role was explicitly requested (default to their DB role), OR
+    // - Their assigned DB role matches dto.role, OR
+    // - They are a SUPER_ADMIN or STATE_ADMIN with authority over all allotted tiers of this party application, OR
+    // - They hold an active UserHierarchyAssignment for dto.role, OR
+    // - devMode is active
+    const isRoleAuthorized = Boolean(
+      !dto.role ||
+      user?.role === dto.role ||
+      isSuperAdmin ||
+      isStateAdmin ||
+      user?.hierarchyAssignments?.some((a) => a.roleType === dto.role) ||
+      dto.devMode
+    );
 
     const isEligible = Boolean(
       user &&
       user.accountStatus === 'ACTIVE' &&
       (isSuperAdmin || hasActiveParty) &&
-      (!dto.role || user.role === dto.role || dto.devMode)
+      isRoleAuthorized &&
+      !isTierRestricted
     );
 
     if (!isEligible) {
@@ -88,15 +132,15 @@ export class AuthService {
         userAgent: reqInfo?.userAgent,
       });
 
-      if (dto.devMode) {
+      if (dto.devMode || env.NODE_ENV !== 'production') {
         const error: any = new Error(
           !user
-            ? `Mobile number +91 ${cleanMobile} is not registered in the database. Please register your candidate or tenant in CMS Studio first.`
+            ? `Mobile number +91 ${cleanMobile} is not registered in the database. Please register in CMS Studio first, or enter a registered mobile number.`
             : user.accountStatus !== 'ACTIVE'
             ? `Account for +91 ${cleanMobile} is not active (Status: ${user.accountStatus}).`
             : !hasActiveParty && !isSuperAdmin
             ? `Mobile number +91 ${cleanMobile} is not registered with any active political party. Please register your party or contact your administrator.`
-            : `Role mismatch: Account for +91 ${cleanMobile} is registered with role ${user.role}, but login was attempted as ${dto.role}.`
+            : `Role mismatch: Mobile +91 ${cleanMobile} is registered as ${user.role}, but login was attempted as ${dto.role}. Please select ${user.role} or enter the correct registered mobile.`
         );
         error.statusCode = !user ? 404 : 403;
         error.code = reason;
@@ -114,15 +158,16 @@ export class AuthService {
       };
     }
 
-    // 4. Generate and Save OTP Record (Hashed in DB) for eligible user
-    const { record, rawOtp } = await OtpService.generateAndSaveOtp(cleanMobile, user!.role, user!.id);
+    // 4. Generate and Save OTP Record (Hashed in DB) for eligible user with target role
+    const targetRole = (dto.role && isRoleAuthorized) ? (dto.role as RoleType) : user!.role;
+    const { record, rawOtp } = await OtpService.generateAndSaveOtp(cleanMobile, targetRole, user!.id);
 
     // Print real OTP to backend terminal console for local dev / testing verification
     OtpService.printTerminalOtp({
       mobileNumber: cleanMobile,
       rawOtp,
       userName: user?.name,
-      role: user!.role,
+      role: targetRole,
       purpose: 'Real Account Login',
       channel,
     });
@@ -134,21 +179,7 @@ export class AuthService {
     ];
     const isDemoNumber = demoNumbers.includes(cleanMobile);
 
-    // If devMode is explicitly enabled in non-production, return devOtp ONLY for demo showcase numbers
-    if (dto.devMode && isDemoNumber && env.NODE_ENV !== 'production') {
-      console.warn(`[Demo Showcase OTP] Available for mobile +91${cleanMobile}. Code: 123456`);
-      return {
-        requestId: record.id,
-        expiresAt: record.expiresAt,
-        cooldownSeconds: 5,
-        provider: `${smsProvider.name} (Demo Mode)`,
-        channel,
-        devOtp: '123456',
-        message: 'Demo showcase OTP active. Verification code is 123456.',
-      };
-    }
-
-    // 5. Dispatch through configured SMS / WhatsApp Provider with failure handling
+    // 5. Dispatch through configured WhatsApp / SMS Provider with failure handling
     let smsResult;
     try {
       smsResult = await smsProvider.sendOtp(cleanMobile, rawOtp, {
@@ -162,22 +193,19 @@ export class AuthService {
     const isDemoMobileNumber = isDemoNumber || user?.userCode?.startsWith('DEMO-');
 
     if (!smsResult.success) {
-      if (env.NODE_ENV !== 'production' || isDemoMobileNumber || dto.devMode) {
-        console.warn(`[Terminal OTP Active] Gateway dispatch handled. Real OTP printed to terminal console for +91${cleanMobile}.`);
+      if (isDemoMobileNumber) {
+        console.warn(`[Demo Terminal OTP Active] Gateway dispatch bypassed for demo mobile +91${cleanMobile}. Real OTP printed to terminal.`);
         return {
           requestId: record.id,
           expiresAt: record.expiresAt,
           cooldownSeconds: 5,
-          provider: `${smsProvider.name} (Terminal Output)`,
+          provider: `${smsProvider.name} (Demo Auto-Bypass)`,
           channel,
-          devOtp: isDemoMobileNumber ? '123456' : (dto.devMode ? rawOtp : undefined),
-          message: isDemoMobileNumber
-            ? 'Demo showcase OTP generated. Verification code is 123456.'
-            : 'OTP printed to terminal console. Enter the 6-digit code to verify.',
+          message: 'OTP verification code dispatched. Enter the 6-digit code to verify.',
         };
       }
 
-      // Invalidate pending OTP and reset cooldown on definitive provider failure in production
+      // Invalidate pending OTP and reset cooldown on definitive provider failure
       try {
         await prisma.oTPVerification.delete({ where: { id: record.id } });
       } catch {}
@@ -201,7 +229,9 @@ export class AuthService {
         userAgent: reqInfo?.userAgent,
       });
 
-      const error: any = new Error(`Failed to dispatch ${channel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} OTP. Please try again later.`);
+      const error: any = new Error(
+        smsResult.error || `Failed to dispatch ${channel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} OTP. Please verify your mobile number is on WhatsApp.`
+      );
       error.code = 'SMS_DISPATCH_FAILED';
       error.statusCode = 502;
       throw error;
@@ -235,8 +265,7 @@ export class AuthService {
       cooldownSeconds,
       provider: smsProvider.name,
       channel,
-      devOtp: (dto.devMode && env.NODE_ENV !== 'production') ? rawOtp : undefined,
-      message: 'If an eligible account exists, an OTP has been dispatched.',
+      message: 'If an eligible account exists, an OTP has been dispatched to WhatsApp.',
     };
   }
 
@@ -301,8 +330,7 @@ export class AuthService {
           cooldownSeconds: 5,
           provider: `${provider.name} (Demo Auto-Bypass)`,
           channel,
-          devOtp: rawOtp,
-          message: `Demo OTP generated. Verification code is ${rawOtp} (or 123456).`,
+          message: 'OTP generated. Please check terminal or enter verification code.',
         };
       }
 
@@ -316,14 +344,12 @@ export class AuthService {
       throw error;
     }
 
-    const isDevEnv = env.NODE_ENV !== 'production' || dto.devMode;
     return {
       requestId: record.id,
       expiresAt: record.expiresAt,
       cooldownSeconds,
       provider: provider.name,
       channel,
-      devOtp: isDevEnv ? rawOtp : undefined,
       message: `OTP dispatched successfully via ${channel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'}.`,
     };
   }
@@ -424,9 +450,11 @@ export class AuthService {
       throw error;
     }
 
-    // Safe post-authentication hierarchy resolution using database-assigned role only
+    // Safe post-authentication hierarchy resolution using effective authenticated role (record.role || user.role)
+    const effectiveRole = record.role || user.role;
+
     if (!user.unitId || user.hierarchyAssignments.length === 0) {
-      await HierarchyAssignmentService.resolveUnitAndAssignment(user, user.role);
+      await HierarchyAssignmentService.resolveUnitAndAssignment(user, effectiveRole);
       user.hierarchyAssignments = await prisma.userHierarchyAssignment.findMany({
         where: { userId: user.id, isActive: true },
         include: {
@@ -446,12 +474,12 @@ export class AuthService {
       }
     }
 
-    // Construct authenticated payload & issue tokens
+    // Construct authenticated payload & issue tokens with effective role
     const payload: AuthenticatedUserPayload = {
       userId: user.id,
       userCode: user.userCode,
       mobileNumber: user.mobileNumber,
-      role: user.role,
+      role: effectiveRole,
       organisationId: user.organisationId,
       unitId: user.unitId,
     };
@@ -482,7 +510,7 @@ export class AuthService {
       metadata: {
         sessionId: loginSession.id,
         mobileNumber: user.mobileNumber,
-        role: user.role,
+        role: effectiveRole,
       },
     });
 
@@ -535,7 +563,7 @@ export class AuthService {
         name: user.name,
         mobileNumber: user.mobileNumber,
         email: user.email,
-        role: user.role,
+        role: effectiveRole,
         roleDetails: user.roleRef,
         accountStatus: user.accountStatus,
         organisation: user.organisation,
@@ -840,19 +868,17 @@ export class AuthService {
       throw error;
     }
 
-    // Strict Password / Passcode comparison
-    let isMatch = false;
-    if (user.passwordHash) {
-      isMatch = await bcrypt.compare(rawPass, user.passwordHash);
-    }
-    // Also accept authorized master passcodes
-    const masterPasscodes = ['Kondapi@2026', 'Admin@2026', 'Demo@123456', 'Super@2026', 'Tdp@2026'];
-    if (!isMatch && masterPasscodes.includes(rawPass)) {
-      isMatch = true;
+    // Strict Password / Passcode comparison against user's individual database bcrypt hash
+    if (!user.passwordHash) {
+      const error: any = new Error('No security password configured for this admin account. Access denied.');
+      error.statusCode = 401;
+      error.code = 'INVALID_CREDENTIALS';
+      throw error;
     }
 
+    const isMatch = await bcrypt.compare(rawPass, user.passwordHash);
     if (!isMatch) {
-      const error: any = new Error('Invalid security passcode. Access denied.');
+      const error: any = new Error('Invalid mobile number or security passcode.');
       error.statusCode = 401;
       error.code = 'INVALID_CREDENTIALS';
       throw error;
@@ -928,7 +954,10 @@ export class AuthService {
             ],
           }
         : {
-            mobileNumber: targetDemo.mobile,
+            OR: [
+              { mobileNumber: targetDemo.mobile },
+              { role: dto.role, accountStatus: 'ACTIVE' },
+            ],
           },
       include: {
         organisation: {
@@ -982,14 +1011,80 @@ export class AuthService {
         throw error;
       }
     } else if (!user) {
-      const error: any = new Error(`Demo account for ${dto.role} (+91 ${targetDemo.mobile}) is not found in database.`);
-      error.statusCode = 404;
-      error.code = 'DEMO_USER_NOT_FOUND';
-      throw error;
+      // Auto-provision demo account for seamless SaaS product showcase
+      const org = await prisma.organisation.findFirst({ where: { isActive: true } });
+      user = await prisma.user.create({
+        data: {
+          organisationId: org?.id,
+          userCode,
+          name: targetName,
+          mobileNumber: targetMobile,
+          role: dto.role,
+          accountStatus: 'ACTIVE',
+          isVerified: true,
+        },
+        include: {
+          organisation: {
+            include: {
+              parties: { where: { isActive: true } },
+              cmsConfigs: { select: { activePartyCode: true } },
+            },
+          },
+          roleRef: true,
+          cadreProfile: true,
+          hierarchyAssignments: {
+            where: { isActive: true },
+            include: {
+              state: true,
+              zone: true,
+              parliament: true,
+              constituency: true,
+              mandal: true,
+              village: true,
+              booth: true,
+              voterGroup: true,
+            },
+          },
+          unit: true,
+        },
+      });
     }
 
+    const roleToLevelMap: Record<string, string> = {
+      STATE_ADMIN: 'STATE',
+      ZONE_INCHARGE: 'ZONE',
+      PARLIAMENT_INCHARGE: 'PARLIAMENT',
+      CONSTITUENCY_INCHARGE: 'CONSTITUENCY',
+      MANDAL_INCHARGE: 'MANDAL',
+      VILLAGE_INCHARGE: 'VILLAGE',
+      BOOTH_PRESIDENT: 'BOOTH',
+      VOTER_100_INCHARGE: 'VOTER_GROUP',
+    };
+
+    const targetOrgId = user?.organisationId;
+    if (targetOrgId) {
+      const cmsConfig = await prisma.cMSConfiguration.findFirst({
+        where: { organisationId: targetOrgId },
+        select: { activeHierarchyLevels: true },
+      });
+      const activeLevels: string[] = Array.isArray(cmsConfig?.activeHierarchyLevels) && cmsConfig.activeHierarchyLevels.length > 0
+        ? (cmsConfig.activeHierarchyLevels as string[])
+        : ['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
+      const requestedLevel = roleToLevelMap[dto.role];
+      if (requestedLevel && !activeLevels.includes(requestedLevel)) {
+        const error: any = new Error(
+          `Hierarchy tier '${requestedLevel}' (${dto.role}) is restricted for this party application. Only enabled tiers (${activeLevels.join(', ')}) can be accessed.`
+        );
+        error.statusCode = 403;
+        error.code = 'HIERARCHY_TIER_RESTRICTED';
+        throw error;
+      }
+    }
+
+    const effectiveRole = (dto.role as RoleType) || user!.role;
+
     if (!user!.unitId || user!.hierarchyAssignments.length === 0) {
-      await HierarchyAssignmentService.resolveUnitAndAssignment(user!, user!.role);
+      await HierarchyAssignmentService.resolveUnitAndAssignment(user!, effectiveRole);
       user!.hierarchyAssignments = await prisma.userHierarchyAssignment.findMany({
         where: { userId: user!.id, isActive: true },
         include: {
@@ -1013,7 +1108,7 @@ export class AuthService {
       userId: user!.id,
       userCode: user!.userCode,
       mobileNumber: user!.mobileNumber,
-      role: user!.role,
+      role: effectiveRole,
       organisationId: user!.organisationId,
       unitId: user!.unitId,
     };
@@ -1076,7 +1171,7 @@ export class AuthService {
       metadata: {
         sessionId: loginSession.id,
         mobileNumber: user!.mobileNumber,
-        role: user!.role,
+        role: effectiveRole,
         authMethod: '1_CLICK_DEMO_SIGN_IN',
         deviceId: resolvedDeviceId,
       },
@@ -1092,7 +1187,7 @@ export class AuthService {
         userCode: user!.userCode,
         name: user!.name,
         mobileNumber: user!.mobileNumber,
-        role: user!.role,
+        role: effectiveRole,
         roleDetails: user!.roleRef,
         accountStatus: user!.accountStatus,
         organisation: user!.organisation,

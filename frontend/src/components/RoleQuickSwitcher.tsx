@@ -24,6 +24,7 @@ interface RoleQuickSwitcherProps {
   currentRole?: RoleType;
   currentPath: string;
   onLogout: () => void;
+  onSwitchRole?: (role: RoleType) => void;
 }
 
 interface SwitcherItem {
@@ -73,6 +74,7 @@ export default function RoleQuickSwitcher({
   currentRole,
   currentPath,
   onLogout,
+  onSwitchRole,
 }: RoleQuickSwitcherProps) {
   const { config } = useCms();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -127,6 +129,9 @@ export default function RoleQuickSwitcher({
   const handleSelect = (item: SwitcherItem) => {
     setIsDropdownOpen(false);
     if (item.path) {
+      if (item.role !== 'ROLES' && onSwitchRole) {
+        onSwitchRole(item.role as RoleType);
+      }
       window.location.hash = item.path;
     }
   };
