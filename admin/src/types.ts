@@ -73,7 +73,7 @@ export interface AdminUser {
   id: string;
   name: string;
   email: string;
-  role: 'SUPER_ADMIN' | 'ORGANISER' | 'SYSTEM_ADMIN';
+  role: 'SUPER_ADMIN' | 'ORGANISER' | 'SYSTEM_ADMIN' | 'STATE_ADMIN';
   token?: string;
 }
 
