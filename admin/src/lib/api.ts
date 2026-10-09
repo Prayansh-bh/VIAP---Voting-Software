@@ -1,7 +1,16 @@
 import { AppInstance, InchargeRecord, ApprovalRecord, AdminUser, ApplicationSummary } from '../types';
 import { getAdminToken, setAdminToken, clearAdminToken, setAdminSession } from './auth';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+const getApiBase = () => {
+  const envUrl = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || '').trim();
+  if (envUrl) {
+    const cleaned = envUrl.replace(/\/+$/, '');
+    return cleaned.endsWith('/api') ? cleaned : `${cleaned}/api`;
+  }
+  return 'http://localhost:4000/api';
+};
+
+const API_BASE = getApiBase();
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = getAdminToken();
