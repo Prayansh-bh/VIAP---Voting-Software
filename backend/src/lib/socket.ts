@@ -12,7 +12,7 @@ let io: SocketIOServer | null = null;
 export function initSocketServer(httpServer: HTTPServer, corsOrigin: string): SocketIOServer {
   io = new SocketIOServer(httpServer, {
     cors: {
-      origin: corsOrigin === '*' ? '*' : corsOrigin.split(','),
+      origin: !corsOrigin || corsOrigin === '*' ? true : corsOrigin.split(',').map((s) => s.trim()),
       credentials: true,
     },
     transports: ['websocket', 'polling'],

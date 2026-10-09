@@ -13,12 +13,18 @@ export function getTrustedOrigins(): string[] {
 /**
  * Checks whether an incoming origin is authorized.
  * - Non-browser requests (no origin) are allowed for general CORS evaluation.
- * - In production: checks against explicit trusted origins from CORS_ORIGIN.
+ * - When CORS_ORIGIN is '*' or unspecified, all browser origins are allowed (reflected for credentials).
+ * - In production with specific origins: checks against explicit trusted origins.
  * - In development/test: allows localhost / 127.0.0.1 on any port, in addition to trusted origins.
  */
 export function isOriginAllowed(origin: string | undefined): boolean {
   if (!origin) {
     return true; // cURL, mobile apps, server-to-server health checks
+  }
+
+  // Allow all origins when CORS_ORIGIN is '*' or empty
+  if (!env.CORS_ORIGIN || env.CORS_ORIGIN === '*') {
+    return true;
   }
 
   const trusted = getTrustedOrigins();

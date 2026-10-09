@@ -44,10 +44,9 @@ services:
       - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
       - COOKIE_SECRET=${COOKIE_SECRET}
       - OTP_SECRET=${OTP_SECRET}
-      - SMS_PROVIDER=msg91
-      - MSG91_AUTH_KEY=${MSG91_AUTH_KEY}
-      - MSG91_TEMPLATE_ID=${MSG91_TEMPLATE_ID}
-      - SMS_SENDER_ID=${SMS_SENDER_ID}
+      - SMS_PROVIDER=baileys
+      - WHATSAPP_PROVIDER=baileys
+      - WHATSAPP_BAILEYS_AUTH_DIR=/app/.baileys_auth
       - ALLOW_MOCK_OTP=false
     depends_on:
       - postgres
