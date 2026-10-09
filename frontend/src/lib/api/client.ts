@@ -3,8 +3,11 @@
 import { getAuthToken } from '../authStorage';
 
 export const getApiBase = (): string => {
-  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) {
-    return import.meta.env.VITE_API_BASE_URL;
+  if (typeof import.meta !== 'undefined') {
+    const envUrl = import.meta.env?.VITE_API_BASE_URL || import.meta.env?.VITE_API_URL;
+    if (envUrl) {
+      return envUrl.replace(/\/+$/, '');
+    }
   }
   // If in browser, use relative URL (empty string) so Vite proxy handles requests from any device/laptop/phone
   if (typeof window !== 'undefined') {
