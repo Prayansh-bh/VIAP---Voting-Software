@@ -335,4 +335,49 @@ describe('P0 Security Hardening - Batch 3 Provisioning Safety & Atomicity', () =
     // Verify credentials object never leaks generated password
     assert.equal(body.data.credentials.password, undefined);
   });
+
+  it('7. Concurrent provisioning requests with same organisation name reject the duplicate with 409', async () => {
+    const timestamp = Date.now().toString().slice(-4);
+    const orgName = `Concurrent Org ${timestamp}`;
+    const [res1, res2] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: '/api/cms/build-application',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          appName: orgName,
+          organisationName: orgName,
+          tenantCode: `CN1-${timestamp}`,
+          appScope: 'SINGLE_MLA',
+        },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/api/cms/build-application',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          appName: orgName.toLowerCase(),
+          organisationName: orgName.toLowerCase(),
+          tenantCode: `CN2-${timestamp}`,
+          appScope: 'SINGLE_MLA',
+        },
+      }),
+    ]);
+
+    const statuses = [res1.statusCode, res2.statusCode].sort();
+    assert.deepEqual(statuses, [201, 409], 'Exactly one request must succeed (201) and the duplicate must be rejected (409)');
+    const successfulRes = res1.statusCode === 201 ? res1 : res2;
+    const body = JSON.parse(successfulRes.body);
+    createdOrgIds.push(body.data.application.organisationId);
+
+    const conflictingRes = res1.statusCode === 409 ? res1 : res2;
+    const conflictBody = JSON.parse(conflictingRes.body);
+    assert.equal(conflictBody.error?.code, 'TENANT_ALREADY_EXISTS');
+
+    // Verify only ONE organisation exists in the database
+    const orgs = await prisma.organisation.findMany({
+      where: { name: { equals: orgName, mode: 'insensitive' } },
+    });
+    assert.equal(orgs.length, 1, 'Database must contain exactly 1 organisation, never duplicate');
+  });
 });

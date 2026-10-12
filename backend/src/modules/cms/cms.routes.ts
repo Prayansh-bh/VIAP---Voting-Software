@@ -273,10 +273,38 @@ export async function cmsRoutes(fastify: FastifyInstance) {
       try {
         const provisionResult = await prisma.$transaction(
           async (tx) => {
+            const orgName = (body.organisationName || body.appName).trim();
+
+            // Advisory transaction lock on case-insensitive organization name to serialize concurrent attempts
+            try {
+              await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(lower(${orgName})))`;
+            } catch {
+              // Non-PostgreSQL test fallback
+            }
+
+            // In-transaction uniqueness re-check for concurrency safety
+            const inTxExisting = await tx.organisation.findFirst({
+              where: {
+                OR: [
+                  { code: rawCode },
+                  { name: { equals: orgName, mode: 'insensitive' } },
+                ],
+              },
+            });
+
+            if (inTxExisting) {
+              const conflictErr: any = new Error(
+                `Tenant organization already exists with code '${inTxExisting.code}' or name '${inTxExisting.name}'. Duplicate provisioning is rejected.`
+              );
+              conflictErr.code = 'TENANT_ALREADY_EXISTS';
+              conflictErr.statusCode = 409;
+              throw conflictErr;
+            }
+
             // 1. Create distinct isolated Organisation
             const org = await tx.organisation.create({
               data: {
-                name: body.organisationName || body.appName,
+                name: orgName,
                 code: rawCode,
                 logoUrl: body.logoUrl || undefined,
                 isActive: true,
@@ -682,10 +710,10 @@ export async function cmsRoutes(fastify: FastifyInstance) {
           ),
         );
       } catch (err: any) {
-        if (err.code === 'P2002') {
+        if (err.code === 'P2002' || err.code === 'TENANT_ALREADY_EXISTS') {
           return reply.status(409).send(
             errorResponse(
-              'Tenant code or organization conflict during provisioning.',
+              err.message || 'Tenant code or organization conflict during provisioning.',
               'TENANT_ALREADY_EXISTS',
             ),
           );
