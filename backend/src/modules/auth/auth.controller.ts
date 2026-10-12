@@ -11,6 +11,14 @@ export class AuthController {
    * Authorizes the device and creates an active session for the chosen role without requiring OTP.
    */
   static async demoLogin(req: FastifyRequest, reply: FastifyReply) {
+    const isExplicitlyAllowed =
+      process.env.NODE_ENV === 'test' ||
+      (process.env.NODE_ENV === 'development' && process.env.ENABLE_DEMO_LOGIN === 'true');
+
+    if (!isExplicitlyAllowed) {
+      return reply.status(404).send(errorResponse('Route not found', 'NOT_FOUND'));
+    }
+
     const body = req.body as DemoLoginDto;
     try {
       const result = await AuthService.authenticateDemoRole(body, {

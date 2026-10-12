@@ -183,7 +183,7 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
     setIsSubmitting(true);
 
     try {
-      const response = await requestOtp(targetNum, role.id, channel, { devMode: true });
+      const response = await requestOtp(targetNum, role.id, channel);
 
       setRequestId(response.requestId);
       setCooldown(response.cooldownSeconds || 30);

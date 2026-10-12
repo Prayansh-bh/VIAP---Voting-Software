@@ -89,15 +89,13 @@ export class AuthService {
     // - No role was explicitly requested (default to their DB role), OR
     // - Their assigned DB role matches dto.role, OR
     // - They are a SUPER_ADMIN or STATE_ADMIN with authority over all allotted tiers of this party application, OR
-    // - They hold an active UserHierarchyAssignment for dto.role, OR
-    // - devMode is active
+    // - They hold an active UserHierarchyAssignment for dto.role
     const isRoleAuthorized = Boolean(
       !dto.role ||
       user?.role === dto.role ||
       isSuperAdmin ||
       isStateAdmin ||
-      user?.hierarchyAssignments?.some((a) => a.roleType === dto.role) ||
-      dto.devMode
+      user?.hierarchyAssignments?.some((a) => a.roleType === dto.role)
     );
 
     const isEligible = Boolean(
@@ -132,7 +130,8 @@ export class AuthService {
         userAgent: reqInfo?.userAgent,
       });
 
-      if (dto.devMode || env.NODE_ENV !== 'production') {
+      const isDevOrTest = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+      if (isDevOrTest) {
         const error: any = new Error(
           !user
             ? `Mobile number +91 ${cleanMobile} is not registered in the database. Please register in CMS Studio first, or enter a registered mobile number.`
@@ -933,6 +932,17 @@ export class AuthService {
    * Authorizes the device and creates an active session for the chosen role without requiring OTP.
    */
   static async authenticateDemoRole(dto: DemoLoginDto, reqInfo?: { ip?: string; userAgent?: string }) {
+    const isExplicitlyAllowed =
+      process.env.NODE_ENV === 'test' ||
+      (process.env.NODE_ENV === 'development' && process.env.ENABLE_DEMO_LOGIN === 'true');
+
+    if (!isExplicitlyAllowed) {
+      const error: any = new Error('Demo login is disabled in this environment.');
+      error.statusCode = 404;
+      error.code = 'NOT_FOUND';
+      throw error;
+    }
+
     const demoDir: Record<string, { mobile: string; name: string; userCode: string }> = {
       SUPER_ADMIN: { mobile: '9848099999', name: 'Super Administrator', userCode: 'DEMO-SUP-9999' },
       STATE_ADMIN: { mobile: '9848088888', name: 'State Incharge', userCode: 'DEMO-STA-8888' },
