@@ -176,10 +176,10 @@ export function serializeCmsConfig(row: any, extras: { constituencies?: any[]; p
   };
 }
 
-export async function persistCmsConfig(input: CmsConfigInput) {
+export async function persistCmsConfig(input: CmsConfigInput, client: Prisma.TransactionClient = prisma) {
   const targetKey = (input.configKey || 'default').toLowerCase();
 
-  const existing = await prisma.cMSConfiguration.findUnique({
+  const existing = await client.cMSConfiguration.findUnique({
     where: { configKey: targetKey },
   });
 
@@ -229,7 +229,7 @@ export async function persistCmsConfig(input: CmsConfigInput) {
     aiEnabled: input.aiEnabled ?? existing?.aiEnabled ?? true,
   };
 
-  const saved = await prisma.cMSConfiguration.upsert({
+  const saved = await client.cMSConfiguration.upsert({
     where: { configKey: targetKey },
     update: data,
     create: data,

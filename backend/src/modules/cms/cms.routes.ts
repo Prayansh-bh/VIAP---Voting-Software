@@ -2,7 +2,8 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AuditAction, OrgHierarchyLevel, Prisma, RoleType, TaskPriority, TaskStatus } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
-import { successResponse } from '../../common/response.js';
+import crypto from 'crypto';
+import { errorResponse, successResponse } from '../../common/response.js';
 import { validateBody } from '../../common/validation.js';
 import { authenticate, optionalAuthenticate } from '../../middleware/auth.js';
 import { populateHierarchyScope, requireRoles } from '../../middleware/rbac.js';
@@ -240,13 +241,18 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as z.infer<typeof buildApplicationSchema>;
 
-      // 1. Ensure distinct Organisation exists or create new isolated tenant
+      // Pre-compute credential hash outside the transaction to minimize transaction holding time
+      const initialPassword = body.password?.trim();
+      const passwordToHash = initialPassword || crypto.randomBytes(32).toString('hex');
+      const passwordHash = await bcrypt.hash(passwordToHash, 10);
+
       const rawCode = (body.tenantCode || body.appKey || `${body.activePartyCode || 'APP'}-${body.appName || 'DEFAULT'}`)
         .replace(/[^A-Za-z0-9]/g, '-')
         .toUpperCase()
         .slice(0, 15);
 
-      let org = await prisma.organisation.findFirst({
+      // Preflight uniqueness check: reject if tenant already exists rather than silently overwriting
+      const existingOrg = await prisma.organisation.findFirst({
         where: {
           OR: [
             { code: rawCode },
@@ -255,497 +261,431 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         },
       });
 
-      if (!org) {
-        let uniqueCode = rawCode;
-        const codeCollision = await prisma.organisation.findUnique({ where: { code: uniqueCode } });
-        if (codeCollision) {
-          uniqueCode = `${rawCode.slice(0, 10)}-${Date.now().toString().slice(-4)}`;
-        }
-
-        org = await prisma.organisation.create({
-          data: {
-            name: body.organisationName || body.appName,
-            code: uniqueCode,
-            logoUrl: body.logoUrl,
-            isActive: true,
-          },
-        });
-      } else {
-        org = await prisma.organisation.update({
-          where: { id: org.id },
-          data: {
-            name: body.organisationName || body.appName,
-            logoUrl: body.logoUrl || org.logoUrl,
-          },
-        });
+      if (existingOrg) {
+        return reply.status(409).send(
+          errorResponse(
+            `Tenant organization already exists with code '${existingOrg.code}' or name '${existingOrg.name}'. Duplicate provisioning is rejected.`,
+            'TENANT_ALREADY_EXISTS'
+          )
+        );
       }
 
-      // 2. Ensure State exists for this organisation
-      const targetStateName = body.stateName || 'Andhra Pradesh';
-      let state = await prisma.state.findFirst({
-        where: {
-          organisationId: org.id,
-          name: { equals: targetStateName, mode: 'insensitive' },
-        },
-      });
-      if (!state) {
-        let stateCode = `${(body.stateName || 'AP').slice(0, 3).toUpperCase()}-${org.code.slice(0, 4)}`;
-        const stateCodeCollision = await prisma.state.findUnique({ where: { code: stateCode } });
-        if (stateCodeCollision) {
-          stateCode = `${(body.stateName || 'AP').slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}`;
-        }
-        state = await prisma.state.create({
-          data: {
-            organisationId: org.id,
-            name: body.stateName || 'Andhra Pradesh',
-            code: stateCode,
-            totalVoters: 0,
-          },
-        });
-        await prisma.organizationUnit.upsert({
-          where: { code: state.code },
-          update: {
-            name: `${state.name} (${org.name})`,
-            level: OrgHierarchyLevel.STATE,
-          },
-          create: {
-            name: `${state.name} (${org.name})`,
-            code: state.code,
-            level: OrgHierarchyLevel.STATE,
-          },
-        });
-      }
+      try {
+        const provisionResult = await prisma.$transaction(
+          async (tx) => {
+            // 1. Create distinct isolated Organisation
+            const org = await tx.organisation.create({
+              data: {
+                name: body.organisationName || body.appName,
+                code: rawCode,
+                logoUrl: body.logoUrl || undefined,
+                isActive: true,
+              },
+            });
 
-      // 3. Ensure Zone exists for this State
-      let zone = await prisma.zone.findFirst({
-        where: { stateId: state.id },
-      });
-      if (!zone) {
-        let zoneCode = `ZN-${state.code}-01`;
-        const zoneCollision = await prisma.zone.findUnique({ where: { code: zoneCode } });
-        if (zoneCollision) zoneCode = `ZN-${state.code}-${Date.now().toString().slice(-4)}`;
-        zone = await prisma.zone.create({
-          data: {
-            stateId: state.id,
-            name: `${state.name} Central Zone`,
-            code: zoneCode,
-            totalVoters: 0,
-          },
-        });
-        const stateUnit = await prisma.organizationUnit.findFirst({
-          where: { code: state.code, level: OrgHierarchyLevel.STATE },
-        });
-        await prisma.organizationUnit.upsert({
-          where: { code: zone.code },
-          update: {
-            name: zone.name,
-            level: OrgHierarchyLevel.ZONE,
-            parentId: stateUnit?.id,
-          },
-          create: {
-            name: zone.name,
-            code: zone.code,
-            level: OrgHierarchyLevel.ZONE,
-            parentId: stateUnit?.id,
-          },
-        });
-      }
-
-      // 4. Ensure Parliament exists for this Zone
-      const parName = body.parliamentName || (body.appScope === 'PARLIAMENT_MP' ? 'Ongole Parliament Constituency' : 'Central Parliament');
-      let parliament = await prisma.parliament.findFirst({
-        where: {
-          zoneId: zone.id,
-          name: { equals: parName, mode: 'insensitive' },
-        },
-      });
-      if (!parliament) {
-        let parCode = body.parliamentCode || `PC-${parName.slice(0, 4).toUpperCase()}-${org.code.slice(0, 4)}`;
-        const parCollision = await prisma.parliament.findUnique({ where: { code: parCode } });
-        if (parCollision) parCode = `PC-${parName.slice(0, 4).toUpperCase()}-${Date.now().toString().slice(-4)}`;
-        parliament = await prisma.parliament.create({
-          data: {
-            zoneId: zone.id,
-            name: parName,
-            code: parCode,
-            totalVoters: 0,
-          },
-        });
-        const zoneUnit = await prisma.organizationUnit.findFirst({
-          where: { code: zone.code, level: OrgHierarchyLevel.ZONE },
-        });
-        await prisma.organizationUnit.upsert({
-          where: { code: parliament.code },
-          update: {
-            name: parliament.name,
-            level: OrgHierarchyLevel.PARLIAMENT,
-            parentId: zoneUnit?.id,
-          },
-          create: {
-            name: parliament.name,
-            code: parliament.code,
-            level: OrgHierarchyLevel.PARLIAMENT,
-            parentId: zoneUnit?.id,
-          },
-        });
-      } else if (body.parliamentName) {
-        parliament = await prisma.parliament.update({
-          where: { id: parliament.id },
-          data: { name: body.parliamentName },
-        });
-      }
-
-      const parUnit = await prisma.organizationUnit.findFirst({
-        where: { code: parliament.code, level: OrgHierarchyLevel.PARLIAMENT },
-      });
-
-      // 5. Create / Update all specified Assembly Constituencies (zero default voters)
-      const createdConstituencies: any[] = [];
-      const incomingConstituencies = body.constituencies && body.constituencies.length > 0
-        ? body.constituencies
-        : [{ name: body.headerTitle || body.organisationName || 'Kondapi', code: `AC-${org.code.slice(0, 4)}-01`, totalVoters: 0 }];
-
-      for (let i = 0; i < incomingConstituencies.length; i++) {
-        const c = incomingConstituencies[i];
-        const cleanName = c.name.trim();
-        if (!cleanName) continue;
-
-        let constRecord = await prisma.constituency.findFirst({
-          where: {
-            parliamentId: parliament.id,
-            name: { equals: cleanName, mode: 'insensitive' },
-          },
-        });
-
-        let code = c.code || `AC-${cleanName.slice(0, 4).toUpperCase()}-${org.code.slice(0, 4)}-${i + 1}`;
-        const codeCollision = await prisma.constituency.findUnique({ where: { code } });
-        if (codeCollision && (!constRecord || constRecord.id !== codeCollision.id)) {
-          code = `AC-${cleanName.slice(0, 4).toUpperCase()}-${Date.now().toString().slice(-4)}-${i + 1}`;
-        }
-        const totalVoters = c.totalVoters || (c as any).votersCount || 0;
-
-        if (!constRecord) {
-          constRecord = await prisma.constituency.create({
-            data: {
-              parliamentId: parliament.id,
-              name: cleanName,
-              code,
-              totalVoters,
-            },
-          });
-          await prisma.organizationUnit.upsert({
-            where: { code },
-            update: {
-              name: cleanName,
-              level: OrgHierarchyLevel.CONSTITUENCY,
-              parentId: parUnit?.id,
-            },
-            create: {
-              name: cleanName,
-              code,
-              level: OrgHierarchyLevel.CONSTITUENCY,
-              parentId: parUnit?.id,
-            },
-          });
-        } else {
-          constRecord = await prisma.constituency.update({
-            where: { id: constRecord.id },
-            data: {
-              name: cleanName,
-              code,
-              totalVoters: totalVoters,
-              parliamentId: parliament.id,
-            },
-          });
-          await prisma.organizationUnit.upsert({
-            where: { code },
-            update: {
-              name: cleanName,
-              level: OrgHierarchyLevel.CONSTITUENCY,
-              parentId: parUnit?.id,
-            },
-            create: {
-              name: cleanName,
-              code,
-              level: OrgHierarchyLevel.CONSTITUENCY,
-              parentId: parUnit?.id,
-            },
-          });
-        }
-
-        createdConstituencies.push(constRecord);
-      }
-
-      // 6. Sync Political Parties
-      if (body.politicalParties && body.politicalParties.length > 0) {
-        for (let i = 0; i < body.politicalParties.length; i++) {
-          const p = body.politicalParties[i];
-          const partyCode = p.code.trim().toUpperCase();
-          if (!partyCode) continue;
-
-          const existingParty = await prisma.politicalParty.findUnique({ where: { code: partyCode } });
-          if (!existingParty) {
-            await prisma.politicalParty.create({
+            // 2. Ensure State exists for this organisation
+            const targetStateName = body.stateName || 'Andhra Pradesh';
+            let stateCode = `${(body.stateName || 'AP').slice(0, 3).toUpperCase()}-${org.code.slice(0, 4)}`;
+            const stateCodeCollision = await tx.state.findUnique({ where: { code: stateCode } });
+            if (stateCodeCollision) {
+              stateCode = `${(body.stateName || 'AP').slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}`;
+            }
+            const state = await tx.state.create({
               data: {
                 organisationId: org.id,
-                name: p.name,
-                code: partyCode,
-                shortName: p.shortName || partyCode,
-                primaryColor: p.primaryColor || '#eab308',
-                secondaryColor: p.secondaryColor || null,
-                accentColor: p.accentColor || null,
-                symbolName: p.symbolName || null,
-                logoUrl: p.logoUrl || null,
-                isActive: p.isActive !== false,
-                sortOrder: p.sortOrder !== undefined && p.sortOrder !== null ? p.sortOrder : i,
+                name: targetStateName,
+                code: stateCode,
+                totalVoters: 0,
               },
             });
-          } else {
-            await prisma.politicalParty.update({
-              where: { id: existingParty.id },
+            await tx.organizationUnit.upsert({
+              where: { code: state.code },
+              update: {
+                name: `${state.name} (${org.name})`,
+                level: OrgHierarchyLevel.STATE,
+              },
+              create: {
+                name: `${state.name} (${org.name})`,
+                code: state.code,
+                level: OrgHierarchyLevel.STATE,
+              },
+            });
+
+            // 3. Ensure Zone exists for this State
+            let zoneCode = `ZN-${state.code}-01`;
+            const zoneCollision = await tx.zone.findUnique({ where: { code: zoneCode } });
+            if (zoneCollision) zoneCode = `ZN-${state.code}-${Date.now().toString().slice(-4)}`;
+            const zone = await tx.zone.create({
               data: {
-                name: p.name,
-                shortName: p.shortName || partyCode,
-                primaryColor: p.primaryColor || '#eab308',
-                secondaryColor: p.secondaryColor || null,
-                accentColor: p.accentColor || null,
-                symbolName: p.symbolName || null,
-                logoUrl: p.logoUrl || null,
-                isActive: p.isActive !== false,
-                sortOrder: p.sortOrder !== undefined && p.sortOrder !== null ? p.sortOrder : i,
-                ...(!existingParty.organisationId ? { organisationId: org.id } : {}),
+                stateId: state.id,
+                name: `${state.name} Central Zone`,
+                code: zoneCode,
+                totalVoters: 0,
               },
             });
-          }
-        }
-      }
+            const stateUnit = await tx.organizationUnit.findFirst({
+              where: { code: state.code, level: OrgHierarchyLevel.STATE },
+            });
+            await tx.organizationUnit.upsert({
+              where: { code: zone.code },
+              update: {
+                name: zone.name,
+                level: OrgHierarchyLevel.ZONE,
+                parentId: stateUnit?.id,
+              },
+              create: {
+                name: zone.name,
+                code: zone.code,
+                level: OrgHierarchyLevel.ZONE,
+                parentId: stateUnit?.id,
+              },
+            });
 
-      // 7. Store / Update CMSConfiguration
-      const mergedHierarchyLabels = {
-        STATE: 'State',
-        ZONE: 'Zone',
-        PARLIAMENT: 'Parliament',
-        CONSTITUENCY: 'Constituency',
-        MANDAL: 'Mandal',
-        VILLAGE: 'Village',
-        BOOTH: 'Booth',
-        VOTER_GROUP: '100-Voter Incharge',
-        ...(body.hierarchyLabels || {}),
-      };
+            // 4. Ensure Parliament exists for this Zone
+            const parName = body.parliamentName || (body.appScope === 'PARLIAMENT_MP' ? 'Ongole Parliament Constituency' : 'Central Parliament');
+            let parCode = body.parliamentCode || `PC-${parName.slice(0, 4).toUpperCase()}-${org.code.slice(0, 4)}`;
+            const parCollision = await tx.parliament.findUnique({ where: { code: parCode } });
+            if (parCollision) parCode = `PC-${parName.slice(0, 4).toUpperCase()}-${Date.now().toString().slice(-4)}`;
+            const parliament = await tx.parliament.create({
+              data: {
+                zoneId: zone.id,
+                name: parName,
+                code: parCode,
+                totalVoters: 0,
+              },
+            });
+            const zoneUnit = await tx.organizationUnit.findFirst({
+              where: { code: zone.code, level: OrgHierarchyLevel.ZONE },
+            });
+            await tx.organizationUnit.upsert({
+              where: { code: parliament.code },
+              update: {
+                name: parliament.name,
+                level: OrgHierarchyLevel.PARLIAMENT,
+                parentId: zoneUnit?.id,
+              },
+              create: {
+                name: parliament.name,
+                code: parliament.code,
+                level: OrgHierarchyLevel.PARLIAMENT,
+                parentId: zoneUnit?.id,
+              },
+            });
 
-      const tenantConfigKey = (body.appKey || body.tenantCode || org.code).toLowerCase();
-      const configPayload = {
-        organisationId: org.id,
-        organisationName: body.organisationName || body.appName,
-        headerTitle: body.headerTitle || body.appName,
-        slogan: body.slogan || undefined,
-        logoUrl: body.logoUrl || undefined,
-        faviconUrl: body.faviconUrl || undefined,
-        stateName: body.stateName || 'Andhra Pradesh',
-        primaryColor: body.primaryColor || '#eab308',
-        secondaryColor: body.secondaryColor || '#1e293b',
-        accentColor: body.accentColor || '#3b82f6',
-        activePartyCode: body.activePartyCode || 'TDP',
-        appScope: body.appScope,
-        parliamentName: parliament.name,
-        parliamentCode: parliament.code,
-        candidateName: ((body as any).candidateName || undefined) as string | undefined,
-        hierarchyLabels: mergedHierarchyLabels,
-        featureToggles: body.featureToggles || undefined,
-        activeHierarchyLevels: body.activeHierarchyLevels,
-      };
+            const parUnit = await tx.organizationUnit.findFirst({
+              where: { code: parliament.code, level: OrgHierarchyLevel.PARLIAMENT },
+            });
 
-      const updatedConfig = await persistCmsConfig({
-        ...configPayload,
-        configKey: tenantConfigKey,
-      });
+            // 5. Create Assembly Constituencies (zero default voters)
+            const createdConstituencies: any[] = [];
+            const incomingConstituencies = body.constituencies && body.constituencies.length > 0
+              ? body.constituencies
+              : [{ name: body.headerTitle || body.organisationName || 'Kondapi', code: `AC-${org.code.slice(0, 4)}-01`, totalVoters: 0 }];
 
+            for (let i = 0; i < incomingConstituencies.length; i++) {
+              const c = incomingConstituencies[i];
+              const cleanName = c.name.trim();
+              if (!cleanName) continue;
 
+              let code = c.code || `AC-${cleanName.slice(0, 4).toUpperCase()}-${org.code.slice(0, 4)}-${i + 1}`;
+              const codeCollision = await tx.constituency.findUnique({ where: { code } });
+              if (codeCollision) {
+                code = `AC-${cleanName.slice(0, 4).toUpperCase()}-${Date.now().toString().slice(-4)}-${i + 1}`;
+              }
+              const totalVoters = c.totalVoters || (c as any).votersCount || 0;
 
-      // 8. Provision Incharge Accounts & Candidate Credentials
-      const rawCandidateMobile = (body as any).candidateMobile?.trim() || '9848012345';
-      const candidateMobile = rawCandidateMobile.replace(/\D/g, '').slice(-10) || '9848012345';
-      const candidateEmail = (body as any).candidateEmail?.trim().toLowerCase() || `candidate@${(body.appName || 'party').toLowerCase().replace(/[^a-z0-9]/g, '')}.org`;
-      const candidateName = (body as any).candidateName?.trim() || 'Key Candidate';
-      const initialPassword = (body as any).password?.trim() || 'Kondapi@2026';
-      const passwordHash = await bcrypt.hash(initialPassword, 10);
+              const constRecord = await tx.constituency.create({
+                data: {
+                  parliamentId: parliament.id,
+                  name: cleanName,
+                  code,
+                  totalVoters,
+                },
+              });
+              await tx.organizationUnit.upsert({
+                where: { code },
+                update: {
+                  name: cleanName,
+                  level: OrgHierarchyLevel.CONSTITUENCY,
+                  parentId: parUnit?.id,
+                },
+                create: {
+                  name: cleanName,
+                  code,
+                  level: OrgHierarchyLevel.CONSTITUENCY,
+                  parentId: parUnit?.id,
+                },
+              });
 
-      const stateUnitRecord = await prisma.organizationUnit.findFirst({
-        where: { code: state.code, level: OrgHierarchyLevel.STATE },
-      });
-      const zoneUnitRecord = await prisma.organizationUnit.findFirst({
-        where: { code: zone.code, level: OrgHierarchyLevel.ZONE },
-      });
-      const parUnitRecord = await prisma.organizationUnit.findFirst({
-        where: { code: parliament.code, level: OrgHierarchyLevel.PARLIAMENT },
-      });
-      const constUnitRecord = createdConstituencies[0]
-        ? await prisma.organizationUnit.findFirst({
-            where: { code: createdConstituencies[0].code, level: OrgHierarchyLevel.CONSTITUENCY },
-          })
-        : null;
+              createdConstituencies.push(constRecord);
+            }
 
-      const primaryRole = body.appScope === 'STATE'
-        ? RoleType.STATE_ADMIN
-        : body.appScope === 'ZONE'
-        ? RoleType.ZONE_INCHARGE
-        : body.appScope === 'PARLIAMENT_MP'
-        ? RoleType.PARLIAMENT_INCHARGE
-        : RoleType.CONSTITUENCY_INCHARGE;
+            // 6. Sync Political Parties
+            if (body.politicalParties && body.politicalParties.length > 0) {
+              for (let i = 0; i < body.politicalParties.length; i++) {
+                const p = body.politicalParties[i];
+                const partyCode = p.code.trim().toUpperCase();
+                if (!partyCode) continue;
 
-      const primaryUnitId = body.appScope === 'STATE'
-        ? stateUnitRecord?.id
-        : body.appScope === 'ZONE'
-        ? zoneUnitRecord?.id
-        : body.appScope === 'PARLIAMENT_MP'
-        ? parUnitRecord?.id
-        : constUnitRecord?.id || null;
+                const existingParty = await tx.politicalParty.findUnique({ where: { code: partyCode } });
+                if (!existingParty) {
+                  await tx.politicalParty.create({
+                    data: {
+                      organisationId: org.id,
+                      name: p.name,
+                      code: partyCode,
+                      shortName: p.shortName || partyCode,
+                      primaryColor: p.primaryColor || '#eab308',
+                      secondaryColor: p.secondaryColor || null,
+                      accentColor: p.accentColor || null,
+                      symbolName: p.symbolName || null,
+                      logoUrl: p.logoUrl || null,
+                      isActive: p.isActive !== false,
+                      sortOrder: p.sortOrder !== undefined && p.sortOrder !== null ? p.sortOrder : i,
+                    },
+                  });
+                } else {
+                  await tx.politicalParty.update({
+                    where: { id: existingParty.id },
+                    data: {
+                      name: p.name,
+                      shortName: p.shortName || partyCode,
+                      primaryColor: p.primaryColor || '#eab308',
+                      secondaryColor: p.secondaryColor || null,
+                      accentColor: p.accentColor || null,
+                      symbolName: p.symbolName || null,
+                      logoUrl: p.logoUrl || null,
+                      isActive: p.isActive !== false,
+                      sortOrder: p.sortOrder !== undefined && p.sortOrder !== null ? p.sortOrder : i,
+                      ...(!existingParty.organisationId ? { organisationId: org.id } : {}),
+                    },
+                  });
+                }
+              }
+            }
 
-      // Upsert primary candidate user in database
-      const candidateUser = await prisma.user.upsert({
-        where: { mobileNumber: candidateMobile },
-        update: {
-          name: candidateName,
-          email: candidateEmail,
-          passwordHash,
-          role: primaryRole,
-          accountStatus: 'ACTIVE',
-          organisationId: org.id,
-          unitId: primaryUnitId,
-          isVerified: true,
-        },
-        create: {
-          organisationId: org.id,
-          userCode: `LEADER-${primaryRole.slice(0, 3)}-${candidateMobile.slice(-4)}`,
-          name: candidateName,
-          mobileNumber: candidateMobile,
-          email: candidateEmail,
-          passwordHash,
-          role: primaryRole,
-          accountStatus: 'ACTIVE',
-          isVerified: true,
-          unitId: primaryUnitId,
-        },
-      });
+            // 7. Store / Update CMSConfiguration
+            const mergedHierarchyLabels = {
+              STATE: 'State',
+              ZONE: 'Zone',
+              PARLIAMENT: 'Parliament',
+              CONSTITUENCY: 'Constituency',
+              MANDAL: 'Mandal',
+              VILLAGE: 'Village',
+              BOOTH: 'Booth',
+              VOTER_GROUP: '100-Voter Incharge',
+              ...(body.hierarchyLabels || {}),
+            };
 
-      if (primaryUnitId) {
-        const existingAssignment = await prisma.userHierarchyAssignment.findFirst({
-          where: { userId: candidateUser.id },
-        });
-        if (existingAssignment) {
-          await prisma.userHierarchyAssignment.update({
-            where: { id: existingAssignment.id },
-            data: {
-              roleType: primaryRole,
-              isActive: true,
-              stateId: state.id,
-              zoneId: zone.id,
-              parliamentId: parliament.id,
-              constituencyId: createdConstituencies[0]?.id || null,
-            },
-          });
-        } else {
-          await prisma.userHierarchyAssignment.create({
-            data: {
-              userId: candidateUser.id,
-              roleType: primaryRole,
-              isActive: true,
-              stateId: state.id,
-              zoneId: zone.id,
-              parliamentId: parliament.id,
-              constituencyId: createdConstituencies[0]?.id || null,
-            },
-          });
-        }
-      }
-
-      // Also ensure standard role accounts exist in DB for each hierarchy tier
-      const standardRoles = [
-        { role: RoleType.SUPER_ADMIN, email: 'superadmin@politicalconnect.in', mobile: '9848099999', name: 'Super Administrator', unitId: null },
-        { role: RoleType.STATE_ADMIN, email: 'stateincharge@politicalconnect.in', mobile: '9848088888', name: `${state.name} State Incharge`, unitId: stateUnitRecord?.id || null },
-        { role: RoleType.ZONE_INCHARGE, email: 'zone@politicalconnect.in', mobile: '9848099998', name: `${zone.name} Coordinator`, unitId: zoneUnitRecord?.id || null },
-        { role: RoleType.PARLIAMENT_INCHARGE, email: 'mp@politicalconnect.in', mobile: '9848088887', name: `${parliament.name} Incharge`, unitId: parUnitRecord?.id || null },
-        { role: RoleType.MANDAL_INCHARGE, email: 'mandal@politicalconnect.in', mobile: '9848077777', name: 'Mandal President', unitId: null },
-        { role: RoleType.BOOTH_PRESIDENT, email: 'booth@politicalconnect.in', mobile: '9848010002', name: 'Booth President', unitId: null },
-        { role: RoleType.VOTER_100_INCHARGE, email: 'voter100@politicalconnect.in', mobile: '9848010003', name: '100 Voter Incharge', unitId: null },
-      ];
-
-      for (const r of standardRoles) {
-        if (r.mobile === candidateMobile) continue;
-        const existing = await prisma.user.findUnique({ where: { mobileNumber: r.mobile } });
-        if (!existing) {
-          await prisma.user.create({
-            data: {
+            const tenantConfigKey = (body.appKey || body.tenantCode || org.code).toLowerCase();
+            const configPayload = {
               organisationId: org.id,
-              userCode: `DEMO-${r.role.slice(0, 3)}-${r.mobile.slice(-4)}`,
-              name: r.name,
-              email: r.email,
-              mobileNumber: r.mobile,
-              passwordHash,
-              role: r.role,
-              accountStatus: 'ACTIVE',
-              isVerified: true,
-              unitId: r.unitId,
+              organisationName: body.organisationName || body.appName,
+              headerTitle: body.headerTitle || body.appName,
+              slogan: body.slogan || undefined,
+              logoUrl: body.logoUrl || undefined,
+              faviconUrl: body.faviconUrl || undefined,
+              stateName: body.stateName || 'Andhra Pradesh',
+              primaryColor: body.primaryColor || '#eab308',
+              secondaryColor: body.secondaryColor || '#1e293b',
+              accentColor: body.accentColor || '#3b82f6',
+              activePartyCode: body.activePartyCode || 'TDP',
+              appScope: body.appScope,
+              parliamentName: parliament.name,
+              parliamentCode: parliament.code,
+              candidateName: ((body as any).candidateName || undefined) as string | undefined,
+              hierarchyLabels: mergedHierarchyLabels,
+              featureToggles: body.featureToggles || undefined,
+              activeHierarchyLevels: body.activeHierarchyLevels,
+            };
+
+            const updatedConfig = await persistCmsConfig(
+              {
+                ...configPayload,
+                configKey: tenantConfigKey,
+              },
+              tx,
+            );
+
+            // 8. Provision Primary Candidate / Admin Credentials
+            const rawCandidateMobile = (body as any).candidateMobile?.trim();
+            const candidateMobile = rawCandidateMobile ? rawCandidateMobile.replace(/\D/g, '').slice(-10) : undefined;
+            const candidateEmail = (body as any).candidateEmail?.trim().toLowerCase() || `admin@${(body.appName || 'party').toLowerCase().replace(/[^a-z0-9]/g, '')}.org`;
+            const candidateName = (body as any).candidateName?.trim() || 'Tenant Administrator';
+
+            const stateUnitRecord = await tx.organizationUnit.findFirst({
+              where: { code: state.code, level: OrgHierarchyLevel.STATE },
+            });
+            const zoneUnitRecord = await tx.organizationUnit.findFirst({
+              where: { code: zone.code, level: OrgHierarchyLevel.ZONE },
+            });
+            const parUnitRecord = await tx.organizationUnit.findFirst({
+              where: { code: parliament.code, level: OrgHierarchyLevel.PARLIAMENT },
+            });
+            const constUnitRecord = createdConstituencies[0]
+              ? await tx.organizationUnit.findFirst({
+                  where: { code: createdConstituencies[0].code, level: OrgHierarchyLevel.CONSTITUENCY },
+                })
+              : null;
+
+            const primaryRole = body.appScope === 'STATE'
+              ? RoleType.STATE_ADMIN
+              : body.appScope === 'ZONE'
+              ? RoleType.ZONE_INCHARGE
+              : body.appScope === 'PARLIAMENT_MP'
+              ? RoleType.PARLIAMENT_INCHARGE
+              : RoleType.CONSTITUENCY_INCHARGE;
+
+            const primaryUnitId = body.appScope === 'STATE'
+              ? stateUnitRecord?.id
+              : body.appScope === 'ZONE'
+              ? zoneUnitRecord?.id
+              : body.appScope === 'PARLIAMENT_MP'
+              ? parUnitRecord?.id
+              : constUnitRecord?.id || null;
+
+            let candidateUser: any = null;
+            if (candidateMobile) {
+              candidateUser = await tx.user.upsert({
+                where: { mobileNumber: candidateMobile },
+                update: {
+                  name: candidateName,
+                  email: candidateEmail,
+                  passwordHash,
+                  role: primaryRole,
+                  accountStatus: 'ACTIVE',
+                  organisationId: org.id,
+                  unitId: primaryUnitId,
+                  isVerified: true,
+                },
+                create: {
+                  organisationId: org.id,
+                  userCode: `LEADER-${primaryRole.slice(0, 3)}-${candidateMobile.slice(-4)}`,
+                  name: candidateName,
+                  mobileNumber: candidateMobile,
+                  email: candidateEmail,
+                  passwordHash,
+                  role: primaryRole,
+                  accountStatus: 'ACTIVE',
+                  isVerified: true,
+                  unitId: primaryUnitId,
+                },
+              });
+
+              if (primaryUnitId) {
+                const existingAssignment = await tx.userHierarchyAssignment.findFirst({
+                  where: { userId: candidateUser.id },
+                });
+                if (existingAssignment) {
+                  await tx.userHierarchyAssignment.update({
+                    where: { id: existingAssignment.id },
+                    data: {
+                      roleType: primaryRole,
+                      isActive: true,
+                      stateId: state.id,
+                      zoneId: zone.id,
+                      parliamentId: parliament.id,
+                      constituencyId: createdConstituencies[0]?.id || null,
+                    },
+                  });
+                } else {
+                  await tx.userHierarchyAssignment.create({
+                    data: {
+                      userId: candidateUser.id,
+                      roleType: primaryRole,
+                      isActive: true,
+                      stateId: state.id,
+                      zoneId: zone.id,
+                      parliamentId: parliament.id,
+                      constituencyId: createdConstituencies[0]?.id || null,
+                    },
+                  });
+                }
+              }
+            }
+
+            return {
+              org,
+              state,
+              zone,
+              parliament,
+              createdConstituencies,
+              updatedConfig,
+              candidateUser,
+              primaryRole,
+            };
+          },
+          { timeout: 45000 },
+        );
+
+        const allParties = await prisma.politicalParty.findMany({
+          where: {
+            isActive: true,
+            NOT: {
+              code: { startsWith: 'TEST_' },
             },
-          });
+          },
+          orderBy: { sortOrder: 'asc' },
+        });
+
+        // Audit logging (external side effect, outside transaction)
+        await logAudit({
+          action: AuditAction.CREATE,
+          entityType: 'ApplicationBuilder',
+          entityId: provisionResult.updatedConfig.id,
+          req,
+          changes: body as unknown as Prisma.InputJsonValue,
+        });
+
+        return reply.status(201).send(
+          successResponse(
+            {
+              application: {
+                appKey: body.appKey || `app_${Date.now()}`,
+                tenantCode: provisionResult.org.code,
+                organisationId: provisionResult.org.id,
+                appName: body.appName,
+                organisationName: body.organisationName,
+                headerTitle: body.headerTitle || body.appName,
+                slogan: body.slogan,
+                logoUrl: body.logoUrl,
+                stateName: body.stateName,
+                primaryColor: body.primaryColor,
+                secondaryColor: body.secondaryColor,
+                accentColor: body.accentColor,
+                activePartyCode: body.activePartyCode,
+                appScope: body.appScope,
+                activeHierarchyLevels: body.activeHierarchyLevels,
+                parliamentName: provisionResult.parliament.name,
+                candidateName: (body as any).candidateName,
+                candidateMobile: (body as any).candidateMobile,
+                candidateRole: provisionResult.primaryRole,
+                constituencies: provisionResult.createdConstituencies,
+                parties: allParties,
+              },
+              credentials: {
+                mobileNumber: (body as any).candidateMobile,
+                role: provisionResult.primaryRole,
+                password: initialPassword || undefined,
+                tenantCode: provisionResult.org.code,
+              },
+              constituencies: provisionResult.createdConstituencies,
+              parties: allParties,
+            },
+            'Application built and provisioned successfully! Ready for Data & Incharge Assignment.',
+          ),
+        );
+      } catch (err: any) {
+        if (err.code === 'P2002') {
+          return reply.status(409).send(
+            errorResponse(
+              'Tenant code or organization conflict during provisioning.',
+              'TENANT_ALREADY_EXISTS',
+            ),
+          );
         }
+        throw err;
       }
-
-
-      const allParties = await prisma.politicalParty.findMany({
-        where: {
-          isActive: true,
-          NOT: {
-            code: { startsWith: 'TEST_' },
-          },
-        },
-        orderBy: { sortOrder: 'asc' },
-      });
-
-      await logAudit({
-        action: AuditAction.CREATE,
-        entityType: 'ApplicationBuilder',
-        entityId: updatedConfig.id,
-        req,
-        changes: body as unknown as Prisma.InputJsonValue,
-      });
-
-      return reply.status(201).send(
-        successResponse({
-          application: {
-            appKey: body.appKey || `app_${Date.now()}`,
-            tenantCode: org.code,
-            organisationId: org.id,
-            appName: body.appName,
-            organisationName: body.organisationName,
-            headerTitle: body.headerTitle || body.appName,
-            slogan: body.slogan,
-            logoUrl: body.logoUrl,
-            stateName: body.stateName,
-            primaryColor: body.primaryColor,
-            secondaryColor: body.secondaryColor,
-            accentColor: body.accentColor,
-            activePartyCode: body.activePartyCode,
-            appScope: body.appScope,
-            activeHierarchyLevels: body.activeHierarchyLevels,
-            parliamentName: parliament.name,
-            candidateName,
-            candidateMobile,
-            candidateRole: primaryRole,
-            initialPassword,
-            constituencies: createdConstituencies,
-            parties: allParties,
-          },
-          credentials: {
-            mobileNumber: candidateMobile,
-            role: primaryRole,
-            password: initialPassword,
-            tenantCode: org.code,
-          },
-          constituencies: createdConstituencies,
-          parties: allParties,
-        }, 'Application built and provisioned successfully! Ready for Data & Incharge Assignment.'),
-      );
     },
   );
 
