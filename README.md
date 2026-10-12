@@ -1,0 +1,239 @@
+# VIAP — Voting Intelligence & Administration Platform
+
+> **Modern, Multi-Tenant Election Management & Real-Time Cadre Telemetry Platform**  
+> Integrated with **Baileys WhatsApp OTP Authentication**, dynamic **Multi-Tier Hierarchy Configuration**, and live ground-intelligence tracking.
+
+---
+
+## 📌 Overview
+
+**VIAP (Voting Intelligence & Administration Platform)** is a production-grade, enterprise political campaign and cadre operations platform. It powers political parties, campaign war rooms, and ground workers across granular electoral hierarchy levels—from statewide leadership down to 100-voter cluster incharges.
+
+### Core Highlights
+
+- 📱 **Free WhatsApp OTP Authentication (Baileys)**: Zero DLT registration, zero credit card requirements, zero per-SMS costs. Uses `@whiskeysockets/baileys` socket automation for direct WhatsApp OTP delivery with terminal QR pairing.
+- 🏛️ **Dynamic Multi-Tier Jurisdictional Hierarchy**: Configurable per-tenant hierarchy levels (e.g., 6-tier models: `STATE` ➔ `ZONE` ➔ `PARLIAMENT` ➔ `CONSTITUENCY` ➔ `VILLAGE` ➔ `VOTER_GROUP`, with automatic restriction of unenabled tiers like `MANDAL` or `BOOTH`).
+- ⚡ **Multi-Tenant CMS Studio**: Instant white-labeling, custom party colors, candidate profiles, and live feature flags per tenant.
+- 👥 **Real-Time Voter Telemetry**: Live polling station turnout, migration tracking (in-state & interstate), fake voter flagging, caste/community demographics, and sentiment tracking.
+- 🛡️ **Role-Based Access Control (RBAC)**: Strict role scoping and session synchronization ensuring in-charges only access their authorized units and allotted tiers.
+
+---
+
+## 🏗️ Architecture & Project Structure
+
+The platform is architected as a decoupled monorepo:
+
+```text
+Voting/
+├── frontend/               # In-Charge Command Station (React 18 + Vite + Tailwind CSS)
+│   ├── src/
+│   │   ├── components/     # Role dashboards, RoleSelection, RoleQuickSwitcher, OtpLoginModal
+│   │   ├── context/        # CmsContext (tenant configuration & theme provider)
+│   │   ├── lib/            # API client, CMS loader, storage helpers
+│   │   └── types/          # TypeScript interfaces & role definitions
+│   └── vite.config.ts
+│
+├── admin/                  # Central CMS Studio & Platform Admin (React 18 + Vite)
+│   ├── src/
+│   │   ├── components/     # ApplicationManagement, CmsStudio, AdminLogin
+│   │   └── lib/            # Administrative APIs & state managers
+│   └── vite.config.ts
+│
+├── backend/                # High-Performance API Server (Fastify + Prisma + PostgreSQL)
+│   ├── prisma/             # Schema definitions, migrations, and seed scripts
+│   │   └── schema.prisma
+│   └── src/
+│       ├── config/         # Environment variables & runtime flags
+│       ├── lib/
+│       │   ├── sms/        # WhatsApp Baileys Provider & SMS factory
+│       │   └── prisma.ts   # Database client singleton
+│       ├── middleware/     # JWT authentication, RBAC, audit logging
+│       └── modules/
+│           ├── auth/       # OTP generation, Baileys dispatch, device tokens
+│           ├── cms/        # Application bundle & tenant configuration
+│           ├── hierarchy/  # Unit trees (State down to Voter Groups)
+│           ├── voters/     # Voter registry, live voting, migration status
+│           ├── cadre/      # Cadre profiles & network tracking
+│           └── analytics/  # Bottom-up rollup aggregation APIs
+│
+└── README.md
+```
+
+---
+
+## 🏛️ Jurisdictional Hierarchy & Tier Enforcement
+
+VIAP supports full 8-tier hierarchy models as well as custom tenant configurations (e.g., 6-tier and 4-tier models):
+
+| Hierarchy Level | System Role Key | Command Station Route | Description |
+| :--- | :--- | :--- | :--- |
+| **STATE** | `STATE_ADMIN` | `#/state` | Statewide war-room, majority projections, apex command |
+| **ZONE** | `ZONE_INCHARGE` | `#/zone` | Multi-parliament regional coordinator |
+| **PARLIAMENT** | `PARLIAMENT_INCHARGE` | `#/parliament` | Lok Sabha parliamentary constituency command |
+| **CONSTITUENCY** | `CONSTITUENCY_INCHARGE` | `#/constituency` | Assembly constituency candidate (MLA) station |
+| **MANDAL / TEHSIL** | `MANDAL_INCHARGE` | `#/mandal` | Block / Mandal level ground operations |
+| **VILLAGE / WARD** | `VILLAGE_INCHARGE` | `#/village` | Village / municipal ward committee lead |
+| **BOOTH** | `BOOTH_PRESIDENT` | `#/booth` | Polling booth agent & live ballot box turnout |
+| **VOTER GROUP** | `VOTER_100_INCHARGE` | `#/100-voter` | 100-voter micro-cluster door-to-door outreach |
+
+> 🔒 **Tier Restrictions**: If a tenant disables specific tiers (e.g., Party applications disabling `MANDAL` and `BOOTH`), the platform strictly hides those roles from the UI and rejects direct access attempts via HTTP 403 `HIERARCHY_TIER_RESTRICTED`.
+
+---
+
+## 🚀 Quick Start & Local Setup
+
+### Prerequisites
+
+- **Node.js**: v18.x or v20.x+
+- **PostgreSQL**: v14+ running locally or on a cloud provider
+- **npm**: v9+
+
+---
+
+### Step 1: Clone Repository & Install Dependencies
+
+```bash
+git clone https://github.com/Prayansh-bh/VIAP---Voting-Software.git
+cd VIAP---Voting-Software
+
+# Install root dependencies
+npm install
+
+# Install workspace dependencies
+cd frontend && npm install
+cd ../admin && npm install
+cd ../backend && npm install
+cd ..
+```
+
+---
+
+### Step 2: Configure Environment Variables
+
+#### Backend Configuration (`backend/.env`)
+Copy the sample file and configure your PostgreSQL database credentials:
+```bash
+cp backend/.env.example backend/.env
+```
+
+Ensure `backend/.env` contains:
+```env
+PORT=4000
+NODE_ENV=development
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/kondapi_connect?schema=public"
+JWT_SECRET="super-secret-jwt-key-replace-in-production"
+COOKIE_SECRET="super-secret-cookie-key-replace-in-production"
+FRONTEND_URL="http://localhost:3000,http://localhost:3001"
+
+# WhatsApp / SMS Configuration
+SMS_DEFAULT_PROVIDER="WHATSAPP"
+OTP_EXPIRY_MINUTES=5
+OTP_RESEND_COOLDOWN_MS=60000
+```
+
+#### Frontend Configuration (`frontend/.env`)
+```bash
+cp frontend/.env.example frontend/.env
+```
+Ensure `VITE_API_URL` points to `http://localhost:4000`.
+
+---
+
+### Step 3: Initialize Database
+
+Run Prisma migrations and seed the initial party configurations, hierarchy, and sample voters:
+
+```bash
+cd backend
+
+# Generate Prisma client
+npx prisma generate
+
+# Apply migrations
+npx prisma migrate dev
+
+# Seed database
+npx prisma db seed
+
+cd ..
+```
+
+---
+
+### Step 4: Start Development Servers
+
+Run the services concurrently in separate terminal windows:
+
+#### 1. Backend Server
+```bash
+cd backend
+npm run dev
+# Running on http://localhost:4000
+```
+
+#### 2. Frontend Command Station
+```bash
+cd frontend
+npm run dev
+# Running on http://localhost:3000
+```
+
+#### 3. Admin / CMS Studio
+```bash
+cd admin
+npm run dev
+# Running on http://localhost:3001
+```
+
+---
+
+## 💬 WhatsApp OTP Setup (Baileys)
+
+VIAP includes direct WhatsApp OTP delivery via **Baileys**:
+
+1. Start the backend: `npm run dev` in `backend/`.
+2. When the backend boots, if no active WhatsApp session is detected, a **QR Code** is printed directly to your backend terminal.
+3. Open WhatsApp on your mobile phone:
+   - Go to **Linked Devices** ➔ **Link a Device**.
+   - Scan the terminal QR code.
+4. Once paired, the session credentials are encrypted and stored in `backend/.baileys_auth/`.
+5. All verification codes requested by users in the UI are automatically delivered straight to their WhatsApp!
+
+---
+
+## 🔑 Key API Endpoints
+
+### Authentication (`/api/auth`)
+- `POST /api/auth/request-otp`: Request 6-digit OTP via WhatsApp/SMS (validates role and tier eligibility).
+- `POST /api/auth/verify-otp`: Verify OTP and receive JWT access token, refresh token, and device token.
+- `POST /api/auth/demo-login`: Fast 1-click authentication for authorized demo accounts.
+- `POST /api/auth/device-session`: Silent persistent session restore on trusted devices.
+- `POST /api/auth/logout`: Revoke active session tokens and clear credentials.
+
+### CMS & Tenant Configuration (`/api/cms`)
+- `GET /api/cms/config`: Public endpoint serving party branding, theme colors, feature flags, and active hierarchy tiers.
+- `PUT /api/cms/config`: Update tenant settings, candidate metadata, and hierarchy definitions (Admin).
+- `POST /api/cms/build-application`: Programmatically provision an entire new party application with custom scope and tiers.
+
+### Hierarchy & Field Operations (`/api`)
+- `GET /api/hierarchy`: Fetch full unit tree for the authenticated tenant.
+- `GET /api/dashboard/:unitId`: Bottom-up rollup metrics (turnout %, voter sentiment, task progress).
+- `GET /api/voters`: Scoped voter list with filters for caste, polling booth, and migration status.
+- `PATCH /api/voters/:id`: Update voting status (`VOTED`, `PENDING`), location, and fake voter flags.
+- `GET /api/tasks` & `POST /api/tasks`: Distribute campaign directives from high command to field workers.
+
+---
+
+## 🔒 Security Best Practices
+
+- **Zero Secret Leaks**: All session credentials (`.baileys_auth/`) and environment configurations (`.env`) are strictly excluded from git tracking.
+- **Rate Limiting**: Built-in sliding-window rate limiting on OTP requests and device authorization attempts.
+- **Audit Logging**: Every login attempt, administrative change, and voter record modification is recorded in the `AuditLog` table.
+- **Strict Role-Based Scoping**: Incharges cannot query or modify data belonging to sibling or higher units.
+
+---
+
+## 📄 License
+
+This software is proprietary and confidential. Unauthorized copying, distribution, or modification is strictly prohibited.  
+Copyright © 2026 VIAP Platform Team. All rights reserved.
