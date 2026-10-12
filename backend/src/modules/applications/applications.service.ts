@@ -285,10 +285,17 @@ export class ApplicationsService {
   }
 
   /**
-   * Return all applications available on the platform
+   * Return applications available on the platform, optionally filtered by organisationId
    */
-  static async getApplications() {
+  static async getApplications(organisationId?: string) {
+    const where: Prisma.CMSConfigurationWhereInput = {};
+    if (organisationId !== undefined) {
+      const isValidUuid = typeof organisationId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(organisationId);
+      where.organisationId = isValidUuid ? organisationId : '00000000-0000-0000-0000-000000000000';
+    }
+
     const configs = await prisma.cMSConfiguration.findMany({
+      where,
       include: { organisation: true },
       orderBy: { updatedAt: 'desc' },
     });

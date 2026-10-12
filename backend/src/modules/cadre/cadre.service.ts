@@ -44,9 +44,26 @@ export class CadreService {
   }
 
   static async updateCadre(id: string, dto: any, actorId: string) {
+    const ALLOWED_FIELDS = [
+      'skills',
+      'badges',
+      'performanceScore',
+      'totalAssignedVoters',
+      'votedCoveredCount',
+      'tasksCompletedCount',
+      'trainingCompletedCount',
+    ];
+
+    const safeData: Record<string, any> = {};
+    for (const key of ALLOWED_FIELDS) {
+      if (dto && dto[key] !== undefined) {
+        safeData[key] = dto[key];
+      }
+    }
+
     const cadre = await prisma.cadre.update({
       where: { id },
-      data: dto,
+      data: safeData,
       include: { user: true },
     });
 
@@ -55,7 +72,7 @@ export class CadreService {
       entityType: 'Cadre',
       entityId: cadre.id,
       userId: actorId,
-      changes: dto,
+      changes: safeData,
     });
 
     return cadre;

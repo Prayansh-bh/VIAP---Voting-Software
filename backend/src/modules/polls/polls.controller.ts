@@ -6,7 +6,7 @@ import { successResponse } from '../../common/response.js';
 export class PollsController {
   static async listPolls(req: FastifyRequest, reply: FastifyReply) {
     const user = (req as any).user;
-    const polls = await PollsService.listPolls(user);
+    const polls = await PollsService.listPolls(user, req.hierarchyScope);
     return reply.status(200).send(successResponse(polls));
   }
 
@@ -20,7 +20,7 @@ export class PollsController {
   static async vote(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
     const body = votePollSchema.parse(req.body);
     const user = (req as any).user;
-    const result = await PollsService.vote(req.params.id, body, user);
+    const result = await PollsService.vote(req.params.id, body, user, req.hierarchyScope);
     return reply.status(200).send(successResponse(result, 'Vote submitted successfully'));
   }
 

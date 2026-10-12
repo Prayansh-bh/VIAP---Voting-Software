@@ -93,8 +93,13 @@ export class VotersService {
     if (politicalPreference) where.politicalPreference = politicalPreference;
     if (caste) where.caste = caste;
 
-    // Enforce Hierarchy Authorization Scope
+    // Enforce Hierarchy Authorization Scope & Tenant Isolation
     if (scope && !scope.isGlobalScope) {
+      if (!scope.organisationId) {
+        return { total: 0, items: [], page, limit }; // Missing organization context must fail closed
+      }
+      where.state = { organisationId: scope.organisationId };
+
       if (scope.role === 'VOTER_100_INCHARGE') {
         const groupIds = Array.from(scope.accessibleVoterGroupIds);
         if (groupIds.length > 0) {
@@ -103,22 +108,37 @@ export class VotersService {
             { assignedInchargeId: scope.userId },
           ];
         } else {
-          where.assignedInchargeId = scope.userId;
+          where.assignedInchargeId = scope.userId || '00000000-0000-0000-0000-000000000000';
         }
       } else if (scope.role === 'BOOTH_PRESIDENT' || scope.role === 'BOOTH_INCHARGE') {
-        if (!boothId) where.boothId = { in: Array.from(scope.accessibleBoothIds) };
+        if (!boothId) {
+          const ids = Array.from(scope.accessibleBoothIds);
+          where.boothId = ids.length > 0 ? { in: ids } : '00000000-0000-0000-0000-000000000000';
+        }
       } else if (scope.role === 'VILLAGE_INCHARGE') {
-        if (!villageId) where.villageId = { in: Array.from(scope.accessibleVillageIds) };
+        if (!villageId) {
+          const ids = Array.from(scope.accessibleVillageIds);
+          where.villageId = ids.length > 0 ? { in: ids } : '00000000-0000-0000-0000-000000000000';
+        }
       } else if (scope.role === 'MANDAL_INCHARGE') {
-        if (!mandalId) where.mandalId = { in: Array.from(scope.accessibleMandalIds) };
+        if (!mandalId) {
+          const ids = Array.from(scope.accessibleMandalIds);
+          where.mandalId = ids.length > 0 ? { in: ids } : '00000000-0000-0000-0000-000000000000';
+        }
       } else if (scope.role === 'CONSTITUENCY_INCHARGE' || scope.role === 'VIEWER') {
-        if (!constituencyId) where.constituencyId = { in: Array.from(scope.accessibleConstituencyIds) };
+        if (!constituencyId) {
+          const ids = Array.from(scope.accessibleConstituencyIds);
+          where.constituencyId = ids.length > 0 ? { in: ids } : '00000000-0000-0000-0000-000000000000';
+        }
       } else if (scope.role === 'PARLIAMENT_INCHARGE') {
-        where.parliamentId = { in: Array.from(scope.accessibleParliamentIds) };
+        const ids = Array.from(scope.accessibleParliamentIds);
+        where.parliamentId = ids.length > 0 ? { in: ids } : '00000000-0000-0000-0000-000000000000';
       } else if (scope.role === 'ZONE_INCHARGE') {
-        where.zoneId = { in: Array.from(scope.accessibleZoneIds) };
+        const ids = Array.from(scope.accessibleZoneIds);
+        where.zoneId = ids.length > 0 ? { in: ids } : '00000000-0000-0000-0000-000000000000';
       } else if (scope.role === 'STATE_ADMIN' || scope.role === 'HIGH_COMMAND') {
-        where.stateId = { in: Array.from(scope.accessibleStateIds) };
+        const ids = Array.from(scope.accessibleStateIds);
+        where.stateId = ids.length > 0 ? { in: ids } : '00000000-0000-0000-0000-000000000000';
       } else if (scope.accessibleUnitIds.size > 0) {
         where.unitId = { in: Array.from(scope.accessibleUnitIds) };
       }
@@ -128,7 +148,7 @@ export class VotersService {
 
     if (search) {
       const isNum = !isNaN(Number(search));
-      where.OR = [
+      const searchConditions: Prisma.VoterWhereInput[] = [
         { name: { contains: search, mode: 'insensitive' } },
         { epicNumber: { contains: search, mode: 'insensitive' } },
         { fatherHusbandName: { contains: search, mode: 'insensitive' } },
@@ -136,6 +156,18 @@ export class VotersService {
         { mobileNumber: { contains: search } },
         ...(isNum ? [{ serialNumber: Number(search) }] : []),
       ];
+
+      if (where.OR) {
+        const existingOr = where.OR;
+        delete where.OR;
+        where.AND = [
+          ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+          { OR: existingOr },
+          { OR: searchConditions },
+        ];
+      } else {
+        where.OR = searchConditions;
+      }
     }
 
     const [total, items] = await Promise.all([

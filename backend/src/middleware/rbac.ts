@@ -470,9 +470,16 @@ export async function populateHierarchyScope(req: FastifyRequest, reply: Fastify
  * Assert Organisation Isolation (Prevents Cross-Tenant Data Access)
  */
 export function assertOrganisationAccess(req: FastifyRequest, reply: FastifyReply, targetOrgId?: string | null): boolean {
-  if (!req.hierarchyScope) return false;
+  if (!req.hierarchyScope) {
+    reply.status(401).send(errorResponse('Unauthorized: Missing security context.', 'UNAUTHORIZED'));
+    return false;
+  }
   if (req.hierarchyScope.isGlobalScope) return true; // Super admin
-  if (!targetOrgId) return true;
+
+  if (!targetOrgId || !req.hierarchyScope.organisationId) {
+    reply.status(403).send(errorResponse('Access denied: Missing organization context.', 'CROSS_ORG_ACCESS_FORBIDDEN'));
+    return false;
+  }
 
   if (req.hierarchyScope.organisationId !== targetOrgId) {
     reply.status(403).send(errorResponse('Access denied: Cross-organisation data access is strictly forbidden.', 'CROSS_ORG_ACCESS_FORBIDDEN'));

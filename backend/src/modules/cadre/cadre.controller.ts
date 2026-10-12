@@ -1,6 +1,6 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { errorResponse, successResponse } from '../../common/response.js';
-import { assertUserScope } from '../../middleware/rbac.js';
+import { assertOrganisationAccess, assertUserScope } from '../../middleware/rbac.js';
 import { prisma } from '../../lib/prisma.js';
 import { CadreService } from './cadre.service.js';
 
@@ -28,9 +28,27 @@ export class CadreController {
       return reply.status(404).send(errorResponse('Cadre not found', 'NOT_FOUND'));
     }
 
+    if (!assertOrganisationAccess(req, reply, existing.user?.organisationId)) return;
     if (!(await assertUserScope(req, reply, existing.userId))) return;
 
-    const item = await CadreService.updateCadre(req.params.id, req.body, req.user!.userId);
+    const ALLOWED_CADRE_UPDATE_FIELDS = [
+      'skills',
+      'badges',
+      'performanceScore',
+      'totalAssignedVoters',
+      'votedCoveredCount',
+      'tasksCompletedCount',
+      'trainingCompletedCount',
+    ];
+
+    const sanitizedData: Record<string, any> = {};
+    for (const field of ALLOWED_CADRE_UPDATE_FIELDS) {
+      if (req.body && (req.body as any)[field] !== undefined) {
+        sanitizedData[field] = (req.body as any)[field];
+      }
+    }
+
+    const item = await CadreService.updateCadre(req.params.id, sanitizedData, req.user!.userId);
     return reply.send(successResponse(item, 'Cadre updated'));
   }
 

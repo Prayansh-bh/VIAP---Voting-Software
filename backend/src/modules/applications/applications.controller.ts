@@ -3,7 +3,18 @@ import { errorResponse, successResponse } from '../../common/response.js';
 import { ApplicationsService } from './applications.service.js';
 
 export class ApplicationsController {
-  static async getApplications(_req: FastifyRequest, reply: FastifyReply) {
+  static async getApplications(req: FastifyRequest, reply: FastifyReply) {
+    const user = req.user;
+    const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+
+    if (!isSuperAdmin) {
+      if (!user?.organisationId) {
+        return reply.send(successResponse([])); // Fail closed if missing tenant context
+      }
+      const data = await ApplicationsService.getApplications(user.organisationId);
+      return reply.send(successResponse(data));
+    }
+
     const data = await ApplicationsService.getApplications();
     return reply.send(successResponse(data));
   }

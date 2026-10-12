@@ -5,11 +5,31 @@ import { logAudit } from '../../middleware/audit.js';
 import { AuditAction } from '@prisma/client';
 
 export class PollsService {
-  static async listPolls(user: AuthenticatedUserPayload) {
+  static async listPolls(user: AuthenticatedUserPayload, scope?: UserHierarchyScope) {
+    const isSuperAdmin = user.role === 'SUPER_ADMIN';
+    if (!isSuperAdmin && !user.organisationId) {
+      return []; // Fail closed if non-superadmin lacks tenant context
+    }
+
+    const where: any = {
+      status: { in: ['PUBLISHED', 'CLOSED'] },
+    };
+
+    if (!isSuperAdmin) {
+      where.createdBy = {
+        organisationId: user.organisationId,
+      };
+
+      if (scope && !scope.isGlobalScope) {
+        where.OR = [
+          { unitId: null },
+          { unitId: { in: Array.from(scope.accessibleUnitIds) } },
+        ];
+      }
+    }
+
     const polls = await prisma.poll.findMany({
-      where: {
-        status: { in: ['PUBLISHED', 'CLOSED'] },
-      },
+      where,
       include: {
         options: {
           include: {
@@ -53,6 +73,14 @@ export class PollsService {
   }
 
   static async createPoll(dto: CreatePollDto, user: AuthenticatedUserPayload, scope?: UserHierarchyScope) {
+    const isSuperAdmin = user.role === 'SUPER_ADMIN';
+    if (!isSuperAdmin && !user.organisationId) {
+      const err: any = new Error('Access denied: Tenant organization context missing.');
+      err.statusCode = 403;
+      err.code = 'FORBIDDEN_TENANT';
+      throw err;
+    }
+
     if (scope && !scope.isGlobalScope && dto.unitId) {
       if (!scope.accessibleUnitIds.has(dto.unitId)) {
         const err: any = new Error(`Access denied: Geographical node ${dto.unitId} is outside your authorized hierarchy scope.`);
@@ -94,21 +122,52 @@ export class PollsService {
     return poll;
   }
 
-  static async vote(pollId: string, dto: VotePollDto, user: AuthenticatedUserPayload) {
+  static async vote(pollId: string, dto: VotePollDto, user: AuthenticatedUserPayload, scope?: UserHierarchyScope) {
     const poll = await prisma.poll.findUnique({
       where: { id: pollId },
-      include: { options: true },
+      include: {
+        options: true,
+        createdBy: { select: { organisationId: true } },
+      },
     });
 
     if (!poll) {
       const err: any = new Error('Poll not found');
       err.statusCode = 404;
+      err.code = 'NOT_FOUND';
       throw err;
+    }
+
+    const isSuperAdmin = user.role === 'SUPER_ADMIN';
+    if (!isSuperAdmin) {
+      if (!user.organisationId || poll.createdBy?.organisationId !== user.organisationId) {
+        const err: any = new Error('Access denied: Poll belongs to another organization.');
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_TENANT';
+        throw err;
+      }
+
+      if (scope && !scope.isGlobalScope && poll.unitId) {
+        if (!scope.accessibleUnitIds.has(poll.unitId)) {
+          const err: any = new Error('Access denied: Poll is outside your authorized hierarchy scope.');
+          err.statusCode = 403;
+          err.code = 'FORBIDDEN_SCOPE';
+          throw err;
+        }
+      }
     }
 
     if (poll.status !== 'PUBLISHED') {
       const err: any = new Error('This poll is closed or not accepting votes');
       err.statusCode = 400;
+      err.code = 'POLL_NOT_ACCEPTING_VOTES';
+      throw err;
+    }
+
+    if (poll.expiresAt && poll.expiresAt < new Date()) {
+      const err: any = new Error('This poll has expired and is no longer accepting votes');
+      err.statusCode = 400;
+      err.code = 'POLL_EXPIRED';
       throw err;
     }
 
@@ -116,6 +175,7 @@ export class PollsService {
     if (!optionExists) {
       const err: any = new Error('Invalid option selected for this poll');
       err.statusCode = 400;
+      err.code = 'INVALID_POLL_OPTION';
       throw err;
     }
 
@@ -132,29 +192,43 @@ export class PollsService {
     if (existingVote) {
       const err: any = new Error('You have already voted on this poll');
       err.statusCode = 409;
+      err.code = 'DUPLICATE_VOTE';
       throw err;
     }
 
-    const vote = await prisma.pollVote.create({
-      data: {
-        pollId,
-        optionId: dto.optionId,
-        userId: user.userId,
-      },
-    });
+    try {
+      const vote = await prisma.pollVote.create({
+        data: {
+          pollId,
+          optionId: dto.optionId,
+          userId: user.userId,
+        },
+      });
 
-    return {
-      success: true,
-      voteId: vote.id,
-      pollId,
-      optionId: vote.optionId,
-      message: 'Vote recorded successfully',
-    };
+      return {
+        success: true,
+        voteId: vote.id,
+        pollId,
+        optionId: vote.optionId,
+        message: 'Vote recorded successfully',
+      };
+    } catch (err: any) {
+      if (err.code === 'P2002') {
+        const conflictErr: any = new Error('You have already voted on this poll');
+        conflictErr.statusCode = 409;
+        conflictErr.code = 'DUPLICATE_VOTE';
+        throw conflictErr;
+      }
+      throw err;
+    }
   }
 
   static async closePoll(pollId: string, user: AuthenticatedUserPayload, scope?: UserHierarchyScope) {
     const existing = await prisma.poll.findUnique({
       where: { id: pollId },
+      include: {
+        createdBy: { select: { organisationId: true } },
+      },
     });
 
     if (!existing) {
@@ -162,6 +236,16 @@ export class PollsService {
       err.statusCode = 404;
       err.code = 'NOT_FOUND';
       throw err;
+    }
+
+    const isSuperAdmin = user.role === 'SUPER_ADMIN';
+    if (!isSuperAdmin) {
+      if (!user.organisationId || existing.createdBy?.organisationId !== user.organisationId) {
+        const err: any = new Error('Access denied: Poll belongs to another organization.');
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_TENANT';
+        throw err;
+      }
     }
 
     if (scope && !scope.isGlobalScope) {
