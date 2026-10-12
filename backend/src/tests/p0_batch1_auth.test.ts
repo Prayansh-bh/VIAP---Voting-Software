@@ -5,6 +5,7 @@ import { buildApp } from '../app.js';
 import { prisma } from '../lib/prisma.js';
 import { RoleType } from '@prisma/client';
 import { SmsProviderFactory } from '../lib/sms/factory.js';
+import { OtpService } from '../modules/auth/services/otp.service.js';
 
 describe('P0 Security Hardening - Batch 1 Authentication Controls', () => {
   let app: any;
@@ -181,5 +182,53 @@ describe('P0 Security Hardening - Batch 1 Authentication Controls', () => {
     assert.equal(json.success, true);
     assert.equal(json.data.message, 'If an eligible account exists, an OTP has been dispatched.');
     assert.ok(json.data.requestId, 'Opaque requestId returned');
+  });
+
+  it('9. In production, eligible registered user receives identical uniform response schema and message', async () => {
+    process.env.NODE_ENV = 'production';
+    if (!activeUser) return;
+
+    OtpService.clearCooldown(activeUser.mobileNumber);
+    await prisma.oTPVerification.deleteMany({ where: { mobileNumber: activeUser.mobileNumber } });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/request-otp',
+      payload: {
+        mobileNumber: activeUser.mobileNumber,
+        role: activeUser.role,
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const json = JSON.parse(res.body);
+    assert.equal(json.success, true);
+    assert.equal(json.data.message, 'If an eligible account exists, an OTP has been dispatched.');
+    assert.ok(json.data.requestId);
+    assert.ok(json.data.expiresAt);
+    assert.equal(typeof json.data.cooldownSeconds, 'number');
+  });
+
+  it('10. In production, role-mismatched or tier-restricted direct request returns identical uniform response', async () => {
+    process.env.NODE_ENV = 'production';
+    if (!activeUser) return;
+
+    OtpService.clearCooldown(activeUser.mobileNumber);
+    await prisma.oTPVerification.deleteMany({ where: { mobileNumber: activeUser.mobileNumber } });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/request-otp',
+      payload: {
+        mobileNumber: activeUser.mobileNumber,
+        role: RoleType.SUPER_ADMIN, // Mismatched role directly from API
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const json = JSON.parse(res.body);
+    assert.equal(json.success, true);
+    assert.equal(json.data.message, 'If an eligible account exists, an OTP has been dispatched.');
+    assert.ok(json.data.requestId);
   });
 });

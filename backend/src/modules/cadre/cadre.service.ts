@@ -27,8 +27,19 @@ export class CadreService {
   }
 
   static async createCadre(dto: any, actorId: string) {
+    const safeData: any = {
+      userId: dto.userId,
+      skills: dto.skills || [],
+      badges: dto.badges || [],
+      performanceScore: typeof dto.performanceScore === 'number' ? dto.performanceScore : 85.0,
+      totalAssignedVoters: Number(dto.totalAssignedVoters) || 0,
+      votedCoveredCount: Number(dto.votedCoveredCount) || 0,
+      tasksCompletedCount: Number(dto.tasksCompletedCount) || 0,
+      trainingCompletedCount: Number(dto.trainingCompletedCount) || 0,
+    };
+
     const cadre = await prisma.cadre.create({
-      data: dto,
+      data: safeData,
       include: { user: true },
     });
 
@@ -37,13 +48,31 @@ export class CadreService {
       entityType: 'Cadre',
       entityId: cadre.id,
       userId: actorId,
-      changes: dto,
+      changes: safeData,
     });
 
     return cadre;
   }
 
-  static async updateCadre(id: string, dto: any, actorId: string) {
+  static async updateCadre(id: string, dto: any, actorId: string, actorOrgId?: string | null, isSuperAdmin = false) {
+    const existing = await prisma.cadre.findUnique({
+      where: { id },
+      include: { user: true },
+    });
+    if (!existing) {
+      const err: any = new Error('Cadre not found');
+      err.statusCode = 404;
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+
+    if (!isSuperAdmin && (!actorOrgId || existing.user?.organisationId !== actorOrgId)) {
+      const err: any = new Error('Access denied: Cadre belongs to another organization');
+      err.statusCode = 403;
+      err.code = 'FORBIDDEN_TENANT';
+      throw err;
+    }
+
     const ALLOWED_FIELDS = [
       'skills',
       'badges',

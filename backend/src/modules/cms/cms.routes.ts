@@ -629,13 +629,19 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         });
 
         // Audit logging (external side effect, outside transaction)
-        await logAudit({
-          action: AuditAction.CREATE,
-          entityType: 'ApplicationBuilder',
-          entityId: provisionResult.updatedConfig.id,
-          req,
-          changes: body as unknown as Prisma.InputJsonValue,
-        });
+        try {
+          const auditChanges = { ...body };
+          delete (auditChanges as any).password;
+          await logAudit({
+            action: AuditAction.CREATE,
+            entityType: 'ApplicationBuilder',
+            entityId: provisionResult.updatedConfig.id,
+            req,
+            changes: auditChanges as unknown as Prisma.InputJsonValue,
+          });
+        } catch (auditErr) {
+          req.log.warn({ err: auditErr }, 'ApplicationBuilder audit logging failed after transaction commit');
+        }
 
         return reply.status(201).send(
           successResponse(

@@ -287,7 +287,11 @@ export class ApplicationsService {
   /**
    * Return applications available on the platform, optionally filtered by organisationId
    */
-  static async getApplications(organisationId?: string) {
+  static async getApplications(organisationId?: string, isSuperAdmin = false) {
+    if (!isSuperAdmin && !organisationId) {
+      return []; // Non-superadmin without organisation context fails closed
+    }
+
     const where: Prisma.CMSConfigurationWhereInput = {};
     if (organisationId !== undefined) {
       const isValidUuid = typeof organisationId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(organisationId);

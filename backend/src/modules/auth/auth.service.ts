@@ -69,12 +69,14 @@ export class AuthService {
     const isTierRestricted = Boolean(requestedLevel && !activeLevels.includes(requestedLevel));
 
     if (isTierRestricted && user) {
-      const error: any = new Error(
-        `Hierarchy tier '${requestedLevel}' (${dto.role}) is restricted for this party application. Only enabled tiers (${activeLevels.join(', ')}) can be accessed.`
-      );
-      error.statusCode = 403;
-      error.code = 'HIERARCHY_TIER_RESTRICTED';
-      throw error;
+      if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
+        const error: any = new Error(
+          `Hierarchy tier '${requestedLevel}' (${dto.role}) is restricted for this party application. Only enabled tiers (${activeLevels.join(', ')}) can be accessed.`
+        );
+        error.statusCode = 403;
+        error.code = 'HIERARCHY_TIER_RESTRICTED';
+        throw error;
+      }
     }
 
     // Record request timestamp uniformly for all valid requests to prevent side-channel account enumeration
@@ -264,7 +266,7 @@ export class AuthService {
       cooldownSeconds,
       provider: smsProvider.name,
       channel,
-      message: 'If an eligible account exists, an OTP has been dispatched to WhatsApp.',
+      message: 'If an eligible account exists, an OTP has been dispatched.',
     };
   }
 

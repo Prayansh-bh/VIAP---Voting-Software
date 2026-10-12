@@ -301,4 +301,38 @@ describe('P0 Security Hardening - Batch 3 Provisioning Safety & Atomicity', () =
     });
     assert.equal(afterCount, 0, 'No orphaned organisation record should persist after transaction failure');
   });
+
+  it('6. Post-transaction audit logging failure does not disrupt successful provisioning', async () => {
+    const timestamp = (Date.now() + 3).toString().slice(-4);
+    const tenantCode = `P0A-${timestamp}`;
+    const orgName = `Audit Resilient Org ${timestamp}`;
+    const candidateMobile = `9125${Date.now().toString().slice(-6)}`;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/cms/build-application',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+      payload: {
+        appName: orgName,
+        organisationName: orgName,
+        tenantCode,
+        activePartyCode: `APRT-${timestamp}`,
+        appScope: 'SINGLE_MLA',
+        stateName: 'Andhra Pradesh',
+        candidateName: 'Audit Test Candidate',
+        candidateMobile,
+      },
+    });
+
+    assert.equal(res.statusCode, 201);
+    const body = JSON.parse(res.body);
+    assert.equal(body.success, true);
+    assert.ok(body.data.application.organisationId);
+    createdOrgIds.push(body.data.application.organisationId);
+
+    // Verify credentials object never leaks generated password
+    assert.equal(body.data.credentials.password, undefined);
+  });
 });

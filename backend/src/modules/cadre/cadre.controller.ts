@@ -48,7 +48,14 @@ export class CadreController {
       }
     }
 
-    const item = await CadreService.updateCadre(req.params.id, sanitizedData, req.user!.userId);
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const item = await CadreService.updateCadre(
+      req.params.id,
+      sanitizedData,
+      req.user!.userId,
+      req.user?.organisationId,
+      isSuperAdmin,
+    );
     return reply.send(successResponse(item, 'Cadre updated'));
   }
 

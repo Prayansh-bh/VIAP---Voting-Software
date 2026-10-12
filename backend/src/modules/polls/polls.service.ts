@@ -16,11 +16,14 @@ export class PollsService {
     };
 
     if (!isSuperAdmin) {
+      if (!user.organisationId || !scope) {
+        return []; // Missing tenant or hierarchy scope context fails closed
+      }
       where.createdBy = {
         organisationId: user.organisationId,
       };
 
-      if (scope && !scope.isGlobalScope) {
+      if (!scope.isGlobalScope) {
         where.OR = [
           { unitId: null },
           { unitId: { in: Array.from(scope.accessibleUnitIds) } },
@@ -81,8 +84,8 @@ export class PollsService {
       throw err;
     }
 
-    if (scope && !scope.isGlobalScope && dto.unitId) {
-      if (!scope.accessibleUnitIds.has(dto.unitId)) {
+    if (!isSuperAdmin && dto.unitId) {
+      if (!scope || (!scope.isGlobalScope && !scope.accessibleUnitIds.has(dto.unitId))) {
         const err: any = new Error(`Access denied: Geographical node ${dto.unitId} is outside your authorized hierarchy scope.`);
         err.statusCode = 403;
         err.code = 'FORBIDDEN_SCOPE';
@@ -147,8 +150,8 @@ export class PollsService {
         throw err;
       }
 
-      if (scope && !scope.isGlobalScope && poll.unitId) {
-        if (!scope.accessibleUnitIds.has(poll.unitId)) {
+      if (poll.unitId) {
+        if (!scope || (!scope.isGlobalScope && !scope.accessibleUnitIds.has(poll.unitId))) {
           const err: any = new Error('Access denied: Poll is outside your authorized hierarchy scope.');
           err.statusCode = 403;
           err.code = 'FORBIDDEN_SCOPE';

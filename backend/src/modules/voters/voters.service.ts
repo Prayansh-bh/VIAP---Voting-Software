@@ -94,9 +94,9 @@ export class VotersService {
     if (caste) where.caste = caste;
 
     // Enforce Hierarchy Authorization Scope & Tenant Isolation
-    if (scope && !scope.isGlobalScope) {
-      if (!scope.organisationId) {
-        return { total: 0, items: [], page, limit }; // Missing organization context must fail closed
+    if (!scope || !scope.isGlobalScope) {
+      if (!scope?.organisationId) {
+        return { total: 0, items: [], page, limit }; // Missing scope or organization context must fail closed
       }
       where.state = { organisationId: scope.organisationId };
 

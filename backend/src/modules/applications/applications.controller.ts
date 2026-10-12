@@ -11,11 +11,11 @@ export class ApplicationsController {
       if (!user?.organisationId) {
         return reply.send(successResponse([])); // Fail closed if missing tenant context
       }
-      const data = await ApplicationsService.getApplications(user.organisationId);
+      const data = await ApplicationsService.getApplications(user.organisationId, false);
       return reply.send(successResponse(data));
     }
 
-    const data = await ApplicationsService.getApplications();
+    const data = await ApplicationsService.getApplications(undefined, true);
     return reply.send(successResponse(data));
   }
 

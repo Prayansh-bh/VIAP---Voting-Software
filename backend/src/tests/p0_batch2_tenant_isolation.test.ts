@@ -8,6 +8,7 @@ import { TokenService } from '../modules/auth/services/token.service.js';
 import { PollsService } from '../modules/polls/polls.service.js';
 import { VotersService } from '../modules/voters/voters.service.js';
 import { ApplicationsService } from '../modules/applications/applications.service.js';
+import { CadreService } from '../modules/cadre/cadre.service.js';
 
 describe('P0 Security Hardening - Batch 2 Tenant Isolation Controls', () => {
   let app: any;
@@ -484,6 +485,8 @@ describe('P0 Security Hardening - Batch 2 Tenant Isolation Controls', () => {
       payload: {
         performanceScore: 95,
         userId: fakeUserId, // Attempted reassignment
+        role: RoleType.SUPER_ADMIN, // Attempted privilege escalation
+        unitId: '22222222-2222-2222-2222-222222222222', // Attempted unit reassignment
       },
     });
 
@@ -491,5 +494,105 @@ describe('P0 Security Hardening - Batch 2 Tenant Isolation Controls', () => {
     const dbCadre = await prisma.cadre.findUnique({ where: { id: cadreRecordA.id } });
     assert.equal(dbCadre?.userId, cadreUserA.id, 'userId must remain untouched');
     assert.equal(dbCadre?.performanceScore, 95);
+    const dbUser = await prisma.user.findUnique({ where: { id: cadreUserA.id } });
+    assert.notEqual(dbUser?.role, RoleType.SUPER_ADMIN, 'User role must not be escalated via cadre update');
+  });
+
+  it('F3. Direct service-level call to CadreService.updateCadre rejects cross-tenant updates with 403', async () => {
+    let thrownError: any = null;
+    try {
+      await CadreService.updateCadre(
+        cadreRecordA.id,
+        { performanceScore: 90 },
+        tenantBUser.id,
+        tenantBOrg.id, // Actor is Tenant B, record is Tenant A
+        false
+      );
+    } catch (err: any) {
+      thrownError = err;
+    }
+    assert.ok(thrownError, 'Direct cross-tenant cadre update must throw');
+    assert.equal(thrownError.statusCode, 403);
+    assert.equal(thrownError.code, 'FORBIDDEN_TENANT');
+  });
+
+  it('F4. Cadre update with absent tenant context for non-superadmin fails closed with 403', async () => {
+    let thrownError: any = null;
+    try {
+      await CadreService.updateCadre(
+        cadreRecordA.id,
+        { performanceScore: 90 },
+        tenantAUser.id,
+        undefined, // Missing tenant context
+        false
+      );
+    } catch (err: any) {
+      thrownError = err;
+    }
+    assert.ok(thrownError, 'Cadre update without tenant context must throw');
+    assert.equal(thrownError.statusCode, 403);
+    assert.equal(thrownError.code, 'FORBIDDEN_TENANT');
+  });
+
+  it('E4. Direct service-level call to ApplicationsService.getApplications() without credentials fails closed', async () => {
+    const apps = await ApplicationsService.getApplications(); // No orgId and not superadmin
+    assert.deepEqual(apps, []);
+  });
+
+  it('D3. Voter listing with absent scope object fails closed with 0 items', async () => {
+    const query: any = { page: 1, limit: 20 };
+    const result = await VotersService.listVoters(query, undefined);
+    assert.equal(result.total, 0);
+    assert.deepEqual(result.items, []);
+  });
+
+  it('C9. Voting on a unit-scoped poll without scope object throws 403 FORBIDDEN_SCOPE', async () => {
+    const testUnit = await prisma.organizationUnit.create({
+      data: {
+        name: 'Test Poll Unit',
+        level: 'CONSTITUENCY',
+        code: `UNIT-${Date.now().toString().slice(-6)}`,
+      },
+    });
+
+    const unitPoll = await prisma.poll.create({
+      data: {
+        title: 'Unit Scoped Poll Test',
+        createdById: tenantAUser.id,
+        status: 'PUBLISHED',
+        unitId: testUnit.id,
+        options: {
+          create: [{ label: 'Option 1', order: 1 }],
+        },
+      },
+      include: { options: true },
+    });
+
+    try {
+      let thrownError: any = null;
+      try {
+        await PollsService.vote(
+          unitPoll.id,
+          { optionId: unitPoll.options[0].id },
+          {
+            userId: tenantAUser.id,
+            userCode: tenantAUser.userCode,
+            mobileNumber: tenantAUser.mobileNumber,
+            role: tenantAUser.role,
+            organisationId: tenantAOrg.id,
+          },
+          undefined // Absent scope!
+        );
+      } catch (err: any) {
+        thrownError = err;
+      }
+      assert.ok(thrownError, 'Voting on unit-scoped poll without scope must throw');
+      assert.equal(thrownError.statusCode, 403);
+      assert.equal(thrownError.code, 'FORBIDDEN_SCOPE');
+    } finally {
+      await prisma.pollOption.deleteMany({ where: { pollId: unitPoll.id } });
+      await prisma.poll.delete({ where: { id: unitPoll.id } });
+      await prisma.organizationUnit.delete({ where: { id: testUnit.id } });
+    }
   });
 });
