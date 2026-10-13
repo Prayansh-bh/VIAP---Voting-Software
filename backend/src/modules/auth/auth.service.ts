@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { performance } from 'perf_hooks';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { AuditAction, RoleType } from '@prisma/client';
@@ -20,6 +21,7 @@ export class AuthService {
    * Mitigates account enumeration by returning a uniform response shape while retaining authoritative checks internally.
    */
   static async requestOtp(dto: RequestOtpDto, reqInfo?: { ip?: string; userAgent?: string }) {
+    const startTime = performance.now();
     const cleanMobile = dto.mobileNumber.replace(/\D/g, '').slice(-10);
 
     // 1. Enforce Server-Side Rate Limiting (Cooldown + Sliding Window on normalized mobile number)
@@ -149,6 +151,7 @@ export class AuthService {
       }
 
       // Uniform response: Opaque crypto random request ID, no OTP generated or sent
+      await AuthService.enforceTimingFloor(startTime);
       return {
         requestId: crypto.randomUUID(),
         expiresAt: new Date(Date.now() + env.OTP_EXPIRY_MS),
@@ -196,6 +199,7 @@ export class AuthService {
     if (!smsResult.success) {
       if (isDemoMobileNumber) {
         console.warn(`[Demo Terminal OTP Active] Gateway dispatch bypassed for demo mobile +91${cleanMobile}. Real OTP printed to terminal.`);
+        await AuthService.enforceTimingFloor(startTime);
         return {
           requestId: record.id,
           expiresAt: record.expiresAt,
@@ -260,6 +264,7 @@ export class AuthService {
     });
 
     // Strip devOtp / rawOtp completely from response in production
+    await AuthService.enforceTimingFloor(startTime);
     return {
       requestId: record.id,
       expiresAt: record.expiresAt,
@@ -268,6 +273,29 @@ export class AuthService {
       channel,
       message: 'If an eligible account exists, an OTP has been dispatched.',
     };
+  }
+
+  /**
+   * Enforces a consistent minimum response duration across all account states
+   * using a monotonic timer and a configurable timing floor.
+   * Mitigates side-channel account enumeration timing discrepancies while
+   * capping delay to prevent resource exhaustion or unbounded delay.
+   */
+  static async enforceTimingFloor(startTime: number): Promise<void> {
+    const rawFloor = process.env.OTP_TIMING_FLOOR_MS !== undefined
+      ? Number(process.env.OTP_TIMING_FLOOR_MS)
+      : (env.OTP_TIMING_FLOOR_MS ?? 1000);
+    // Cap minimum floor at 0 and upper bound at 5000ms to avoid resource exhaustion
+    const floorMs = Math.max(0, Math.min(Number.isFinite(rawFloor) ? rawFloor : 1000, 5000));
+
+    // Enforce in production or when explicitly configured in environment / tests
+    if (process.env.NODE_ENV === 'production' || process.env.OTP_TIMING_FLOOR_MS !== undefined) {
+      const elapsed = performance.now() - startTime;
+      const remaining = floorMs - elapsed;
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
+    }
   }
 
   /**

@@ -22,6 +22,7 @@ const envSchema = z.object({
   OTP_RESEND_COOLDOWN_MS: z.coerce.number().default(60000), // 60 seconds
   OTP_RATE_LIMIT_MAX: z.coerce.number().default(5), // 5 requests per window
   OTP_RATE_LIMIT_WINDOW_MS: z.coerce.number().default(900000), // 15 minutes
+  OTP_TIMING_FLOOR_MS: z.coerce.number().default(1000), // consistent minimum response duration in ms
 
   // Primary Gateway Configuration (WhatsApp via Baileys is Primary OTP provider)
   SMS_PROVIDER: z.string().default('baileys'),

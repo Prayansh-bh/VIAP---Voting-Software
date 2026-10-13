@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AuditAction, Prisma, RoleType } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
-import { successResponse } from '../../common/response.js';
+import { errorResponse, successResponse } from '../../common/response.js';
 import { validateBody } from '../../common/validation.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requireRoles } from '../../middleware/rbac.js';
@@ -65,19 +65,31 @@ export async function organisationsRoutes(fastify: FastifyInstance) {
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as z.infer<typeof createOrgSchema>;
-      const org = await prisma.organisation.create({
-        data: body,
-      });
+      try {
+        const org = await prisma.organisation.create({
+          data: body,
+        });
 
-      await logAudit({
-        action: AuditAction.CREATE,
-        entityType: 'Organisation',
-        entityId: org.id,
-        req,
-        changes: body as unknown as Prisma.InputJsonValue,
-      });
+        await logAudit({
+          action: AuditAction.CREATE,
+          entityType: 'Organisation',
+          entityId: org.id,
+          req,
+          changes: body as unknown as Prisma.InputJsonValue,
+        });
 
-      return reply.status(201).send(successResponse(org, 'Organisation created'));
+        return reply.status(201).send(successResponse(org, 'Organisation created'));
+      } catch (err: any) {
+        if (
+          err.code === 'P2002' ||
+          err.code === '23505' ||
+          err.message?.includes('Organisation_lower_name_key') ||
+          err.message?.includes('Unique constraint failed')
+        ) {
+          return reply.status(409).send(errorResponse('Organisation with this name or code already exists', 'CONFLICT'));
+        }
+        throw err;
+      }
     },
   );
 }

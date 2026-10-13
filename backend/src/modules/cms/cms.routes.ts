@@ -710,7 +710,13 @@ export async function cmsRoutes(fastify: FastifyInstance) {
           ),
         );
       } catch (err: any) {
-        if (err.code === 'P2002' || err.code === 'TENANT_ALREADY_EXISTS') {
+        if (
+          err.code === 'P2002' ||
+          err.code === '23505' ||
+          err.code === 'TENANT_ALREADY_EXISTS' ||
+          err.message?.includes('Organisation_lower_name_key') ||
+          err.message?.includes('Unique constraint failed')
+        ) {
           return reply.status(409).send(
             errorResponse(
               err.message || 'Tenant code or organization conflict during provisioning.',
