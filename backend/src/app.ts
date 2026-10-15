@@ -41,6 +41,19 @@ export function buildApp(): FastifyInstance {
   // Centralized Error Handler
   app.setErrorHandler(errorHandler);
 
+  // Safely parse application/json when body is empty or blank (e.g. DELETE requests)
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, defaultDone) => {
+    if (!body || (typeof body === 'string' && body.trim() === '')) {
+      return defaultDone(null, {});
+    }
+    try {
+      defaultDone(null, JSON.parse(body as string));
+    } catch (err: any) {
+      err.statusCode = 400;
+      defaultDone(err, undefined);
+    }
+  });
+
   // Security Headers Hook (zero external dependencies)
   app.addHook('onSend', async (_request, reply) => {
     reply.header('X-Content-Type-Options', 'nosniff');

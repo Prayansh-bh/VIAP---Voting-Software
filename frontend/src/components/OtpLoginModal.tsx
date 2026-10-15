@@ -478,7 +478,7 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {filteredDemoProfiles.map((item) => {
-                    const isCurrent = item.roleId === role.id;
+                    const isCurrent = Boolean(role && item.roleId === role.id);
                     const isItemSubmitting = isSubmitting && submittingRoleId === item.roleId;
 
                     return (
@@ -545,7 +545,7 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
                   <span className="font-mono text-slate-900 font-bold">+91 {mobileNumber}</span>
                 </div>
                 <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-200 text-slate-700">
-                  {role.name}
+                  {role?.name || 'Authorized Incharge'}
                 </span>
               </div>
 

@@ -671,9 +671,11 @@ export class ApplicationsService {
           await tx.organisation.delete({
             where: { id: orgId },
           });
+          }
         }
-      }
-    });
+      },
+      { timeout: 30000, maxWait: 10000 },
+    );
 
     return { id: config.id, deleted: true };
   }

@@ -6,7 +6,7 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}): Promise<T> {
   const token = getAdminToken();
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     ...(init.headers as Record<string, string>),
   };
   if (token) {
