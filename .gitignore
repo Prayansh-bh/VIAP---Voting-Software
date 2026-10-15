@@ -64,3 +64,5 @@ frontend/AGENTS.md
 frontend/CLAUDE.md
 
 .neon
+uploads/
+backend/uploads/

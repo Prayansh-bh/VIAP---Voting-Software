@@ -61,6 +61,7 @@ import {
 } from '../lib/api';
 import { createRealtimeSocket, RealtimeVoteEvent } from '../lib/realtime';
 import Pagination from './common/Pagination';
+import { useCms } from '../context/CmsContext';
 
 interface MandalInchargeDashboardProps {
   session: UserSession;
@@ -130,7 +131,7 @@ interface VillageDataInfo {
 }
 
 export default function MandalInchargeDashboard({ session, onLogout }: MandalInchargeDashboardProps) {
-
+  const { config } = useCms();
   const [cadreItems, setCadreItems] = useState<any[]>([]);
 
   const villageIncharges = useMemo(() => {
@@ -384,7 +385,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       const ysrcp = bVoters.filter(v => v.politicalPreference === 'YSRCP').length;
       const neutral = bVoters.filter(v => v.politicalPreference === 'Neutral').length;
       
-      const totalVoters = b.votersCount || 1200; // registered voters count
+      const totalVoters = b.votersCount || bVoters.length; // registered voters count
       const classifiedVoters = tdp + ysrcp + neutral; // surveyed voters
       
       const margin = tdp - ysrcp;
@@ -699,16 +700,25 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
 
   // Party support breakdown
   const partyStats = useMemo(() => {
-    return {
-      TDP: 28054,
-      YSRCP: 21634,
+    const stats: Record<VoterPreference, number> = {
+      TDP: 0,
+      YSRCP: 0,
       JSP: 0,
       BJP: 0,
       INC: 0,
-      Neutral: 2559,
+      Neutral: 0,
       OTH: 0
     };
-  }, []);
+    voters.forEach(v => {
+      const pref = v.politicalPreference || 'Neutral';
+      if (stats[pref] !== undefined) {
+        stats[pref] += 1;
+      } else {
+        stats.Neutral += 1;
+      }
+    });
+    return stats;
+  }, [voters]);
 
   // Fake votes count (Fake, Duplicate, Doubtful)
   const fakeVotesCount = useMemo(() => {
@@ -717,18 +727,33 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
 
   // Dynamic Election Forecast computation
   const forecastData = useMemo(() => {
+    const candidates: [VoterPreference, number][] = [
+      ['TDP', partyStats.TDP],
+      ['YSRCP', partyStats.YSRCP],
+      ['JSP', partyStats.JSP],
+      ['BJP', partyStats.BJP],
+      ['INC', partyStats.INC],
+      ['OTH', partyStats.OTH],
+    ];
+    candidates.sort((a, b) => b[1] - a[1]);
+    const leader = candidates[0] || ['Neutral' as VoterPreference, 0];
+    const runnerUp = candidates[1] || ['Neutral' as VoterPreference, 0];
+    const leadCount = Math.max(0, leader[1] - runnerUp[1]);
+    const totalVotes = voters.length;
+    const leadPercentage = totalVotes > 0 && leader[1] > 0 ? ((leadCount / totalVotes) * 100).toFixed(1) : '0.0';
+
     return {
-      leadingParty: 'TDP' as VoterPreference,
-      secondParty: 'YSRCP' as VoterPreference,
-      leadCount: 6420,
-      leadCountStr: '6,420',
-      leaderCount: 28054,
-      runnerUpParty: 'YSRCP' as VoterPreference,
-      runnerUpCount: 21634,
-      leadPercentage: '12.3',
-      isFullSurveyAvailable: false
+      leadingParty: leader[1] > 0 ? leader[0] : ('Neutral' as VoterPreference),
+      secondParty: runnerUp[1] > 0 ? runnerUp[0] : ('Neutral' as VoterPreference),
+      leadCount,
+      leadCountStr: leadCount.toLocaleString(),
+      leaderCount: leader[1],
+      runnerUpParty: runnerUp[1] > 0 ? runnerUp[0] : ('Neutral' as VoterPreference),
+      runnerUpCount: runnerUp[1],
+      leadPercentage,
+      isFullSurveyAvailable: totalVotes > 0
     };
-  }, []);
+  }, [partyStats, voters]);
 
   // Donut chart calculations
   const donutChartData = useMemo(() => {
@@ -950,8 +975,8 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         inchargeId: session.userId,
         inchargeName: session.userName,
         constituency: session.assignedConstituency,
-        mandal: session.assignedMandal || 'Kondapi',
-        village: session.assignedVillage || 'Kondapi Village',
+        mandal: session.assignedMandal || '',
+        village: session.assignedVillage || '',
         booth: updated.boothNumber,
         date: new Date().toISOString().split('T')[0],
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -991,8 +1016,8 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       inchargeId: session.userId,
       inchargeName: session.userName,
       constituency: session.assignedConstituency,
-      mandal: session.assignedMandal || 'Kondapi',
-      village: session.assignedVillage || 'Kondapi Village',
+      mandal: session.assignedMandal || '',
+      village: session.assignedVillage || '',
       booth: 'All Polling Booths',
       date: new Date().toISOString().split('T')[0],
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -1026,8 +1051,8 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       inchargeId: session.userId,
       inchargeName: session.userName,
       constituency: session.assignedConstituency,
-      mandal: session.assignedMandal || 'Kondapi',
-      village: session.assignedVillage || 'Kondapi Village',
+      mandal: session.assignedMandal || '',
+      village: session.assignedVillage || '',
       booth: 'All Polling Booths',
       date: new Date().toISOString().split('T')[0],
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -1332,11 +1357,20 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
           {/* Brand logo & App Name */}
           <div className="flex items-center justify-between border-b border-slate-800 pb-4">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-yellow-400 flex items-center justify-center text-slate-950 font-black shadow-md shadow-yellow-400/10">
-                K
-              </div>
+              {config.logoUrl ? (
+                <img src={config.logoUrl} alt="Logo" className="w-9 h-9 rounded-xl object-cover shadow-md border border-slate-700" />
+              ) : (
+                <div 
+                  className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-950 font-black shadow-md shadow-yellow-400/10"
+                  style={{ backgroundColor: config.primaryColor || '#EAB308' }}
+                >
+                  {(config.organisationName || session.organisationName || 'M').slice(0, 1).toUpperCase()}
+                </div>
+              )}
               <div>
-                <h1 className="text-sm font-black tracking-tight uppercase text-yellow-400">Kondapi TDP Connect</h1>
+                <h1 className="text-sm font-black tracking-tight uppercase" style={{ color: config.primaryColor || '#FACC15' }}>
+                  {config.organisationName || session.organisationName || 'Political Connect'}
+                </h1>
                 <p className="text-[9px] font-black tracking-widest uppercase text-slate-400">Mandal Command</p>
               </div>
             </div>
@@ -1429,8 +1463,19 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         {/* Mobile top navigation header */}
         <div className="md:hidden flex items-center justify-between bg-white border border-slate-100 rounded-xl p-3 shadow-sm mb-4">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-yellow-400 flex items-center justify-center font-black text-slate-950">K</div>
-            <span className="font-black text-sm text-slate-900 tracking-tight">Kondapi TDP Connect</span>
+            {config.logoUrl ? (
+              <img src={config.logoUrl} alt="Logo" className="w-8 h-8 rounded-lg object-cover" />
+            ) : (
+              <div 
+                className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-slate-950"
+                style={{ backgroundColor: config.primaryColor || '#EAB308' }}
+              >
+                {(config.organisationName || session.organisationName || 'M').slice(0, 1).toUpperCase()}
+              </div>
+            )}
+            <span className="font-black text-sm text-slate-900 tracking-tight">
+              {config.organisationName || session.organisationName || 'Political Connect'}
+            </span>
           </div>
           <button 
             onClick={() => setIsSidebarOpen(true)}

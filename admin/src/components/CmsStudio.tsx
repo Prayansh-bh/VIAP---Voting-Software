@@ -610,10 +610,32 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 5 * 1024 * 1024) {
+      notify.error('Logo file size exceeds 5MB limit.', 'File Too Large');
+      return;
+    }
+
     const reader = new FileReader();
-    reader.onload = (event) => {
-      if (event.target?.result) {
-        setLogoUrl(event.target.result as string);
+    reader.onload = async (event) => {
+      const base64 = event.target?.result as string;
+      if (!base64) return;
+
+      try {
+        const { uploadAssetApi } = await import('../lib/cms');
+        const res = await uploadAssetApi({
+          base64Data: base64,
+          filename: file.name,
+          mimeType: file.type,
+        });
+        if (res?.assetUrl) {
+          setLogoUrl(res.assetUrl);
+          notify.success('Logo uploaded and stored safely.', 'Asset Saved');
+        } else {
+          setLogoUrl(base64);
+        }
+      } catch (err: any) {
+        console.warn('Asset upload fallback to local preview:', err);
+        setLogoUrl(base64);
       }
     };
     reader.readAsDataURL(file);
@@ -827,7 +849,11 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
         activeHierarchyLevels: selectedHierarchyLevels,
       };
 
-      localStorage.setItem('kdp_cms_config', JSON.stringify(mergedConfig));
+      const mergedToStore = { ...mergedConfig };
+      if (mergedToStore.logoUrl && mergedToStore.logoUrl.startsWith('data:')) {
+        mergedToStore.logoUrl = '';
+      }
+      localStorage.setItem('kdp_cms_config', JSON.stringify(mergedToStore));
       localStorage.setItem('kdp_custom_parties', JSON.stringify(partyList));
 
       const buildRes: any = await buildApplication(buildPayload);

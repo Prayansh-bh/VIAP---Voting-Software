@@ -162,7 +162,23 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
     if (typeof document !== 'undefined') {
       document.title = config.organisationName || 'Political Connect Platform';
       applyThemeVariables(config.primaryColor, config.secondaryColor, config.accentColor);
-      localStorage.setItem('kdp_cms_config', JSON.stringify(config));
+      if (config.faviconUrl && !config.faviconUrl.startsWith('data:')) {
+        let favicon = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+        if (!favicon) {
+          favicon = document.createElement('link');
+          favicon.rel = 'icon';
+          document.getElementsByTagName('head')[0].appendChild(favicon);
+        }
+        favicon.href = config.faviconUrl;
+      }
+      const toStore = { ...config };
+      if (toStore.logoUrl && toStore.logoUrl.startsWith('data:')) {
+        toStore.logoUrl = '';
+      }
+      if (toStore.faviconUrl && toStore.faviconUrl.startsWith('data:')) {
+        toStore.faviconUrl = '';
+      }
+      localStorage.setItem('kdp_cms_config', JSON.stringify(toStore));
     }
   }, [config]);
 
@@ -220,6 +236,32 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
   };
 
   const buildApplication = async (payload: any) => {
+    // If logo or favicon is raw base64 data, upload as asset first
+    const { uploadAssetApi } = await import('../lib/cms');
+    if (payload.logoUrl && payload.logoUrl.startsWith('data:')) {
+      try {
+        const uploaded = await uploadAssetApi({
+          base64Data: payload.logoUrl,
+          filename: `${(payload.appName || 'logo').toLowerCase().replace(/[^a-z0-9]/g, '')}-logo.png`,
+        });
+        payload.logoUrl = uploaded.assetUrl;
+      } catch (e) {
+        console.warn('Logo asset upload failed in buildApplication:', e);
+      }
+    }
+
+    if (payload.faviconUrl && payload.faviconUrl.startsWith('data:')) {
+      try {
+        const uploaded = await uploadAssetApi({
+          base64Data: payload.faviconUrl,
+          filename: `${(payload.appName || 'favicon').toLowerCase().replace(/[^a-z0-9]/g, '')}-favicon.png`,
+        });
+        payload.faviconUrl = uploaded.assetUrl;
+      } catch (e) {
+        console.warn('Favicon asset upload failed in buildApplication:', e);
+      }
+    }
+
     let res: any = {};
     try {
       res = await buildApplicationApi(payload);
@@ -261,7 +303,9 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem('kdp_custom_parties', JSON.stringify(payload.politicalParties));
     }
     applyThemeVariables(nextConfig.primaryColor, nextConfig.secondaryColor, nextConfig.accentColor);
-    localStorage.setItem('kdp_cms_config', JSON.stringify(nextConfig));
+    const toStore = { ...nextConfig };
+    if (toStore.logoUrl && toStore.logoUrl.startsWith('data:')) toStore.logoUrl = '';
+    localStorage.setItem('kdp_cms_config', JSON.stringify(toStore));
     return res;
   };
 

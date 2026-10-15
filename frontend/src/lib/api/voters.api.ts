@@ -44,7 +44,7 @@ export function normalizeVoter(v: any): Voter {
     age: Number(v.age || 18),
     gender: v.gender || 'Other',
     mobileNumber: String(v.mobileNumber || ''),
-    assemblyConstituency: typeof v.constituency === 'object' ? String(v.constituency?.name || 'Kondapi') : String(v.constituency || 'Kondapi'),
+    assemblyConstituency: typeof v.constituency === 'object' ? String(v.constituency?.name || '') : String(v.constituency || ''),
     mandal: typeof v.mandal === 'object' ? String(v.mandal?.name || '') : String(v.mandal || ''),
     village: typeof v.village === 'object' ? String(v.village?.name || '') : String(v.village || ''),
     boothNumber: typeof v.booth === 'object' ? String(v.booth?.boothNumber || v.booth?.name || '') : String(v.boothNumber || ''),

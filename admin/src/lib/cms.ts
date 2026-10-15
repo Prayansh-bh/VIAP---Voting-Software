@@ -328,24 +328,18 @@ export const PARTY_PRESETS: PartyPreset[] = [
 ];
 
 export const DEFAULT_CONFIG: CmsConfig = {
-  organisationName: 'Telangana Congress Connect',
-  headerTitle: 'Telangana Congress Connect',
-  stateName: 'Telangana',
-  defaultLanguage: 'te-IN',
-  activePartyCode: 'INC',
-  primaryColor: '#FF6600',
-  secondaryColor: '#138808',
-  accentColor: '#0038A8',
-  appScope: 'STATE',
-  activeHierarchyLevels: ['VOTER_GROUP', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY', 'PARLIAMENT', 'ZONE', 'STATE'],
-  constituencies: [
-    { name: 'Nalgonda Constituency', code: 'TS-AC-92', totalVoters: 0 },
-    { name: 'Warangal West Constituency', code: 'TS-AC-105', totalVoters: 0 },
-    { name: 'Khammam Constituency', code: 'TS-AC-112', totalVoters: 0 },
-    { name: 'Karimnagar Constituency', code: 'TS-AC-26', totalVoters: 0 },
-    { name: 'Secunderabad Constituency', code: 'TS-AC-70', totalVoters: 0 },
-  ],
-  slogan: 'Praja Palana — Congress Ki Guarantee for Telangana',
+  organisationName: 'Political Connect',
+  headerTitle: 'Political Connect',
+  stateName: 'Andhra Pradesh',
+  defaultLanguage: 'en',
+  activePartyCode: '',
+  primaryColor: '#eab308',
+  secondaryColor: '#1e293b',
+  accentColor: '#3b82f6',
+  appScope: 'SINGLE_MLA',
+  activeHierarchyLevels: ['VOTER_GROUP', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY'],
+  constituencies: [],
+  slogan: '',
   hierarchyLabels: {
     STATE: 'State Incharge',
     ZONE: 'Zone Coordinator',
@@ -589,3 +583,27 @@ export async function fetchConstituenciesApi(): Promise<ConstituencyItem[]> {
     return [];
   }
 }
+
+export async function uploadAssetApi(
+  payload: { base64Data: string; filename: string; mimeType?: string },
+  token?: string
+): Promise<{ assetUrl: string; filename: string; mimeType: string; size: number }> {
+  let authToken: string | null = token || getAdminToken();
+  if (!authToken) {
+    try {
+      const { authenticateAdminCredentials } = await import('./api');
+      const authResult = await authenticateAdminCredentials('9848099999', 'Kondapi@2026');
+      authToken = authResult.token ?? null;
+    } catch (e) {
+      console.warn('Auto-authenticate admin warning:', e);
+    }
+  }
+
+  const res = await apiFetch<any>('/api/cms/upload-asset', {
+    method: 'POST',
+    headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+    body: JSON.stringify(payload),
+  });
+  return res.data || res;
+}
+

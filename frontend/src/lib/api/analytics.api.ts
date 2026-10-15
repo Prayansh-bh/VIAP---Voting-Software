@@ -139,7 +139,7 @@ export async function fetchHierarchySummary(unitId: string): Promise<HierarchySu
         name: 'Dr. Bala',
         role: 'CONSTITUENCY_INCHARGE',
         unitId: analytics.unit?.id || unitId,
-        unitName: analytics.unit?.name || 'Kondapi',
+        unitName: analytics.unit?.name || 'Constituency',
         unitLevel: analytics.unit?.level || 'CONSTITUENCY',
       },
       snapshot: {
@@ -164,10 +164,10 @@ export async function fetchHierarchySummary(unitId: string): Promise<HierarchySu
     return {
       user: {
         userCode: 'MLA-107',
-        name: 'Dr. Bala',
+        name: 'In-Charge',
         role: 'CONSTITUENCY_INCHARGE',
         unitId,
-        unitName: 'Kondapi',
+        unitName: 'Constituency',
         unitLevel: 'CONSTITUENCY',
       },
       snapshot: {

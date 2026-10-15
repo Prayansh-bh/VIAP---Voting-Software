@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { UserSession, Voter, VoterPreference, VoterStatus, SurveyStatus, VoterTask, TrainingVideo, GroundReport } from '../types';
 import Pagination from './common/Pagination';
+import { useCms } from '../context/CmsContext';
 import {
   createReport,
   createTask,
@@ -252,6 +253,7 @@ function StackedBarChartCard({ title, icon, totalVoters, data }: ChartCardProps)
 }
 
 export default function BoothInchargeDashboard({ session, onLogout }: BoothInchargeDashboardProps) {
+  const { config } = useCms();
   // Navigation active tab
   const [activeTab, setActiveTab] = useState<'dashboard' | 'voters' | 'live-track' | 'fake-votes' | 'tasks' | 'caste' | 'teams' | 'videos'>(() => {
     const hash = window.location.hash;
@@ -716,9 +718,9 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
       inchargeId: session.userId,
       inchargeName: session.userName,
       constituency: session.assignedConstituency,
-      mandal: session.assignedMandal || "Kondapi",
-      village: session.assignedVillage || "Kondapi Village",
-      booth: session.assignedBooth || "Booth 145 (ZPHS North)",
+      mandal: session.assignedMandal || '',
+      village: session.assignedVillage || '',
+      booth: session.assignedBooth || '',
       reportType: "General Update",
       priority: "Low",
       description: generalContent,
@@ -755,9 +757,9 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
       inchargeId: session.userId,
       inchargeName: session.userName,
       constituency: session.assignedConstituency,
-      mandal: session.assignedMandal || "Kondapi",
-      village: session.assignedVillage || "Kondapi Village",
-      booth: session.assignedBooth || "Booth 145 (ZPHS North)",
+      mandal: session.assignedMandal || '',
+      village: session.assignedVillage || '',
+      booth: session.assignedBooth || '',
       reportType: "Complaint / Issue",
       priority: complaintPriority,
       description: `[${issueCategory}] ${complaintDesc} (Affected Voters: ${affectedVotersCount})`,
@@ -860,11 +862,20 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
         <div className="space-y-6">
           {/* Logo & Branding */}
           <div className="flex items-center gap-3 border-b border-slate-800/80 pb-5">
-            <div className="w-11 h-11 bg-yellow-400 rounded-full flex items-center justify-center text-slate-950 font-black text-lg shadow-md shrink-0">
-              TDP
-            </div>
+            {config.logoUrl ? (
+              <img src={config.logoUrl} alt="Logo" className="w-11 h-11 rounded-full object-cover shadow-md shrink-0 border border-slate-700" />
+            ) : (
+              <div 
+                className="w-11 h-11 rounded-full flex items-center justify-center text-slate-950 font-black text-lg shadow-md shrink-0"
+                style={{ backgroundColor: config.primaryColor || '#EAB308' }}
+              >
+                {(config.organisationName || session.organisationName || 'B').slice(0, 2).toUpperCase()}
+              </div>
+            )}
             <div>
-              <h2 className="text-sm font-black tracking-tight text-yellow-400">Kondapi TDP Connect</h2>
+              <h2 className="text-sm font-black tracking-tight" style={{ color: config.primaryColor || '#FACC15' }}>
+                {config.organisationName || session.organisationName || 'Political Connect'}
+              </h2>
               <span className="text-[10px] bg-slate-900 text-yellow-300 font-extrabold uppercase px-2 py-0.5 rounded tracking-wide border border-yellow-400/20">
                 BOOTH INCHARGE
               </span>
@@ -884,8 +895,8 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
             <h4 className="text-xs font-bold text-slate-100">{session.userName}</h4>
             <div className="text-[10px] text-slate-400 flex flex-col gap-0.5 font-mono">
               <span title={session.userId}>ID: {session.userId?.slice(-8).toUpperCase() || 'BOOTH'}</span>
-              <span>Booth: {session.assignedBooth?.split(' ')[1] || '145'}</span>
-              <span>Village: {session.assignedVillage || 'Kondapi Village'}</span>
+              <span>Booth: {session.assignedBooth || 'Unassigned'}</span>
+              <span>Village: {session.assignedVillage || 'Unassigned'}</span>
               <span>Total Teams: {cadreList.length} Incharges</span>
             </div>
           </div>
@@ -993,12 +1004,21 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
             <Menu className="w-6 h-6" />
           </button>
           <div className="text-center">
-            <h1 className="text-xs font-black text-slate-900 uppercase tracking-widest">Kondapi Connect</h1>
+            <h1 className="text-xs font-black text-slate-900 uppercase tracking-widest">
+              {config.organisationName || session.organisationName || 'Political Connect'}
+            </h1>
             <p className="text-[9px] font-bold text-yellow-600">Booth Dashboard</p>
           </div>
-          <div className="w-10 h-10 bg-yellow-400 rounded-full flex items-center justify-center font-bold text-sm">
-            TDP
-          </div>
+          {config.logoUrl ? (
+            <img src={config.logoUrl} alt="Logo" className="w-10 h-10 rounded-full object-cover shadow-sm" />
+          ) : (
+            <div 
+              className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm text-slate-950"
+              style={{ backgroundColor: config.primaryColor || '#EAB308' }}
+            >
+              {(config.organisationName || session.organisationName || 'B').slice(0, 2).toUpperCase()}
+            </div>
+          )}
         </div>
 
         {/* HEADER SECTION */}
@@ -1008,11 +1028,11 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
               My Booth Overview
             </h1>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-xs text-slate-500 font-semibold">
-              <span className="text-slate-900">Booth No: <strong className="font-extrabold">{session.assignedBooth || "Booth 145 (ZPHS North)"}</strong></span>
+              <span className="text-slate-900">Booth No: <strong className="font-extrabold">{session.assignedBooth || "Assigned Booth"}</strong></span>
               <span className="text-slate-300">|</span>
               <span className="text-slate-900">Total Voters: <strong className="font-extrabold text-slate-950">{totalVoters}</strong></span>
               <span className="text-slate-300">|</span>
-              <span>Village: {session.assignedVillage || 'Kondapi Village'}</span>
+              <span>Village: {session.assignedVillage || 'Assigned Village'}</span>
             </div>
             <p className="text-xs font-medium text-slate-400 mt-1">
               Live analytics from your assigned polling booth.

@@ -568,7 +568,7 @@ export default function PlatformAdminPortal() {
               <div className="flex items-center gap-2.5">
                 <Settings className="w-5 h-5 text-amber-400" />
                 <h1 className="font-bold text-lg md:text-xl tracking-tight text-white">
-                  {config.organisationName || 'Kondapi'} Platform Administration
+                  {config.organisationName || 'VIAP'} Platform Administration
                 </h1>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-400 text-slate-950 shadow-xs">
                   MULTI-TENANT ENGINE
@@ -985,13 +985,13 @@ export default function PlatformAdminPortal() {
                     </div>
                     <div>
                       <h3 className="font-black text-slate-900 text-sm">
-                        {selectedApp?.name || 'Kondapi TDP Connect'}
+                        {selectedApp?.name || 'Constituency Connect'}
                       </h3>
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-0.5">
                         CONNECTING PEOPLE, BUILDING PROGRESS
                       </p>
                       <p className="text-[9px] text-slate-400 mt-0.5">
-                        Jurisdiction: {selectedApp?.jurisdiction || 'Kondapi Constituency'}
+                        Jurisdiction: {selectedApp?.jurisdiction || 'Assigned Jurisdiction'}
                       </p>
                     </div>
 

@@ -41,6 +41,7 @@ export interface UserSession {
   userId: string;
   accountStatus: 'Active' | 'Pending' | 'Suspended';
   organisationId?: string;
+  organisationName?: string;
   organisation?: { id: string; name: string; code: string };
 }
 

@@ -9,6 +9,8 @@ import { authenticate, optionalAuthenticate } from '../../middleware/auth.js';
 import { populateHierarchyScope, requireRoles } from '../../middleware/rbac.js';
 import { logAudit } from '../../middleware/audit.js';
 import bcrypt from 'bcryptjs';
+import fs from 'fs';
+import { saveAsset, getAssetPath } from '../../lib/storage.js';
 import {
   DEFAULT_ANALYTICS_CONFIG,
   DEFAULT_DASHBOARD_CONFIG,
@@ -181,11 +183,15 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   fastify.put(
     '/config',
     {
-      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND)],
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN, RoleType.CONSTITUENCY_INCHARGE)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = (req.body || {}) as Record<string, any>;
+      const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
+      const targetOrgId = isSuperAdmin ? (body.organisationId || req.user?.organisationId) : req.user?.organisationId;
+
       const saved = await persistCmsConfig({
+        organisationId: targetOrgId || undefined,
         organisationName: body.organisationName || body.appName,
         headerTitle: body.headerTitle || body.organisationName || body.appName,
         slogan: body.slogan,
@@ -211,7 +217,10 @@ export async function cmsRoutes(fastify: FastifyInstance) {
 
       if (body.activePartyCode && body.primaryColor) {
         await prisma.politicalParty.updateMany({
-          where: { code: body.activePartyCode },
+          where: {
+            code: body.activePartyCode,
+            ...(targetOrgId ? { organisationId: targetOrgId } : {}),
+          },
           data: {
             primaryColor: body.primaryColor,
             secondaryColor: body.secondaryColor,
@@ -235,6 +244,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
           NOT: {
             code: { startsWith: 'TEST_' },
           },
+          ...(targetOrgId ? { organisationId: targetOrgId } : {}),
         },
         orderBy: { sortOrder: 'asc' },
       });
@@ -242,6 +252,70 @@ export async function cmsRoutes(fastify: FastifyInstance) {
       return reply.send(successResponse(serializeCmsConfig(saved, { parties }), 'CMS configuration saved'));
     },
   );
+
+  // --------------------------------------------------------------------------
+  // ASSET MANAGEMENT (Logo & Brand Asset Uploads)
+  // --------------------------------------------------------------------------
+  fastify.post(
+    '/upload-asset',
+    {
+      preHandler: [authenticate],
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const body = (req.body || {}) as { data?: string; base64Data?: string; fileData?: string; filename?: string; mimeType?: string };
+      const rawBase64 = body.data || body.base64Data || body.fileData;
+      if (!rawBase64 || typeof rawBase64 !== 'string') {
+        return reply.status(400).send(errorResponse('Base64 image data is required in data or base64Data field.', 'MISSING_ASSET_DATA'));
+      }
+
+      // Strip Data URL prefix if present (e.g., data:image/png;base64,...)
+      const commaIndex = rawBase64.indexOf(',');
+      const base64String = commaIndex !== -1 ? rawBase64.slice(commaIndex + 1) : rawBase64;
+      let buffer: Buffer;
+      try {
+        buffer = Buffer.from(base64String, 'base64');
+      } catch {
+        return reply.status(400).send(errorResponse('Invalid base64 payload.', 'INVALID_BASE64'));
+      }
+
+      const filename = body.filename || 'asset.png';
+      const targetOrgId = req.user?.organisationId;
+
+      try {
+        const saved = await saveAsset(buffer, filename, {
+          organisationId: targetOrgId || undefined,
+          declaredMimeType: body.mimeType,
+        });
+
+        await logAudit({
+          action: AuditAction.CREATE,
+          entityType: 'CMSAsset',
+          entityId: saved.filename,
+          req,
+          changes: { filename: saved.filename, size: saved.size, mimeType: saved.mimeType } as unknown as Prisma.InputJsonValue,
+        });
+
+        return reply.status(201).send(successResponse(saved, 'Asset uploaded successfully'));
+      } catch (err: any) {
+        const status = err.statusCode || 400;
+        return reply.status(status).send(errorResponse(err.message || 'Asset upload failed', err.code || 'ASSET_UPLOAD_ERROR'));
+      }
+    },
+  );
+
+  fastify.get('/assets/:filename', async (req: FastifyRequest<{ Params: { filename: string } }>, reply: FastifyReply) => {
+    const filename = req.params.filename;
+    const asset = getAssetPath(filename);
+    if (!asset) {
+      return reply.status(404).send(errorResponse('Asset not found.', 'ASSET_NOT_FOUND'));
+    }
+
+    reply.header('Content-Type', asset.mimeType);
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+    const stream = fs.createReadStream(asset.fullPath);
+    return reply.send(stream);
+  });
 
   // --------------------------------------------------------------------------
   // DYNAMIC APPLICATION BUILDER & GENERATOR (CMS Phase 1)

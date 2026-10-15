@@ -60,6 +60,7 @@ import {
 import { createRealtimeSocket, RealtimeVoteEvent } from '../lib/realtime';
 import Pagination from './common/Pagination';
 import { useNotification } from '../context/NotificationContext';
+import { useCms } from '../context/CmsContext';
 
 interface VillageCadreItem {
   id: string;
@@ -127,6 +128,7 @@ const PARTY_BG_COLORS: Record<VoterPreference, string> = {
 };
 
 export default function VillageInchargeDashboard({ session, onLogout }: VillageInchargeDashboardProps) {
+  const { config } = useCms();
   const { notify } = useNotification();
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [cadreActiveTab, setCadreActiveTab] = useState<'booth' | 'voter'>('booth');
@@ -424,8 +426,8 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
         inchargeId: session.userId,
         inchargeName: session.userName,
         constituency: session.assignedConstituency,
-        mandal: session.assignedMandal || 'Kondapi',
-        village: session.assignedVillage || 'Kondapi Village',
+        mandal: session.assignedMandal || '',
+        village: session.assignedVillage || '',
         booth: updated.boothNumber,
         date: new Date().toISOString().split('T')[0],
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -465,8 +467,8 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
       inchargeId: session.userId,
       inchargeName: session.userName,
       constituency: session.assignedConstituency,
-      mandal: session.assignedMandal || 'Kondapi',
-      village: session.assignedVillage || 'Kondapi Village',
+      mandal: session.assignedMandal || '',
+      village: session.assignedVillage || '',
       booth: 'All Polling Booths',
       date: new Date().toISOString().split('T')[0],
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -502,8 +504,8 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
       inchargeId: session.userId,
       inchargeName: session.userName,
       constituency: session.assignedConstituency,
-      mandal: session.assignedMandal || 'Kondapi',
-      village: session.assignedVillage || 'Kondapi Village',
+      mandal: session.assignedMandal || '',
+      village: session.assignedVillage || '',
       booth: 'All Polling Booths',
       date: new Date().toISOString().split('T')[0],
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -874,11 +876,20 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
           {/* Brand logo & App Name */}
           <div className="flex items-center justify-between border-b border-slate-800 pb-4">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-yellow-400 flex items-center justify-center text-slate-950 font-black shadow-md shadow-yellow-400/10">
-                K
-              </div>
+              {config.logoUrl ? (
+                <img src={config.logoUrl} alt="Logo" className="w-9 h-9 rounded-xl object-cover shadow-md border border-slate-700" />
+              ) : (
+                <div 
+                  className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-950 font-black shadow-md shadow-yellow-400/10"
+                  style={{ backgroundColor: config.primaryColor || '#EAB308' }}
+                >
+                  {(config.organisationName || session.organisationName || 'V').slice(0, 1).toUpperCase()}
+                </div>
+              )}
               <div>
-                <h1 className="text-sm font-black tracking-tight uppercase text-yellow-400">Kondapi TDP Connect</h1>
+                <h1 className="text-sm font-black tracking-tight uppercase" style={{ color: config.primaryColor || '#FACC15' }}>
+                  {config.organisationName || session.organisationName || 'Political Connect'}
+                </h1>
                 <p className="text-[9px] font-black tracking-widest uppercase text-slate-400">Village Command</p>
               </div>
             </div>
@@ -968,8 +979,19 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
         {/* Mobile top navigation header */}
         <div className="md:hidden flex items-center justify-between bg-white border border-slate-100 rounded-xl p-3 shadow-sm mb-4">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-yellow-400 flex items-center justify-center font-black text-slate-950">K</div>
-            <span className="font-black text-sm text-slate-900 tracking-tight">Kondapi TDP Connect</span>
+            {config.logoUrl ? (
+              <img src={config.logoUrl} alt="Logo" className="w-8 h-8 rounded-lg object-cover" />
+            ) : (
+              <div 
+                className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-slate-950"
+                style={{ backgroundColor: config.primaryColor || '#EAB308' }}
+              >
+                {(config.organisationName || session.organisationName || 'V').slice(0, 1).toUpperCase()}
+              </div>
+            )}
+            <span className="font-black text-sm text-slate-900 tracking-tight">
+              {config.organisationName || session.organisationName || 'Political Connect'}
+            </span>
           </div>
           <button 
             onClick={() => setIsSidebarOpen(true)}
@@ -991,7 +1013,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                      Kondapi Assembly Constituency
+                      {session.assignedConstituency || config.organisationName || 'Constituency'}
                     </span>
                     <span className="text-[10px] bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full font-bold">
                       Village Polling Station
@@ -1043,7 +1065,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                   </h3>
                   
                   <p className="text-xs text-slate-400 font-medium">
-                    Live voter analytics for {session.assignedVillage || 'Ponnaluru'} Village. Total registered preferences: TDP ({partyStats.TDP}), YSRCP ({partyStats.YSRCP}), JSP ({partyStats.JSP}), BJP ({partyStats.BJP}), INC ({partyStats.INC}).
+                    Live voter analytics for {session.assignedVillage || 'Assigned'} Village. Total registered preferences: TDP ({partyStats.TDP}), YSRCP ({partyStats.YSRCP}), JSP ({partyStats.JSP}), BJP ({partyStats.BJP}), INC ({partyStats.INC}).
                   </p>
                 </div>
 

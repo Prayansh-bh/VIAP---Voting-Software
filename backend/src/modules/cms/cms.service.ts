@@ -149,17 +149,17 @@ export function serializeCmsConfig(row: any, extras: { constituencies?: any[]; p
     extras.parties?.find((p) => p.code === row?.activePartyCode) || extras.parties?.[0];
 
   return {
-    organisationName: row?.organisationName || 'Political Connect',
-    headerTitle: row?.headerTitle || row?.organisationName || 'Political Connect',
+    organisationName: row?.organisationName || row?.organisation?.name || 'Political Connect',
+    headerTitle: row?.headerTitle || row?.organisationName || row?.organisation?.name || 'Political Connect',
     slogan: row?.slogan || '',
-    logoUrl: row?.logoUrl || activeParty?.logoUrl || '',
-    faviconUrl: row?.faviconUrl || '',
+    logoUrl: row?.logoUrl || row?.organisation?.logoUrl || activeParty?.logoUrl || '',
+    faviconUrl: row?.faviconUrl || row?.organisation?.faviconUrl || '',
     stateName: row?.stateName || 'Andhra Pradesh',
     defaultLanguage: row?.defaultLanguage || 'en',
     primaryColor: row?.primaryColor || activeParty?.primaryColor || '#eab308',
     secondaryColor: row?.secondaryColor || activeParty?.secondaryColor || '#1e293b',
     accentColor: row?.accentColor || activeParty?.accentColor || '#3b82f6',
-    activePartyCode: row?.activePartyCode || activeParty?.code || 'TDP',
+    activePartyCode: row?.activePartyCode || activeParty?.code || '',
     appScope: row?.appScope || 'SINGLE_MLA',
     parliamentName: row?.parliamentName || '',
     parliamentCode: row?.parliamentCode || '',
@@ -177,10 +177,31 @@ export function serializeCmsConfig(row: any, extras: { constituencies?: any[]; p
 }
 
 export async function persistCmsConfig(input: CmsConfigInput, client: Prisma.TransactionClient = prisma) {
-  const targetKey = (input.configKey || 'default').toLowerCase();
+  let targetKey = (input.configKey || '').trim().toLowerCase();
 
-  const existing = await client.cMSConfiguration.findUnique({
-    where: { configKey: targetKey },
+  // If organisationId is provided, resolve organization and derive tenant-scoped key if needed
+  let org: any = null;
+  if (input.organisationId) {
+    org = await client.organisation.findUnique({
+      where: { id: input.organisationId },
+    });
+    if (!targetKey && org) {
+      targetKey = org.code.toLowerCase();
+    }
+  }
+
+  if (!targetKey) {
+    targetKey = 'default';
+  }
+
+  const existing = await client.cMSConfiguration.findFirst({
+    where: {
+      OR: [
+        { configKey: targetKey },
+        ...(input.organisationId ? [{ organisationId: input.organisationId }] : []),
+      ],
+    },
+    orderBy: { updatedAt: 'desc' },
   });
 
   const nextFeatureToggles = input.featureToggles
@@ -202,14 +223,14 @@ export async function persistCmsConfig(input: CmsConfigInput, client: Prisma.Tra
       : DEFAULT_HIERARCHY_LABELS;
 
   const data: Prisma.CMSConfigurationUncheckedCreateInput = {
-    configKey: targetKey,
+    configKey: existing?.configKey || targetKey,
     organisationId: input.organisationId ?? existing?.organisationId ?? undefined,
-    organisationName: input.organisationName || existing?.organisationName || 'Political Connect',
+    organisationName: input.organisationName || org?.name || existing?.organisationName || 'Political Connect',
     stateName: input.stateName || existing?.stateName || 'Andhra Pradesh',
     defaultLanguage: input.defaultLanguage || existing?.defaultLanguage || 'en',
-    headerTitle: input.headerTitle ?? existing?.headerTitle,
+    headerTitle: input.headerTitle ?? existing?.headerTitle ?? input.organisationName ?? org?.name,
     slogan: input.slogan ?? existing?.slogan,
-    logoUrl: input.logoUrl ?? existing?.logoUrl,
+    logoUrl: input.logoUrl ?? existing?.logoUrl ?? org?.logoUrl,
     faviconUrl: input.faviconUrl ?? existing?.faviconUrl,
     primaryColor: input.primaryColor ?? existing?.primaryColor,
     secondaryColor: input.secondaryColor ?? existing?.secondaryColor,
@@ -230,11 +251,22 @@ export async function persistCmsConfig(input: CmsConfigInput, client: Prisma.Tra
   };
 
   const saved = await client.cMSConfiguration.upsert({
-    where: { configKey: targetKey },
+    where: { configKey: existing?.configKey || targetKey },
     update: data,
     create: data,
     include: { organisation: true },
   });
+
+  // Sync back to Organisation entity if organisationId is linked
+  if (input.organisationId) {
+    await client.organisation.update({
+      where: { id: input.organisationId },
+      data: {
+        ...(input.organisationName ? { name: input.organisationName } : {}),
+        ...(input.logoUrl ? { logoUrl: input.logoUrl } : {}),
+      },
+    }).catch(() => {});
+  }
 
   return saved;
 }
@@ -248,6 +280,23 @@ export async function loadCmsBundle(options?: { organisationId?: string; configK
       include: { organisation: true },
       orderBy: { updatedAt: 'desc' },
     });
+
+    if (!config) {
+      const org = await prisma.organisation.findUnique({
+        where: { id: options.organisationId },
+      });
+      if (org) {
+        config = await persistCmsConfig({
+          configKey: org.code.toLowerCase(),
+          organisationId: org.id,
+          organisationName: org.name,
+          headerTitle: org.name,
+          logoUrl: org.logoUrl || undefined,
+          primaryColor: '#eab308',
+          stateName: 'Andhra Pradesh',
+        });
+      }
+    }
   }
 
   if (!config && options?.configKey) {
@@ -266,28 +315,23 @@ export async function loadCmsBundle(options?: { organisationId?: string; configK
     });
   }
 
-  if (!config) {
+  // Safe global default if no tenant scope was given
+  if (!config && !options?.organisationId) {
     config = await prisma.cMSConfiguration.findUnique({
       where: { configKey: 'default' },
       include: { organisation: true },
     });
   }
 
-  if (!config) {
-    config = await prisma.cMSConfiguration.findFirst({
-      orderBy: { updatedAt: 'desc' },
-      include: { organisation: true },
-    });
-  }
-
-  if (!config) {
+  if (!config && !options?.organisationId) {
     config = await persistCmsConfig({
-      organisationName: 'Kondapi TDP Connect',
+      configKey: 'default',
+      organisationName: 'Political Connect',
       stateName: 'Andhra Pradesh',
     });
   }
 
-  const orgId = config.organisationId || options?.organisationId;
+  const orgId = config?.organisationId || options?.organisationId;
 
   const parties = await prisma.politicalParty.findMany({
     where: {
@@ -295,11 +339,7 @@ export async function loadCmsBundle(options?: { organisationId?: string; configK
       NOT: {
         code: { startsWith: 'TEST_' },
       },
-      ...(orgId
-        ? {
-            OR: [{ organisationId: orgId }, { organisationId: null }],
-          }
-        : {}),
+      ...(orgId ? { organisationId: orgId } : {}),
     },
     orderBy: { sortOrder: 'asc' },
   });

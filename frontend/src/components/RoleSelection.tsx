@@ -230,7 +230,7 @@ export default function RoleSelection({ onSelectRole, onLock, onChangePasscode, 
           </div>
           <div>
             <div className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
-              <span>Active Workspace: {config.organisationName || 'Kondapi Connect'}</span>
+              <span>Active Workspace: {config.organisationName || 'Political Connect'}</span>
               <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800">
                 LIVE
               </span>

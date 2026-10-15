@@ -65,6 +65,7 @@ import {
   updateTrainingProgress,
 } from '../lib/api';
 import { createRealtimeSocket, RealtimeReportEvent, RealtimeTaskEvent, RealtimeVoteEvent } from '../lib/realtime';
+import { useCms } from '../context/CmsContext';
 
 interface Voter100DashboardProps {
   session: UserSession;
@@ -101,6 +102,7 @@ const PARTY_COLORS: Record<VoterPreference, { bg: string; text: string; hex: str
 };
 
 export default function Voter100Dashboard({ session, onLogout }: Voter100DashboardProps) {
+  const { config } = useCms();
   // Navigation tabs state: 'dashboard' | 'voters' | 'live-track' | 'fake-doubtful' | 'tasks' | 'videos'
   const [activeTab, setActiveTab] = useState<'dashboard' | 'voters' | 'live-track' | 'fake-doubtful' | 'tasks' | 'videos'>(() => {
     const hash = window.location.hash.replace('#', '');
@@ -549,11 +551,20 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
         <div className="space-y-6">
           {/* Circular logo & Title block */}
           <div className="flex items-center gap-3 border-b border-slate-800 pb-5">
-            <div className="w-11 h-11 bg-yellow-400 rounded-full flex items-center justify-center text-slate-950 font-black text-lg shadow-inner">
-              TDP
-            </div>
+            {config.logoUrl ? (
+              <img src={config.logoUrl} alt="Logo" className="w-11 h-11 rounded-full object-cover shadow-inner border border-slate-700" />
+            ) : (
+              <div 
+                className="w-11 h-11 rounded-full flex items-center justify-center text-slate-950 font-black text-lg shadow-inner"
+                style={{ backgroundColor: config.primaryColor || '#EAB308' }}
+              >
+                {(config.organisationName || session.organisationName || '100').slice(0, 3).toUpperCase()}
+              </div>
+            )}
             <div>
-              <h2 className="text-sm font-black tracking-tight text-yellow-400">Kondapi TDP Connect</h2>
+              <h2 className="text-sm font-black tracking-tight" style={{ color: config.primaryColor || '#FACC15' }}>
+                {config.organisationName || session.organisationName || 'Political Connect'}
+              </h2>
               <span className="text-[10px] bg-slate-800 text-yellow-300 font-extrabold uppercase px-2 py-0.5 rounded tracking-wide">
                 100 Voter Incharge
               </span>
@@ -671,12 +682,21 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
             <Menu className="w-6 h-6" />
           </button>
           <div className="text-center">
-            <h1 className="text-xs font-black text-slate-900 uppercase tracking-widest">Kondapi Connect</h1>
+            <h1 className="text-xs font-black text-slate-900 uppercase tracking-widest">
+              {config.organisationName || session.organisationName || 'Political Connect'}
+            </h1>
             <p className="text-[9px] font-bold text-yellow-600">100 Voter Dashboard</p>
           </div>
-          <div className="w-10 h-10 bg-yellow-400 rounded-full flex items-center justify-center font-bold text-sm">
-            TDP
-          </div>
+          {config.logoUrl ? (
+            <img src={config.logoUrl} alt="Logo" className="w-10 h-10 rounded-full object-cover shadow-sm" />
+          ) : (
+            <div 
+              className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm text-slate-950"
+              style={{ backgroundColor: config.primaryColor || '#EAB308' }}
+            >
+              {(config.organisationName || session.organisationName || '100').slice(0, 3).toUpperCase()}
+            </div>
+          )}
         </div>
 
         {/* DASHBOARD HEADER */}
@@ -1515,16 +1535,16 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                     <span className="font-bold text-xs uppercase tracking-wider text-slate-200 pl-3.5">Real-time Synchronization Uplink Active</span>
                   </div>
                   <span className="text-[10px] bg-slate-800 text-yellow-400 font-extrabold px-2.5 py-1 rounded uppercase tracking-wider font-mono">
-                    Kondapi Central Aggregator
+                    {session.assignedConstituency || config.organisationName || 'Central'} Aggregator
                   </span>
                 </div>
 
                 <p className="text-xs text-slate-400 leading-relaxed font-semibold">
                   Data Flow: <span className="text-yellow-400 font-black">100 Voter Incharge ({session.userId})</span> → 
-                  <span className="text-slate-200"> Booth ({session.assignedBooth?.split(' ')[1] || '145'})</span> → 
-                  <span className="text-slate-200"> Village ({session.assignedVillage})</span> → 
-                  <span className="text-slate-200"> Mandal ({session.assignedMandal})</span> → 
-                  <span className="text-yellow-400 font-black"> Kondapi Constituency Server</span>
+                  <span className="text-slate-200"> Booth ({session.assignedBooth?.split(' ')[1] || session.assignedBooth || 'Booth'})</span> → 
+                  <span className="text-slate-200"> Village ({session.assignedVillage || 'Village'})</span> → 
+                  <span className="text-slate-200"> Mandal ({session.assignedMandal || 'Mandal'})</span> → 
+                  <span className="text-yellow-400 font-black"> {session.assignedConstituency || config.organisationName || 'Constituency'} Server</span>
                 </p>
 
                 <div className="space-y-2 border-t border-slate-800 pt-3">
@@ -2062,7 +2082,7 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                 <div className="space-y-1">
                   <p className="text-sm font-bold">Mock Training Video Stream Active</p>
                   <p className="text-xs text-gray-400 font-semibold max-w-md mx-auto">
-                    In production, this module embeds secure Vimeo/YouTube videos for Kondapi TDP ground volunteers.
+                    In production, this module embeds secure training videos for ground campaign volunteers.
                   </p>
                 </div>
                 <div className="text-xs font-mono bg-slate-900/60 inline-block px-3 py-1.5 rounded text-yellow-400 font-bold border border-slate-800">
