@@ -5,7 +5,7 @@ import { prisma } from '../../lib/prisma.js';
 import { errorResponse, successResponse } from '../../common/response.js';
 import { validateBody } from '../../common/validation.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRoles } from '../../middleware/rbac.js';
+import { requireRoles, requireSuperAdmin } from '../../middleware/rbac.js';
 import { logAudit } from '../../middleware/audit.js';
 
 const createOrgSchema = z.object({
@@ -60,7 +60,7 @@ export async function organisationsRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/',
     {
-      preHandler: [requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND)],
+      preHandler: [requireSuperAdmin()],
       preValidation: [validateBody(createOrgSchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {

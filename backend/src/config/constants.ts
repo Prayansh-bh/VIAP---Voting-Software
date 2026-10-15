@@ -22,9 +22,10 @@ export const HIERARCHY_LEVEL_WEIGHT: Record<OrgHierarchyLevel, number> = {
   [OrgHierarchyLevel.VOTER_GROUP]: 1,
 };
 
-export const ROLE_HIERARCHY_MAP: Record<RoleType, OrgHierarchyLevel> = {
+export const ROLE_HIERARCHY_MAP: Record<RoleType | 'PARTY_ADMIN', OrgHierarchyLevel> = {
   [RoleType.SUPER_ADMIN]: OrgHierarchyLevel.STATE,
   [RoleType.HIGH_COMMAND]: OrgHierarchyLevel.STATE,
+  PARTY_ADMIN: OrgHierarchyLevel.STATE,
   [RoleType.STATE_ADMIN]: OrgHierarchyLevel.STATE,
   [RoleType.ZONE_INCHARGE]: OrgHierarchyLevel.ZONE,
   [RoleType.PARLIAMENT_INCHARGE]: OrgHierarchyLevel.PARLIAMENT,

@@ -4,7 +4,7 @@ export interface AuthenticatedUserPayload {
   userId: string;
   userCode: string;
   mobileNumber: string;
-  role: RoleType;
+  role: RoleType | 'PARTY_ADMIN';
   organisationId?: string | null;
   unitId?: string | null;
   assignedStateId?: string | null;
@@ -19,7 +19,7 @@ export interface AuthenticatedUserPayload {
 
 export interface UserHierarchyScope {
   userId: string;
-  role: RoleType;
+  role: RoleType | 'PARTY_ADMIN';
   organisationId: string | null;
   maxLevel: OrgHierarchyLevel;
   isGlobalScope: boolean;

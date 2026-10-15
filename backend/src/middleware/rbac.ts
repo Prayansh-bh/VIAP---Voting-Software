@@ -5,9 +5,10 @@ import { errorResponse } from '../common/response.js';
 import { prisma } from '../lib/prisma.js';
 import { UserHierarchyScope } from '../common/types.js';
 
-export const ROLE_RANK_WEIGHT: Record<RoleType, number> = {
+export const ROLE_RANK_WEIGHT: Record<RoleType | 'PARTY_ADMIN', number> = {
   [RoleType.SUPER_ADMIN]: 100,
   [RoleType.HIGH_COMMAND]: 90,
+  PARTY_ADMIN: 85,
   [RoleType.STATE_ADMIN]: 80,
   [RoleType.ZONE_INCHARGE]: 70,
   [RoleType.PARLIAMENT_INCHARGE]: 60,
@@ -25,13 +26,21 @@ export const ROLE_RANK_WEIGHT: Record<RoleType, number> = {
 /**
  * Enforce minimum role rank or specific allowed roles
  */
-export function requireRoles(...allowedRoles: RoleType[]) {
+export function requireRoles(...allowedRoles: (RoleType | 'PARTY_ADMIN')[]) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
     if (!req.user) {
       return reply.status(401).send(errorResponse('Authentication required.', 'UNAUTHORIZED'));
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    const userRole = req.user.role as RoleType | 'PARTY_ADMIN';
+    const isAllowed =
+      allowedRoles.includes(userRole) ||
+      (userRole === 'PARTY_ADMIN' &&
+        (allowedRoles.includes(RoleType.HIGH_COMMAND) ||
+          allowedRoles.includes(RoleType.STATE_ADMIN) ||
+          allowedRoles.includes(RoleType.CONSTITUENCY_INCHARGE)));
+
+    if (!isAllowed) {
       return reply.status(403).send(errorResponse('Insufficient role permissions for this operation.', 'FORBIDDEN_ROLE'));
     }
   };
@@ -66,7 +75,10 @@ export function requireNotReadOnly() {
 /**
  * Computes full hierarchical subtree and relational scope for a user
  */
-export async function computeUserHierarchyScope(userId: string): Promise<UserHierarchyScope> {
+export async function computeUserHierarchyScope(
+  userId: string,
+  roleOverride?: RoleType | 'PARTY_ADMIN',
+): Promise<UserHierarchyScope> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: {
@@ -92,7 +104,7 @@ export async function computeUserHierarchyScope(userId: string): Promise<UserHie
     throw new Error('User not found');
   }
 
-  const role = user.role;
+  const role = (roleOverride || user.role) as RoleType | 'PARTY_ADMIN';
   const isGlobalScope = role === RoleType.SUPER_ADMIN;
   const isReadOnly = role === RoleType.VIEWER;
   const maxLevel = ROLE_HIERARCHY_MAP[role] || OrgHierarchyLevel.VOTER_GROUP;
@@ -164,7 +176,7 @@ export async function computeUserHierarchyScope(userId: string): Promise<UserHie
     if (assignment.voterGroupId) accessibleVoterGroupIds.add(assignment.voterGroupId);
 
     // Resolve downward descendants
-    if (role === RoleType.STATE_ADMIN || role === RoleType.HIGH_COMMAND) {
+    if (role === RoleType.STATE_ADMIN || role === RoleType.HIGH_COMMAND || role === 'PARTY_ADMIN') {
       if (assignment.stateId) {
         const state = await prisma.state.findUnique({
           where: { id: assignment.stateId },
@@ -399,7 +411,7 @@ export async function computeUserHierarchyScope(userId: string): Promise<UserHie
       accessibleVoterGroupIds.add(assignment.voterGroupId);
       if (assignment.boothId) accessibleBoothIds.add(assignment.boothId);
     }
-  } else if ((role === RoleType.STATE_ADMIN || role === RoleType.HIGH_COMMAND) && user.organisationId) {
+  } else if ((role === RoleType.STATE_ADMIN || role === RoleType.HIGH_COMMAND || role === 'PARTY_ADMIN') && user.organisationId) {
     const orgStates = await prisma.state.findMany({
       where: { organisationId: user.organisationId },
       include: {
@@ -514,7 +526,7 @@ export async function populateHierarchyScope(req: FastifyRequest, reply: Fastify
   }
 
   try {
-    req.hierarchyScope = await computeUserHierarchyScope(req.user.userId);
+    req.hierarchyScope = await computeUserHierarchyScope(req.user.userId, req.user.role as RoleType | 'PARTY_ADMIN');
   } catch (err) {
     return reply.status(500).send(errorResponse('Failed to resolve user hierarchy scope.', 'SCOPE_RESOLUTION_ERROR'));
   }
@@ -647,7 +659,7 @@ export async function assertVoterScope(req: FastifyRequest, reply: FastifyReply,
   }
 
   // State / High Command Level
-  if (scope.role === RoleType.STATE_ADMIN || scope.role === RoleType.HIGH_COMMAND) {
+  if (scope.role === RoleType.STATE_ADMIN || scope.role === RoleType.HIGH_COMMAND || scope.role === 'PARTY_ADMIN') {
     if (voter.stateId && scope.accessibleStateIds.size > 0 && !scope.accessibleStateIds.has(voter.stateId)) {
       reply.status(403).send(errorResponse('Access denied: This voter is not in your assigned State.', 'FORBIDDEN_VOTER_SCOPE'));
       return false;
@@ -689,7 +701,7 @@ export function assertVoterFieldPermitted(req: FastifyRequest, reply: FastifyRep
 /**
  * Prevent Vertical Privilege Escalation when creating or updating users
  */
-export function assertRoleHierarchy(callerRole: RoleType, targetRole?: RoleType | null): boolean {
+export function assertRoleHierarchy(callerRole: RoleType | 'PARTY_ADMIN', targetRole?: RoleType | 'PARTY_ADMIN' | null): boolean {
   if (!targetRole) return true;
   const callerRank = ROLE_RANK_WEIGHT[callerRole] ?? 0;
   const targetRank = ROLE_RANK_WEIGHT[targetRole] ?? 0;
@@ -702,7 +714,7 @@ export function assertRoleHierarchy(callerRole: RoleType, targetRole?: RoleType 
 /**
  * Assert user management scope (Vertical + Horizontal)
  */
-export async function assertUserScope(req: FastifyRequest, reply: FastifyReply, targetUserId: string, targetRole?: RoleType): Promise<boolean> {
+export async function assertUserScope(req: FastifyRequest, reply: FastifyReply, targetUserId: string, targetRole?: RoleType | 'PARTY_ADMIN'): Promise<boolean> {
   if (!req.user || !req.hierarchyScope) return false;
 
   // 1. Vertical Check: Cannot assign or modify roles higher than or equal to caller's rank

@@ -88,7 +88,7 @@ export async function verifyTokenAndSession(token: string): Promise<TokenVerific
         userId: user.id,
         userCode: user.userCode,
         mobileNumber: user.mobileNumber,
-        role: user.role,
+        role: (decoded.role === 'PARTY_ADMIN' ? 'PARTY_ADMIN' : user.role) as any,
         organisationId: user.organisationId,
         unitId: user.unitId,
       },
