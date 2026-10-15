@@ -1,6 +1,16 @@
 import { VoterPreference } from '../types';
-import { apiFetch } from './api';
+import { apiFetch, getApiBase } from './api';
 import { getAuthToken } from './authStorage';
+
+export const resolveAssetUrl = (url?: string | null): string => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url;
+  }
+  const base = getApiBase();
+  const cleanUrl = url.startsWith('/') ? url : `/${url}`;
+  return base ? `${base}${cleanUrl}` : cleanUrl;
+};
 
 export type AppScope = 'SINGLE_MLA' | 'PARLIAMENT_MP' | 'ZONE' | 'STATE';
 
@@ -397,8 +407,8 @@ export async function fetchCmsConfig(options?: { organisationId?: string; tenant
       secondaryColor: rawConfig.secondaryColor || DEFAULT_CONFIG.secondaryColor,
       accentColor: rawConfig.accentColor || DEFAULT_CONFIG.accentColor,
       slogan: rawConfig.slogan || DEFAULT_CONFIG.slogan,
-      logoUrl: rawConfig.logoUrl || DEFAULT_CONFIG.logoUrl,
-      faviconUrl: rawConfig.faviconUrl || DEFAULT_CONFIG.faviconUrl,
+      logoUrl: resolveAssetUrl(rawConfig.logoUrl) || DEFAULT_CONFIG.logoUrl,
+      faviconUrl: resolveAssetUrl(rawConfig.faviconUrl) || DEFAULT_CONFIG.faviconUrl,
       appScope: (rawConfig.appScope as AppScope) || DEFAULT_CONFIG.appScope,
       candidateName: rawConfig.candidateName || DEFAULT_CONFIG.candidateName,
       activeHierarchyLevels: Array.isArray(rawConfig.activeHierarchyLevels) && rawConfig.activeHierarchyLevels.length > 0
@@ -429,7 +439,9 @@ export async function fetchCmsConfig(options?: { organisationId?: string; tenant
       config.primaryColor = config.primaryColor || activeParty.primaryColor;
       config.secondaryColor = config.secondaryColor || activeParty.secondaryColor || '#1e293b';
       config.accentColor = config.accentColor || activeParty.accentColor || '#3b82f6';
-      if (activeParty.logoUrl && !config.logoUrl) config.logoUrl = activeParty.logoUrl;
+      if (activeParty.logoUrl && (!rawConfig.logoUrl || rawConfig.logoUrl === DEFAULT_CONFIG.logoUrl)) {
+        config.logoUrl = resolveAssetUrl(activeParty.logoUrl);
+      }
     }
 
     applyThemeVariables(config.primaryColor, config.secondaryColor, config.accentColor);

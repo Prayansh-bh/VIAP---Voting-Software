@@ -8,6 +8,7 @@ import ApprovalEngine from './components/ApprovalEngine';
 import AdminLogin from './components/AdminLogin';
 import CmsBrandStudio from './components/CmsBrandStudio';
 import CmsStudio from './components/CmsStudio';
+import ApiCredentialsManager from './components/ApiCredentialsManager';
 import {
   AppInstance,
   InchargeRecord,
@@ -342,6 +343,14 @@ export default function App() {
               approvals={approvals}
               onApprove={handleApprove}
               onReject={handleReject}
+            />
+          )}
+
+          {activeTab === 'credentials' && (
+            <ApiCredentialsManager
+              currentApp={selectedApp}
+              apps={apps}
+              onSelectApp={handleSelectApp}
             />
           )}
 

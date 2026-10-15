@@ -73,6 +73,7 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
   });
 
   const [selectedRole, setSelectedRole] = useState<CommandRole | null>(null);
+  const [isDirectLoginOpen, setIsDirectLoginOpen] = useState(false);
   const [currentPath, setCurrentPath] = useState(() => {
     if (initialPath) return initialPath;
     if (typeof window === 'undefined') return '/';
@@ -419,13 +420,13 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
           isPartyCreated={isPartyCreated}
           onResetParty={handleResetParty}
           onEnterApp={() => {
-            window.location.hash = '/roles';
+            setIsDirectLoginOpen(true);
           }}
           onOpenLogin={() => {
-            window.location.hash = '/roles';
+            setIsDirectLoginOpen(true);
           }}
           onGetStarted={() => {
-            window.location.hash = '/roles';
+            setIsDirectLoginOpen(true);
           }}
         />
       );
@@ -480,12 +481,18 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
 
       {!isDashboardActive && !isLandingRoute && !isRolesRoute && currentPath !== '/cms' && <Footer />}
 
-      {selectedRole && (
+      {(selectedRole || isDirectLoginOpen) && (
         <Suspense fallback={null}>
           <OtpLoginModal
             role={selectedRole}
-            onClose={() => setSelectedRole(null)}
-            onSuccess={handleLoginSuccess}
+            onClose={() => {
+              setSelectedRole(null);
+              setIsDirectLoginOpen(false);
+            }}
+            onSuccess={(session, token) => {
+              setIsDirectLoginOpen(false);
+              handleLoginSuccess(session, token);
+            }}
           />
         </Suspense>
       )}

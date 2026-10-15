@@ -13,6 +13,7 @@ import {
   Radio,
   ChevronRight,
   Server,
+  KeyRound,
 } from 'lucide-react';
 import { AdminUser } from '../types';
 
@@ -74,6 +75,14 @@ export default function AdminSidebar({
       badge: pendingApprovalsCount > 0 ? `${pendingApprovalsCount}` : null,
       badgeColor: 'bg-amber-500 text-slate-950',
       description: 'Voter & cadre verification',
+    },
+    {
+      id: 'credentials',
+      label: 'API Keys & Secrets',
+      icon: KeyRound,
+      badge: 'VAULT',
+      badgeColor: 'bg-emerald-500 text-slate-950',
+      description: 'Encrypted DB-backed API keys',
     },
     {
       id: 'settings',

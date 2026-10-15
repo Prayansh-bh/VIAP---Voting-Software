@@ -29,7 +29,7 @@ const ROLE_TO_LEVEL: Record<string, string> = {
 };
 
 interface OtpLoginModalProps {
-  role?: CommandRole;
+  role?: CommandRole | null;
   onClose: () => void;
   onSuccess: (session: UserSession, token: string) => void;
 }
@@ -390,15 +390,24 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
                   </div>
                 </div>
 
-                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Logging into</span>
-                    <span className="text-xs font-black text-slate-800">{role.name}</span>
+                {role ? (
+                  <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Assigned Tier Role</span>
+                      <span className="text-xs font-black text-slate-800">{role.name}</span>
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-200 text-slate-700">
+                      {role.id}
+                    </span>
                   </div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-200 text-slate-700">
-                    {role.id}
-                  </span>
-                </div>
+                ) : (
+                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span className="text-[11px] font-bold text-amber-900">
+                      Direct Mobile Access: Your party and tier role are recognized automatically from your phone number.
+                    </span>
+                  </div>
+                )}
 
                 {/* Primary Action Button: Dispatches Real OTP */}
                 <button

@@ -306,13 +306,13 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
   const [stateName, setStateName] = useState(config.stateName || 'Andhra Pradesh');
   const [appScope, setAppScope] = useState<AppScope>(config.appScope || 'SINGLE_MLA');
   const [candidateName, setCandidateName] = useState(
-    (config as any).candidateName || 'Dr. Dola Sree Bala Veeranjaneya Swamy'
+    (config as any).candidateName || ''
   );
   const [candidateMobile, setCandidateMobile] = useState(
-    (config as any).candidateMobile || (config as any).mobileNumber || '9848012345'
+    (config as any).candidateMobile || (config as any).mobileNumber || ''
   );
   const [candidatePassword, setCandidatePassword] = useState(
-    (config as any).password || 'Kondapi@2026'
+    (config as any).password || ''
   );
   const [showPassword, setShowPassword] = useState(false);
   const [regOtpChannel, setRegOtpChannel] = useState<'WHATSAPP' | 'SMS'>('WHATSAPP');
@@ -324,36 +324,36 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
   const [isVerifyingRegOtp, setIsVerifyingRegOtp] = useState(false);
   const [createdCredentialsModal, setCreatedCredentialsModal] = useState<any | null>(null);
   const [constituencyName, setConstituencyName] = useState(
-    config.constituencies?.[0]?.name || 'Kondapi (SC)'
+    config.constituencies?.[0]?.name || ''
   );
 
-  // Multi-tier hierarchy incharges configuration state
+  // Multi-tier hierarchy incharges configuration state (All unique numbers required)
   const [tierInchargesState, setTierInchargesState] = useState<Record<string, { name: string; mobileNumber: string; unitName: string }>>({
-    STATE: { name: 'State Incharge', mobileNumber: '9848088888', unitName: 'State Headquarters' },
-    ZONE: { name: 'Zone Coordinator', mobileNumber: '9848099998', unitName: 'Regional Zone HQ' },
-    PARLIAMENT: { name: 'Parliament Incharge', mobileNumber: '9848088887', unitName: 'Ongole Parliament' },
-    CONSTITUENCY: { name: 'Constituency MLA Incharge', mobileNumber: '9848012345', unitName: 'Kondapi Assembly' },
-    MANDAL: { name: 'Mandal President', mobileNumber: '9848010001', unitName: 'Kondapi Mandal' },
-    VILLAGE: { name: 'Village Incharge', mobileNumber: '9848010002', unitName: 'Kondapi Village' },
-    BOOTH: { name: 'Booth President', mobileNumber: '9848010003', unitName: 'Booth 101' },
-    VOTER_GROUP: { name: '100-Voter Incharge', mobileNumber: '9848010004', unitName: 'Cluster 101-A' },
+    STATE: { name: 'State Incharge', mobileNumber: '', unitName: 'State Headquarters' },
+    ZONE: { name: 'Zone Coordinator', mobileNumber: '', unitName: 'Regional Zone HQ' },
+    PARLIAMENT: { name: 'Parliament Incharge', mobileNumber: '', unitName: 'Parliament Unit' },
+    CONSTITUENCY: { name: 'Constituency MLA Incharge', mobileNumber: '', unitName: 'Assembly Constituency' },
+    MANDAL: { name: 'Mandal President', mobileNumber: '', unitName: 'Mandal Unit' },
+    VILLAGE: { name: 'Village Incharge', mobileNumber: '', unitName: 'Village Unit' },
+    BOOTH: { name: 'Booth President', mobileNumber: '', unitName: 'Booth Station' },
+    VOTER_GROUP: { name: '100-Voter Incharge', mobileNumber: '', unitName: 'Cluster Unit' },
   });
 
-  // 1. Parliament MP: 7 Assembly segments (Constituency Name + Candidate/Person Name)
+  // 1. Parliament MP: Assembly segments
   const [parliamentName, setParliamentName] = useState(
-    config.parliamentName || 'Ongole Parliament (Lok Sabha)'
+    config.parliamentName || ''
   );
   const [mpCandidateName, setMpCandidateName] = useState(
-    (config as any).candidateName || 'Magunta Sreenivasulu Reddy'
+    (config as any).candidateName || ''
   );
   const [parliamentMlas, setParliamentMlas] = useState<Array<{ constituencyName: string; candidateName: string }>>([
-    { constituencyName: 'Kondapi (SC)', candidateName: 'Dr. Dola Sree Bala Veeranjaneya Swamy' },
-    { constituencyName: 'Ongole', candidateName: 'Damacharla Janardhana Rao' },
-    { constituencyName: 'Santhanuthalapadu (SC)', candidateName: 'B. N. Vijay Kumar' },
-    { constituencyName: 'Yerragondapalem (SC)', candidateName: 'G. Chandrasekhar' },
-    { constituencyName: 'Darsi', candidateName: 'Dr. Gottipati Ravi Kumar' },
-    { constituencyName: 'Markapuram', candidateName: 'Kandula Narayana Reddy' },
-    { constituencyName: 'Giddalur', candidateName: 'M. Ashok Reddy' },
+    { constituencyName: 'Assembly Segment 1', candidateName: 'MLA Candidate 1' },
+    { constituencyName: 'Assembly Segment 2', candidateName: 'MLA Candidate 2' },
+    { constituencyName: 'Assembly Segment 3', candidateName: 'MLA Candidate 3' },
+    { constituencyName: 'Assembly Segment 4', candidateName: 'MLA Candidate 4' },
+    { constituencyName: 'Assembly Segment 5', candidateName: 'MLA Candidate 5' },
+    { constituencyName: 'Assembly Segment 6', candidateName: 'MLA Candidate 6' },
+    { constituencyName: 'Assembly Segment 7', candidateName: 'MLA Candidate 7' },
   ]);
 
   // 2. Zone: N Parliament MPs * 7 MLAs algorithm
@@ -702,7 +702,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
     }
 
     // Format & validate multi-tier hierarchy incharges for each selected level
-    const formattedTierIncharges = selectedHierarchyLevels.map((tierKey) => {
+    const formattedTierIncharges = selectedHierarchyLevels.map((tierKey, idx) => {
       const meta = TIER_TO_ROLE_DEFAULT[tierKey] || { role: 'CONSTITUENCY_INCHARGE', roleName: 'Incharge', defaultName: 'Tier Incharge', defaultUnit: tierKey };
       const val = tierInchargesState[tierKey] || { name: meta.defaultName, mobileNumber: '', unitName: meta.defaultUnit };
       const cleanNum = (val.mobileNumber || '').replace(/\D/g, '').slice(-10);
@@ -710,7 +710,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
         tierLevel: tierKey as any,
         role: meta.role as any,
         name: val.name.trim() || meta.defaultName,
-        mobileNumber: cleanNum || (tierKey === 'CONSTITUENCY' ? cleanMobile : ''),
+        mobileNumber: cleanNum || (idx === 0 && cleanMobile ? cleanMobile : ''),
         unitName: val.unitName.trim() || meta.defaultUnit,
       };
     });
@@ -718,11 +718,17 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
     const seenMobiles = new Set<string>();
     for (const item of formattedTierIncharges) {
       if (!item.mobileNumber || item.mobileNumber.length < 10) {
-        notify.warning(`Please enter a valid 10-digit mobile number for ${item.tierLevel} incharge (${item.name}).`, 'Valid Mobile Required');
+        notify.warning(
+          `Please enter a valid 10-digit mobile number for ${item.tierLevel} incharge (${item.name}). You have selected ${selectedHierarchyLevels.length} tiers, so all ${selectedHierarchyLevels.length} unique phone numbers must be registered.`,
+          'Unique Mobile Number Required'
+        );
         return;
       }
       if (seenMobiles.has(item.mobileNumber)) {
-        notify.warning(`Duplicate phone number detected: +91 ${item.mobileNumber} is assigned to multiple tier incharges. Each tier must have a unique phone number.`, 'Duplicate Phone Number');
+        notify.warning(
+          `Duplicate phone number detected: +91 ${item.mobileNumber} is assigned to multiple tiers. Each of the ${selectedHierarchyLevels.length} selected tiers must have its own distinct phone number so the system recognizes which party and tier the user belongs to.`,
+          'Duplicate Phone Number'
+        );
         return;
       }
       seenMobiles.add(item.mobileNumber);
@@ -859,9 +865,16 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
       const buildRes: any = await buildApplication(buildPayload);
       updateParties(partyList);
 
+      const returnedApp = buildRes?.application || buildRes?.data?.application;
+      if (returnedApp?.logoUrl) {
+        setLogoUrl(returnedApp.logoUrl);
+        mergedToStore.logoUrl = returnedApp.logoUrl;
+        localStorage.setItem('kdp_cms_config', JSON.stringify(mergedToStore));
+      }
+
       if (onAppBuilt) {
         try {
-          await onAppBuilt(buildRes?.application || buildRes?.data?.application);
+          await onAppBuilt(returnedApp);
         } catch (e) {
           console.warn('onAppBuilt callback error:', e);
         }

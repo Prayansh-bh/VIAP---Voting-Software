@@ -259,7 +259,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/upload-asset',
     {
-      preHandler: [authenticate],
+      preHandler: [optionalAuthenticate],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = (req.body || {}) as { data?: string; base64Data?: string; fileData?: string; filename?: string; mimeType?: string };
@@ -469,12 +469,27 @@ export async function cmsRoutes(fastify: FastifyInstance) {
               throw conflictErr;
             }
 
-            // 1. Create distinct isolated Organisation
+            // 1. Resolve & permanently persist logo asset if uploaded as base64
+            let resolvedLogoUrl = (body.logoUrl || '').trim() || undefined;
+            if (resolvedLogoUrl && resolvedLogoUrl.startsWith('data:')) {
+              try {
+                const commaIdx = resolvedLogoUrl.indexOf(',');
+                const base64Str = commaIdx !== -1 ? resolvedLogoUrl.slice(commaIdx + 1) : resolvedLogoUrl;
+                const buffer = Buffer.from(base64Str, 'base64');
+                const cleanSlug = orgName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
+                const saved = await saveAsset(buffer, `${cleanSlug}-logo.png`);
+                resolvedLogoUrl = saved.assetUrl;
+              } catch (e) {
+                console.warn('Failed to auto-persist base64 logo in build-application:', e);
+              }
+            }
+
+            // Create distinct isolated Organisation
             const org = await tx.organisation.create({
               data: {
                 name: orgName,
                 code: rawCode,
-                logoUrl: body.logoUrl || undefined,
+                logoUrl: resolvedLogoUrl,
                 isActive: true,
               },
             });
@@ -690,7 +705,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
               organisationName: body.organisationName || body.appName,
               headerTitle: body.headerTitle || body.appName,
               slogan: body.slogan || undefined,
-              logoUrl: body.logoUrl || undefined,
+              logoUrl: resolvedLogoUrl,
               faviconUrl: body.faviconUrl || undefined,
               stateName: body.stateName || 'Andhra Pradesh',
               primaryColor: body.primaryColor || '#eab308',

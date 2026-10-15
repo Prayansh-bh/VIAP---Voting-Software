@@ -379,3 +379,56 @@ export async function importVoterRolls(appId: string, payload: {
   });
 }
 
+// ── Encrypted Database-backed API Credentials ──
+export interface ApiCredentialItem {
+  id: string;
+  keyName: string;
+  provider: string;
+  serviceType?: string;
+  maskedValue: string;
+  environment?: string;
+  isActive: boolean;
+  version: number;
+  rotatedAt?: string;
+  updatedAt: string;
+}
+
+export async function fetchCredentials(organisationId?: string): Promise<ApiCredentialItem[]> {
+  try {
+    const q = organisationId ? `?organisationId=${encodeURIComponent(organisationId)}` : '';
+    const res: any = await request(`/credentials${q}`);
+    return Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
+  } catch (err) {
+    console.warn('Failed to fetch credentials:', err);
+    return [];
+  }
+}
+
+export async function setCredential(payload: { keyName: string; secretValue: string; provider?: string; organisationId?: string }): Promise<any> {
+  const q = payload.organisationId ? `?organisationId=${encodeURIComponent(payload.organisationId)}` : '';
+  return request(`/credentials${q}`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function rotateCredential(keyName: string, newSecretValue: string, organisationId?: string): Promise<any> {
+  const q = organisationId ? `?organisationId=${encodeURIComponent(organisationId)}` : '';
+  return request(`/credentials/${encodeURIComponent(keyName)}/rotate${q}`, {
+    method: 'POST',
+    body: JSON.stringify({ newSecretValue }),
+  });
+}
+
+export async function revealCredential(keyName: string, organisationId?: string): Promise<{ keyName: string; secretValue: string; provider: string }> {
+  const q = organisationId ? `?organisationId=${encodeURIComponent(organisationId)}` : '';
+  return request(`/credentials/${encodeURIComponent(keyName)}/reveal${q}`);
+}
+
+export async function deleteCredential(keyName: string, organisationId?: string): Promise<any> {
+  const q = organisationId ? `?organisationId=${encodeURIComponent(organisationId)}` : '';
+  return request(`/credentials/${encodeURIComponent(keyName)}${q}`, {
+    method: 'DELETE',
+  });
+}
+
