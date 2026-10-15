@@ -306,7 +306,8 @@ export async function loadCmsBundle(options?: { organisationId?: string; configK
 
   const announcements = await prisma.announcement.findMany({
     where: {
-      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      ...(orgId ? { OR: [{ organisationId: orgId }, { organisationId: null }] } : {}),
+      AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
     },
     orderBy: { createdAt: 'desc' },
     take: 10,
@@ -334,9 +335,7 @@ export async function loadCmsBundle(options?: { organisationId?: string; configK
       },
       orderBy: { name: 'asc' },
     });
-  }
-
-  if (constituencies.length === 0) {
+  } else {
     constituencies = await prisma.constituency.findMany({
       select: {
         id: true,

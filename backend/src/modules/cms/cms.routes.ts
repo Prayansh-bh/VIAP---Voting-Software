@@ -732,8 +732,19 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // LIST CONSTITUENCIES
   // --------------------------------------------------------------------------
-  fastify.get('/constituencies', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/constituencies', { preHandler: [authenticate] }, async (req: FastifyRequest, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
+    const orgId = req.user?.organisationId;
+    if (!isSuperAdmin && !orgId) {
+      return reply.send(successResponse([]));
+    }
+
+    const where: Prisma.ConstituencyWhereInput = isSuperAdmin
+      ? {}
+      : { parliament: { zone: { state: { organisationId: orgId } } } };
+
     const list = await prisma.constituency.findMany({
+      where,
       select: {
         id: true,
         name: true,
@@ -750,9 +761,17 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 1. ORGANISATION MANAGEMENT
   // --------------------------------------------------------------------------
-  fastify.get('/organisation', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
-    const org = await prisma.organisation.findFirst({
-      orderBy: { createdAt: 'asc' },
+  fastify.get('/organisation', { preHandler: [authenticate] }, async (req: FastifyRequest, reply: FastifyReply) => {
+    const targetOrgId = req.user?.role === RoleType.SUPER_ADMIN && (req.query as any)?.organisationId
+      ? (req.query as any).organisationId
+      : req.user?.organisationId;
+
+    if (!targetOrgId) {
+      return reply.status(404).send({ success: false, error: { message: 'Organisation not found' } });
+    }
+
+    const org = await prisma.organisation.findUnique({
+      where: { id: targetOrgId },
     });
     return reply.send(successResponse(org));
   });
@@ -765,27 +784,30 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as z.infer<typeof organisationSchema>;
-      const existing = await prisma.organisation.findFirst({ orderBy: { createdAt: 'asc' } });
-      const orgData = {
-        name: body.name,
-        code: body.code,
-        description: body.description,
-        logoUrl: body.logoUrl,
-        website: body.website,
-        isActive: body.isActive,
-      };
+      const targetOrgId = req.user?.role === RoleType.SUPER_ADMIN && (req.query as any)?.organisationId
+        ? (req.query as any).organisationId
+        : req.user?.organisationId;
 
-      let org;
-      if (existing) {
-        org = await prisma.organisation.update({
-          where: { id: existing.id },
-          data: orgData,
-        });
-      } else {
-        org = await prisma.organisation.create({
-          data: orgData,
-        });
+      if (!targetOrgId) {
+        return reply.status(403).send({ success: false, error: { message: 'Missing organisation context' } });
       }
+
+      const existing = await prisma.organisation.findUnique({ where: { id: targetOrgId } });
+      if (!existing) {
+        return reply.status(404).send({ success: false, error: { message: 'Organisation not found' } });
+      }
+
+      const org = await prisma.organisation.update({
+        where: { id: existing.id },
+        data: {
+          name: body.name,
+          code: body.code,
+          description: body.description,
+          logoUrl: body.logoUrl,
+          website: body.website,
+          isActive: body.isActive,
+        },
+      });
 
       await logAudit({
         action: AuditAction.UPDATE,
@@ -823,12 +845,21 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as z.infer<typeof partySchema>;
       const isDraft = body.lifecycleStatus === 'DRAFT';
-      const org = await prisma.organisation.findFirst();
+      const orgId = req.user?.role === RoleType.SUPER_ADMIN && (body as any).organisationId
+        ? (body as any).organisationId
+        : req.user?.organisationId;
+
+      if (req.user?.role !== RoleType.SUPER_ADMIN && !orgId) {
+        return reply.status(403).send({
+          success: false,
+          error: { code: 'FORBIDDEN_TENANT', message: 'Missing organisation context' },
+        });
+      }
 
       const party = await prisma.politicalParty.create({
         data: {
           ...body,
-          organisationId: org?.id,
+          organisationId: orgId,
           lifecycleStatus: isDraft ? 'DRAFT' : 'LOCKED',
           isLocked: !isDraft,
           publishedAt: isDraft ? null : new Date(),
@@ -867,6 +898,14 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         return reply.status(404).send({
           success: false,
           error: { code: 'NOT_FOUND', message: 'Party not found' },
+        });
+      }
+
+      // TENANT ISOLATION CHECK
+      if (req.user?.role !== RoleType.SUPER_ADMIN && party.organisationId !== req.user?.organisationId) {
+        return reply.status(403).send({
+          success: false,
+          error: { code: 'FORBIDDEN_TENANT', message: 'Access denied: Party belongs to another organization' },
         });
       }
 
@@ -914,6 +953,14 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         return reply.status(404).send({
           success: false,
           error: { code: 'NOT_FOUND', message: 'Party not found' },
+        });
+      }
+
+      // TENANT ISOLATION CHECK
+      if (req.user?.role !== RoleType.SUPER_ADMIN && existingParty.organisationId !== req.user?.organisationId) {
+        return reply.status(403).send({
+          success: false,
+          error: { code: 'FORBIDDEN_TENANT', message: 'Access denied: Party belongs to another organization' },
         });
       }
 
@@ -979,6 +1026,14 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         });
       }
 
+      // TENANT ISOLATION CHECK
+      if (req.user?.role !== RoleType.SUPER_ADMIN && existingParty.organisationId !== req.user?.organisationId) {
+        return reply.status(403).send({
+          success: false,
+          error: { code: 'FORBIDDEN_TENANT', message: 'Access denied: Party belongs to another organization' },
+        });
+      }
+
       // STRICT IMMUTABILITY CHECK
       if (existingParty.isLocked || existingParty.lifecycleStatus === 'LOCKED') {
         await logAudit({
@@ -1036,6 +1091,36 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         return reply.status(404).send({
           success: false,
           error: { code: 'NOT_FOUND', message: 'Party not found' },
+        });
+      }
+
+      // STRICT IMMUTABILITY CHECK
+      if (existingParty.isLocked || existingParty.lifecycleStatus === 'LOCKED') {
+        await logAudit({
+          action: AuditAction.DELETE,
+          entityType: 'PoliticalParty',
+          entityId: existingParty.id,
+          req,
+          changes: {
+            status: 'BLOCKED',
+            reason: 'Party is published and immutable (LOCKED)',
+          } as unknown as Prisma.InputJsonValue,
+        });
+
+        return reply.status(403).send({
+          success: false,
+          error: {
+            code: 'PARTY_CONFIGURATION_LOCKED',
+            message: 'Party configuration is published, locked and immutable. Deletion is not permitted.',
+          },
+        });
+      }
+
+      // TENANT ISOLATION CHECK
+      if (req.user?.role !== RoleType.SUPER_ADMIN && existingParty.organisationId !== req.user?.organisationId) {
+        return reply.status(403).send({
+          success: false,
+          error: { code: 'FORBIDDEN_TENANT', message: 'Access denied: Party belongs to another organization' },
         });
       }
 
@@ -1320,8 +1405,15 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 7. TRAINING CMS
   // --------------------------------------------------------------------------
-  fastify.get('/training', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/training', { preHandler: [authenticate] }, async (req: FastifyRequest, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
+    const orgId = req.user?.organisationId;
+    if (!isSuperAdmin && !orgId) {
+      return reply.send(successResponse([]));
+    }
+    const where: Prisma.TrainingVideoWhereInput = isSuperAdmin ? {} : { organisationId: orgId };
     const videos = await prisma.trainingVideo.findMany({
+      where,
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
       include: {
         assignments: true,
@@ -1379,8 +1471,15 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 9. ANNOUNCEMENTS CMS
   // --------------------------------------------------------------------------
-  fastify.get('/announcements', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/announcements', { preHandler: [authenticate] }, async (req: FastifyRequest, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
+    const orgId = req.user?.organisationId;
+    if (!isSuperAdmin && !orgId) {
+      return reply.send(successResponse([]));
+    }
+    const where: Prisma.AnnouncementWhereInput = isSuperAdmin ? {} : { organisationId: orgId };
     const items = await prisma.announcement.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
     });
     return reply.send(successResponse(items));
@@ -1393,6 +1492,12 @@ export async function cmsRoutes(fastify: FastifyInstance) {
       preValidation: [validateBody(announcementSchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
+      const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
+      const orgId = req.user?.organisationId;
+      if (!isSuperAdmin && !orgId) {
+        return reply.status(403).send({ error: { message: 'Missing organization context' } });
+      }
+
       const body = req.body as z.infer<typeof announcementSchema>;
 
       const announcement = await prisma.announcement.create({
@@ -1401,6 +1506,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
           content: body.content,
           priority: body.priority,
           targetLevel: body.targetLevel,
+          organisationId: orgId,
           expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
         },
       });
@@ -1424,6 +1530,18 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const params = req.params as { id: string };
+
+      const announcement = await prisma.announcement.findUnique({
+        where: { id: params.id },
+      });
+
+      if (!announcement) {
+        return reply.status(404).send({ error: { message: 'Announcement not found' } });
+      }
+
+      if (req.user?.role !== RoleType.SUPER_ADMIN && announcement.organisationId !== req.user?.organisationId) {
+        return reply.status(403).send({ error: { message: 'Access denied: Announcement belongs to another organization' } });
+      }
 
       await prisma.announcement.delete({
         where: { id: params.id },
@@ -2818,8 +2936,18 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 15. GEOGRAPHY ENTITIES LIST & CREATE
   // --------------------------------------------------------------------------
-  fastify.get('/geography', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/geography', { preHandler: [authenticate] }, async (req: FastifyRequest, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
+    const orgId = req.user?.organisationId;
+
+    if (!isSuperAdmin && !orgId) {
+      return reply.send(successResponse([]));
+    }
+
+    const where: Prisma.StateWhereInput = isSuperAdmin ? {} : { organisationId: orgId };
+
     const states = await prisma.state.findMany({
+      where,
       include: {
         zones: {
           include: {
@@ -2852,6 +2980,13 @@ export async function cmsRoutes(fastify: FastifyInstance) {
       preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
+      const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
+      const orgId = req.user?.organisationId;
+
+      if (!isSuperAdmin && !orgId) {
+        return reply.status(403).send({ error: { message: 'Missing organization context' } });
+      }
+
       const body = req.body as {
         level: 'STATE' | 'ZONE' | 'PARLIAMENT' | 'CONSTITUENCY' | 'MANDAL';
         name: string;
@@ -2869,8 +3004,21 @@ export async function cmsRoutes(fastify: FastifyInstance) {
       const code = body.code?.trim() || `${body.level.slice(0, 3)}-${cleanName.slice(0, 4).toUpperCase()}`;
 
       if (body.level === 'CONSTITUENCY') {
-        const parliamentId = body.parentId || (await prisma.parliament.findFirst())?.id;
+        const parliamentId = body.parentId || (await prisma.parliament.findFirst({
+          where: isSuperAdmin ? {} : { zone: { state: { organisationId: orgId } } },
+        }))?.id;
         if (!parliamentId) throw new Error('No parent Parliament found to attach Constituency');
+
+        if (!isSuperAdmin) {
+          const parentPar = await prisma.parliament.findUnique({
+            where: { id: parliamentId },
+            include: { zone: { include: { state: true } } },
+          });
+          if (!parentPar || parentPar.zone.state.organisationId !== orgId) {
+            return reply.status(403).send({ error: { message: 'Access denied: Parent parliament belongs to another organization' } });
+          }
+        }
+
         created = await prisma.constituency.create({
           data: {
             name: cleanName,
@@ -2880,8 +3028,21 @@ export async function cmsRoutes(fastify: FastifyInstance) {
           },
         });
       } else if (body.level === 'MANDAL') {
-        const constituencyId = body.parentId || (await prisma.constituency.findFirst())?.id;
+        const constituencyId = body.parentId || (await prisma.constituency.findFirst({
+          where: isSuperAdmin ? {} : { parliament: { zone: { state: { organisationId: orgId } } } },
+        }))?.id;
         if (!constituencyId) throw new Error('No parent Constituency found to attach Mandal');
+
+        if (!isSuperAdmin) {
+          const parentCon = await prisma.constituency.findUnique({
+            where: { id: constituencyId },
+            include: { parliament: { include: { zone: { include: { state: true } } } } },
+          });
+          if (!parentCon || parentCon.parliament.zone.state.organisationId !== orgId) {
+            return reply.status(403).send({ error: { message: 'Access denied: Parent constituency belongs to another organization' } });
+          }
+        }
+
         created = await prisma.mandal.create({
           data: {
             name: cleanName,
@@ -2891,8 +3052,21 @@ export async function cmsRoutes(fastify: FastifyInstance) {
           },
         });
       } else if (body.level === 'PARLIAMENT') {
-        const zoneId = body.parentId || (await prisma.zone.findFirst())?.id;
+        const zoneId = body.parentId || (await prisma.zone.findFirst({
+          where: isSuperAdmin ? {} : { state: { organisationId: orgId } },
+        }))?.id;
         if (!zoneId) throw new Error('No parent Zone found to attach Parliament');
+
+        if (!isSuperAdmin) {
+          const parentZone = await prisma.zone.findUnique({
+            where: { id: zoneId },
+            include: { state: true },
+          });
+          if (!parentZone || parentZone.state.organisationId !== orgId) {
+            return reply.status(403).send({ error: { message: 'Access denied: Parent zone belongs to another organization' } });
+          }
+        }
+
         created = await prisma.parliament.create({
           data: {
             name: cleanName,
@@ -2902,8 +3076,20 @@ export async function cmsRoutes(fastify: FastifyInstance) {
           },
         });
       } else if (body.level === 'ZONE') {
-        const stateId = body.parentId || (await prisma.state.findFirst())?.id;
+        const stateId = body.parentId || (await prisma.state.findFirst({
+          where: isSuperAdmin ? {} : { organisationId: orgId },
+        }))?.id;
         if (!stateId) throw new Error('No parent State found to attach Zone');
+
+        if (!isSuperAdmin) {
+          const parentState = await prisma.state.findUnique({
+            where: { id: stateId },
+          });
+          if (!parentState || parentState.organisationId !== orgId) {
+            return reply.status(403).send({ error: { message: 'Access denied: Parent state belongs to another organization' } });
+          }
+        }
+
         created = await prisma.zone.create({
           data: {
             name: cleanName,
@@ -2913,12 +3099,11 @@ export async function cmsRoutes(fastify: FastifyInstance) {
           },
         });
       } else if (body.level === 'STATE') {
-        const org = await prisma.organisation.findFirst();
         created = await prisma.state.create({
           data: {
             name: cleanName,
             code,
-            organisationId: org?.id,
+            organisationId: orgId,
             totalVoters: body.totalVoters || 40000000,
           },
         });

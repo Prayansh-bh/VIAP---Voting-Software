@@ -279,8 +279,20 @@ export class BulkUploadService {
       throw err;
     }
 
-    // 2. Enforce Hierarchy Scope Authorization (P1-A reuse)
-    if (opts.scope && !opts.scope.isGlobalScope) {
+    // 2. Enforce Hierarchy Scope Authorization and Tenant Isolation
+    if (!opts.scope || (!opts.scope.isGlobalScope && !opts.scope.organisationId)) {
+      const err: any = new Error('Access denied: Authentication and hierarchy scope required.');
+      err.statusCode = 403;
+      err.code = 'FORBIDDEN';
+      throw err;
+    }
+    if (!opts.scope.isGlobalScope) {
+      if (constituency.parliament.zone.state.organisationId !== opts.scope.organisationId) {
+        const err: any = new Error('Access denied: Constituency belongs to a different organisation.');
+        err.statusCode = 403;
+        err.code = 'CROSS_ORG_ACCESS_FORBIDDEN';
+        throw err;
+      }
       if (!opts.scope.accessibleConstituencyIds.has(constituency.id)) {
         const err: any = new Error(`Access denied: You do not have authority over constituency '${constituency.name}'.`);
         err.statusCode = 403;

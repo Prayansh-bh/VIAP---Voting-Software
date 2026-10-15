@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AuditAction, GroundReportStatus, GroundReportType, Prisma, TaskPriority } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
-import { successResponse } from '../../common/response.js';
+import { errorResponse, successResponse } from '../../common/response.js';
 import { validateBody } from '../../common/validation.js';
 import { authenticate } from '../../middleware/auth.js';
 import { assertUnitAccess, populateHierarchyScope } from '../../middleware/rbac.js';
@@ -42,17 +42,43 @@ export async function reportsRoutes(fastify: FastifyInstance) {
 
   // List ground reports
   fastify.get('/ground', async (req: FastifyRequest<{ Querystring: { unitId?: string; status?: GroundReportStatus; page?: string; limit?: string } }>, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const orgId = req.user?.organisationId;
+
+    if (!isSuperAdmin && !orgId) {
+      return reply.send(successResponse([], undefined, {
+        total: 0,
+        page: 1,
+        limit: 50,
+        totalPages: 1,
+        hasNextPage: false,
+        hasPrevPage: false,
+      }));
+    }
+
     const where: Prisma.GroundReportWhereInput = {};
     if (req.query.status) where.status = req.query.status;
+
+    if (!isSuperAdmin && orgId) {
+      where.OR = [
+        { createdBy: { organisationId: orgId } },
+        { constituency: { parliament: { zone: { state: { organisationId: orgId } } } } },
+        { mandal: { constituency: { parliament: { zone: { state: { organisationId: orgId } } } } } },
+        { village: { mandal: { constituency: { parliament: { zone: { state: { organisationId: orgId } } } } } } },
+        { booth: { village: { mandal: { constituency: { parliament: { zone: { state: { organisationId: orgId } } } } } } } },
+      ];
+    }
 
     if (req.query.unitId) {
       if (!assertUnitAccess(req, reply, req.query.unitId)) return;
       where.unitId = req.query.unitId;
     } else if (req.hierarchyScope && !req.hierarchyScope.isGlobalScope) {
-      if (req.hierarchyScope.accessibleUnitIds.size > 0) {
-        where.unitId = { in: Array.from(req.hierarchyScope.accessibleUnitIds) };
-      } else {
-        where.unitId = '00000000-0000-0000-0000-000000000000';
+      if (req.hierarchyScope.role !== 'HIGH_COMMAND' && req.hierarchyScope.role !== 'STATE_ADMIN') {
+        if (req.hierarchyScope.accessibleUnitIds.size > 0) {
+          where.unitId = { in: Array.from(req.hierarchyScope.accessibleUnitIds) };
+        } else {
+          where.unitId = '00000000-0000-0000-0000-000000000000';
+        }
       }
     }
 
@@ -84,8 +110,36 @@ export async function reportsRoutes(fastify: FastifyInstance) {
 
   // Create ground report
   fastify.post('/ground', { preValidation: [validateBody(groundReportSchema)] }, async (req: FastifyRequest<{ Body: z.infer<typeof groundReportSchema> }>, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const orgId = req.user?.organisationId;
+
+    if (!isSuperAdmin && !orgId) {
+      return reply.status(403).send(errorResponse('Tenant context required', 'FORBIDDEN'));
+    }
+
     if (req.body.unitId && !assertUnitAccess(req, reply, req.body.unitId)) {
       return;
+    }
+
+    if (!isSuperAdmin && orgId) {
+      if (req.body.constituencyId) {
+        const c = await prisma.constituency.findUnique({
+          where: { id: req.body.constituencyId },
+          include: { parliament: { include: { zone: { include: { state: true } } } } },
+        });
+        if (!c || c.parliament.zone.state.organisationId !== orgId) {
+          return reply.status(404).send(errorResponse('Constituency not found or access denied', 'NOT_FOUND'));
+        }
+      }
+      if (req.body.boothId) {
+        const b = await prisma.booth.findUnique({
+          where: { id: req.body.boothId },
+          include: { village: { include: { mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } } } } },
+        });
+        if (!b || b.village.mandal.constituency.parliament.zone.state.organisationId !== orgId) {
+          return reply.status(404).send(errorResponse('Booth not found or access denied', 'NOT_FOUND'));
+        }
+      }
     }
 
     const report = await prisma.groundReport.create({
@@ -117,16 +171,39 @@ export async function reportsRoutes(fastify: FastifyInstance) {
 
   // List polling booth reports
   fastify.get('/polling', async (req: FastifyRequest<{ Querystring: { unitId?: string; page?: string; limit?: string } }>, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const orgId = req.user?.organisationId;
+
+    if (!isSuperAdmin && !orgId) {
+      return reply.send(successResponse([], undefined, {
+        total: 0,
+        page: 1,
+        limit: 50,
+        totalPages: 1,
+        hasNextPage: false,
+        hasPrevPage: false,
+      }));
+    }
+
     const where: Prisma.PollingReportWhereInput = {};
+
+    if (!isSuperAdmin && orgId) {
+      where.OR = [
+        { createdBy: { organisationId: orgId } },
+        { booth: { village: { mandal: { constituency: { parliament: { zone: { state: { organisationId: orgId } } } } } } } },
+      ];
+    }
 
     if (req.query.unitId) {
       if (!assertUnitAccess(req, reply, req.query.unitId)) return;
       where.unitId = req.query.unitId;
     } else if (req.hierarchyScope && !req.hierarchyScope.isGlobalScope) {
-      if (req.hierarchyScope.accessibleUnitIds.size > 0) {
-        where.unitId = { in: Array.from(req.hierarchyScope.accessibleUnitIds) };
-      } else {
-        where.unitId = '00000000-0000-0000-0000-000000000000';
+      if (req.hierarchyScope.role !== 'HIGH_COMMAND' && req.hierarchyScope.role !== 'STATE_ADMIN') {
+        if (req.hierarchyScope.accessibleUnitIds.size > 0) {
+          where.unitId = { in: Array.from(req.hierarchyScope.accessibleUnitIds) };
+        } else {
+          where.unitId = '00000000-0000-0000-0000-000000000000';
+        }
       }
     }
 
@@ -158,9 +235,27 @@ export async function reportsRoutes(fastify: FastifyInstance) {
 
   // Submit polling booth report
   fastify.post('/polling', { preValidation: [validateBody(pollingReportSchema)] }, async (req: FastifyRequest<{ Body: z.infer<typeof pollingReportSchema> }>, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const orgId = req.user?.organisationId;
+
+    if (!isSuperAdmin && !orgId) {
+      return reply.status(403).send(errorResponse('Tenant context required', 'FORBIDDEN'));
+    }
+
     if (req.body.unitId && !assertUnitAccess(req, reply, req.body.unitId)) {
       return;
     }
+
+    if (!isSuperAdmin && orgId && req.body.boothId) {
+      const b = await prisma.booth.findUnique({
+        where: { id: req.body.boothId },
+        include: { village: { include: { mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } } } } },
+      });
+      if (!b || b.village.mandal.constituency.parliament.zone.state.organisationId !== orgId) {
+        return reply.status(404).send(errorResponse('Booth not found or access denied', 'NOT_FOUND'));
+      }
+    }
+
     const { tdpVotes, ysrcpVotes, jspVotes, bjpVotes, incVotes, othersVotes } = req.body;
     const totalVotes = tdpVotes + ysrcpVotes + jspVotes + bjpVotes + incVotes + othersVotes;
 

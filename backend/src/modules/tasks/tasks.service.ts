@@ -5,6 +5,7 @@ import { emitHierarchyEvent } from '../../lib/socket.js';
 
 export class TasksService {
   static async listTasks(query: any, scope?: import('../../common/types.js').UserHierarchyScope) {
+    if (!scope) return [];
     const { status, priority, unitId, assigneeId } = query;
     const where: Prisma.TaskWhereInput = {};
 
@@ -12,21 +13,59 @@ export class TasksService {
     if (priority) where.priority = priority;
     if (assigneeId) where.assigneeId = assigneeId;
 
-    if (scope && !scope.isGlobalScope) {
-      if (scope.role === 'VOTER_100_INCHARGE') {
-        where.OR = [
-          { assigneeId: scope.userId },
-          { assignments: { some: { userId: scope.userId } } },
-          { targetLevel: 'VOTER_GROUP' },
-          ...(scope.accessibleUnitIds.size > 0 ? [{ unitId: { in: Array.from(scope.accessibleUnitIds) } }] : []),
-        ];
-      } else if (scope.accessibleUnitIds.size > 0) {
-        where.OR = [
-          { unitId: { in: Array.from(scope.accessibleUnitIds) } },
-          { assigneeId: scope.userId },
-          { assignments: { some: { userId: scope.userId } } },
-        ];
+    if (!scope.isGlobalScope) {
+      if (!scope.organisationId) return [];
+
+      const orgFilter: Prisma.TaskWhereInput = {
+        OR: [
+          { createdBy: { organisationId: scope.organisationId } },
+          { assignee: { organisationId: scope.organisationId } },
+          { constituency: { parliament: { zone: { state: { organisationId: scope.organisationId } } } } },
+          { mandal: { constituency: { parliament: { zone: { state: { organisationId: scope.organisationId } } } } } },
+          { village: { mandal: { constituency: { parliament: { zone: { state: { organisationId: scope.organisationId } } } } } } },
+          { booth: { village: { mandal: { constituency: { parliament: { zone: { state: { organisationId: scope.organisationId } } } } } } } },
+        ],
+      };
+
+      const scopeOrConditions: Prisma.TaskWhereInput[] = [
+        { createdById: scope.userId },
+        { assigneeId: scope.userId },
+        { assignments: { some: { userId: scope.userId } } },
+      ];
+
+      if (scope.role === 'HIGH_COMMAND' || scope.role === 'STATE_ADMIN') {
+        // Full tenant visibility
+      } else if (scope.role === 'VOTER_100_INCHARGE') {
+        if (scope.accessibleUnitIds.size > 0) {
+          scopeOrConditions.push({ unitId: { in: Array.from(scope.accessibleUnitIds) } });
+        }
+        if (scope.accessibleBoothIds.size > 0) {
+          scopeOrConditions.push({ boothId: { in: Array.from(scope.accessibleBoothIds) } });
+        }
+      } else {
+        if (scope.accessibleUnitIds.size > 0) {
+          scopeOrConditions.push({ unitId: { in: Array.from(scope.accessibleUnitIds) } });
+        }
+        if (scope.accessibleConstituencyIds.size > 0) {
+          scopeOrConditions.push({ constituencyId: { in: Array.from(scope.accessibleConstituencyIds) } });
+        }
+        if (scope.accessibleMandalIds.size > 0) {
+          scopeOrConditions.push({ mandalId: { in: Array.from(scope.accessibleMandalIds) } });
+        }
+        if (scope.accessibleVillageIds.size > 0) {
+          scopeOrConditions.push({ villageId: { in: Array.from(scope.accessibleVillageIds) } });
+        }
+        if (scope.accessibleBoothIds.size > 0) {
+          scopeOrConditions.push({ boothId: { in: Array.from(scope.accessibleBoothIds) } });
+        }
       }
+
+      where.AND = [
+        orgFilter,
+        ...(scopeOrConditions.length > 0 && scope.role !== 'HIGH_COMMAND' && scope.role !== 'STATE_ADMIN'
+          ? [{ OR: scopeOrConditions }]
+          : []),
+      ];
     } else if (unitId) {
       where.unitId = unitId;
     }
@@ -54,8 +93,23 @@ export class TasksService {
     actorId?: string,
     action: 'read' | 'status' | 'update' | 'assign' = 'read',
   ): boolean {
-    if (!scope) return true;
+    if (!scope) return false;
     if (scope.isGlobalScope) return true;
+    if (!scope.organisationId) return false;
+
+    // Verify tenant ownership
+    const belongsToOrg =
+      task.createdBy?.organisationId === scope.organisationId ||
+      task.assignee?.organisationId === scope.organisationId ||
+      task.constituency?.parliament?.zone?.state?.organisationId === scope.organisationId ||
+      task.mandal?.constituency?.parliament?.zone?.state?.organisationId === scope.organisationId ||
+      task.village?.mandal?.constituency?.parliament?.zone?.state?.organisationId === scope.organisationId ||
+      task.booth?.village?.mandal?.constituency?.parliament?.zone?.state?.organisationId === scope.organisationId;
+
+    if (!belongsToOrg) return false;
+
+    // High Command and State Admin have full access within their tenant
+    if (scope.role === 'HIGH_COMMAND' || scope.role === 'STATE_ADMIN') return true;
 
     // Creator always has full access
     if (task.createdById === (actorId || scope.userId)) return true;
@@ -88,6 +142,10 @@ export class TasksService {
         createdBy: true,
         assignee: true,
         assignments: { include: { user: true } },
+        constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } },
+        mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } },
+        village: { include: { mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } } } },
+        booth: { include: { village: { include: { mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } } } } } },
         statusHistory: { orderBy: { changedAt: 'desc' } },
       },
     });
@@ -111,6 +169,12 @@ export class TasksService {
 
   static async createTask(dto: any, actorId: string, scope?: import('../../common/types.js').UserHierarchyScope) {
     if (scope && !scope.isGlobalScope) {
+      if (!scope.organisationId) {
+        const err: any = new Error('Tenant context required');
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN';
+        throw err;
+      }
       if (dto.unitId && !scope.accessibleUnitIds.has(dto.unitId)) {
         const err: any = new Error(`Access denied: Geographical node ${dto.unitId} is outside your authorized hierarchy scope.`);
         err.statusCode = 403;
@@ -203,9 +267,19 @@ export class TasksService {
   }
 
   static async updateTask(id: string, dto: any, actorId: string, scope?: import('../../common/types.js').UserHierarchyScope) {
+    const TASK_ACCESS_INCLUDE = {
+      createdBy: true,
+      assignee: true,
+      assignments: { include: { user: true } },
+      constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } },
+      mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } },
+      village: { include: { mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } } } },
+      booth: { include: { village: { include: { mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } } } } } },
+    };
+
     const existing = await prisma.task.findUnique({
       where: { id },
-      include: { assignments: true },
+      include: TASK_ACCESS_INCLUDE,
     });
     if (!existing) {
       const err: any = new Error('Task not found');
@@ -246,9 +320,19 @@ export class TasksService {
   }
 
   static async assignTask(id: string, userIds: string[], actorId: string, scope?: import('../../common/types.js').UserHierarchyScope) {
+    const TASK_ACCESS_INCLUDE = {
+      createdBy: true,
+      assignee: true,
+      assignments: { include: { user: true } },
+      constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } },
+      mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } },
+      village: { include: { mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } } } },
+      booth: { include: { village: { include: { mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } } } } } },
+    };
+
     const task = await prisma.task.findUnique({
       where: { id },
-      include: { assignments: true },
+      include: TASK_ACCESS_INCLUDE,
     });
     if (!task) {
       const err: any = new Error('Task not found');
@@ -298,9 +382,19 @@ export class TasksService {
   }
 
   static async updateTaskStatus(id: string, status: TaskStatus, comments?: string, actorId?: string, scope?: import('../../common/types.js').UserHierarchyScope) {
+    const TASK_ACCESS_INCLUDE = {
+      createdBy: true,
+      assignee: true,
+      assignments: { include: { user: true } },
+      constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } },
+      mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } },
+      village: { include: { mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } } } },
+      booth: { include: { village: { include: { mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } } } } } },
+    };
+
     const existing = await prisma.task.findUnique({
       where: { id },
-      include: { assignments: true },
+      include: TASK_ACCESS_INCLUDE,
     });
     if (!existing) {
       const err: any = new Error('Task not found');

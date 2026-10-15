@@ -4,6 +4,7 @@ import { prisma } from '../../lib/prisma.js';
 import { errorResponse, successResponse } from '../../common/response.js';
 import { validateBody } from '../../common/validation.js';
 import { authenticate } from '../../middleware/auth.js';
+import { assertUnitAccess, populateHierarchyScope } from '../../middleware/rbac.js';
 import { AIService } from './ai.service.js';
 
 const aiQuerySchema = z.object({
@@ -19,11 +20,27 @@ const aiReportSchema = z.object({
 
 export async function aiRoutes(fastify: FastifyInstance) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', populateHierarchyScope);
 
   // List AI strategic insights
   fastify.get('/insights', async (req: FastifyRequest<{ Querystring: { constituencyId?: string } }>, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const orgId = req.user?.organisationId;
+
+    if (!isSuperAdmin && !orgId) {
+      return reply.send(successResponse([]));
+    }
+
+    const where: any = {};
+    if (!isSuperAdmin && orgId) {
+      where.constituency = { parliament: { zone: { state: { organisationId: orgId } } } };
+    }
+    if (req.query.constituencyId) {
+      where.constituencyId = req.query.constituencyId;
+    }
+
     const items = await prisma.aIInsight.findMany({
-      where: req.query.constituencyId ? { constituencyId: req.query.constituencyId } : undefined,
+      where,
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
@@ -31,8 +48,24 @@ export async function aiRoutes(fastify: FastifyInstance) {
   });
 
   // News monitoring feed
-  fastify.get('/news', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/news', async (req: FastifyRequest<{ Querystring: { constituencyId?: string } }>, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const orgId = req.user?.organisationId;
+
+    if (!isSuperAdmin && !orgId) {
+      return reply.send(successResponse([]));
+    }
+
+    const where: any = {};
+    if (!isSuperAdmin && orgId) {
+      where.constituency = { parliament: { zone: { state: { organisationId: orgId } } } };
+    }
+    if (req.query.constituencyId) {
+      where.constituencyId = req.query.constituencyId;
+    }
+
     const items = await prisma.newsArticle.findMany({
+      where,
       orderBy: { publishedAt: 'desc' },
       take: 20,
     });
@@ -40,8 +73,24 @@ export async function aiRoutes(fastify: FastifyInstance) {
   });
 
   // Social media trends
-  fastify.get('/social-trends', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/social-trends', async (req: FastifyRequest<{ Querystring: { constituencyId?: string } }>, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const orgId = req.user?.organisationId;
+
+    if (!isSuperAdmin && !orgId) {
+      return reply.send(successResponse([]));
+    }
+
+    const where: any = {};
+    if (!isSuperAdmin && orgId) {
+      where.constituency = { parliament: { zone: { state: { organisationId: orgId } } } };
+    }
+    if (req.query.constituencyId) {
+      where.constituencyId = req.query.constituencyId;
+    }
+
     const items = await prisma.socialTrend.findMany({
+      where,
       orderBy: { trendingRank: 'asc' },
       take: 20,
     });
@@ -50,8 +99,23 @@ export async function aiRoutes(fastify: FastifyInstance) {
 
   // Election scenario projections
   fastify.get('/projections', async (req: FastifyRequest<{ Querystring: { constituencyId?: string } }>, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const orgId = req.user?.organisationId;
+
+    if (!isSuperAdmin && !orgId) {
+      return reply.send(successResponse([]));
+    }
+
+    const where: any = {};
+    if (!isSuperAdmin && orgId) {
+      where.constituency = { parliament: { zone: { state: { organisationId: orgId } } } };
+    }
+    if (req.query.constituencyId) {
+      where.constituencyId = req.query.constituencyId;
+    }
+
     const projections = await prisma.electionProjection.findMany({
-      where: req.query.constituencyId ? { constituencyId: req.query.constituencyId } : undefined,
+      where,
       orderBy: { computedAt: 'desc' },
       take: 5,
     });
@@ -69,6 +133,10 @@ export async function aiRoutes(fastify: FastifyInstance) {
       }
 
       const { unitId, prompt, language } = req.body;
+      if (!assertUnitAccess(req, reply, unitId)) {
+        return;
+      }
+
       const result = await AIService.queryStrategy(unitId, prompt, language, req.user?.userId);
       return reply.send(successResponse(result));
     },
@@ -85,6 +153,10 @@ export async function aiRoutes(fastify: FastifyInstance) {
       }
 
       const { unitId, language } = req.body;
+      if (!assertUnitAccess(req, reply, unitId)) {
+        return;
+      }
+
       const report = await AIService.generateReport(unitId, language, req.user?.userId);
       return reply.send(successResponse(report));
     },

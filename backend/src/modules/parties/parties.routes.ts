@@ -41,9 +41,21 @@ export async function partiesRoutes(fastify: FastifyInstance) {
       const body = req.body as z.infer<typeof partySchema>;
       const isDraft = body.lifecycleStatus === 'DRAFT';
 
+      const orgId = req.user?.role === RoleType.SUPER_ADMIN && (body as any).organisationId
+        ? (body as any).organisationId
+        : req.user?.organisationId;
+
+      if (req.user?.role !== RoleType.SUPER_ADMIN && !orgId) {
+        return reply.status(403).send({
+          success: false,
+          error: { code: 'FORBIDDEN_TENANT', message: 'Missing organisation context' },
+        });
+      }
+
       const party = await prisma.politicalParty.create({
         data: {
           ...body,
+          organisationId: orgId,
           lifecycleStatus: isDraft ? 'DRAFT' : 'LOCKED',
           isLocked: !isDraft,
           publishedAt: isDraft ? null : new Date(),
@@ -79,6 +91,13 @@ export async function partiesRoutes(fastify: FastifyInstance) {
 
       if (!party) {
         return reply.status(404).send({ success: false, error: { code: 'NOT_FOUND', message: 'Party not found' } });
+      }
+
+      if (req.user?.role !== RoleType.SUPER_ADMIN && party.organisationId !== req.user?.organisationId) {
+        return reply.status(403).send({
+          success: false,
+          error: { code: 'FORBIDDEN_TENANT', message: 'Access denied: Party belongs to another organization' },
+        });
       }
 
       if (party.isLocked || party.lifecycleStatus === 'LOCKED') {
@@ -124,6 +143,13 @@ export async function partiesRoutes(fastify: FastifyInstance) {
         return reply.status(404).send({ success: false, error: { code: 'NOT_FOUND', message: 'Party not found' } });
       }
 
+      if (req.user?.role !== RoleType.SUPER_ADMIN && existingParty.organisationId !== req.user?.organisationId) {
+        return reply.status(403).send({
+          success: false,
+          error: { code: 'FORBIDDEN_TENANT', message: 'Access denied: Party belongs to another organization' },
+        });
+      }
+
       if (existingParty.isLocked || existingParty.lifecycleStatus === 'LOCKED') {
         await logAudit({
           action: AuditAction.UPDATE,
@@ -164,6 +190,36 @@ export async function partiesRoutes(fastify: FastifyInstance) {
 
       if (!existingParty) {
         return reply.status(404).send({ success: false, error: { code: 'NOT_FOUND', message: 'Party not found' } });
+      }
+
+      // STRICT IMMUTABILITY CHECK
+      if (existingParty.isLocked || existingParty.lifecycleStatus === 'LOCKED') {
+        await logAudit({
+          action: AuditAction.DELETE,
+          entityType: 'PoliticalParty',
+          entityId: existingParty.id,
+          req,
+          changes: {
+            status: 'BLOCKED',
+            reason: 'Party is published and immutable (LOCKED)',
+          } as unknown as Prisma.InputJsonValue,
+        });
+
+        return reply.status(403).send({
+          success: false,
+          error: {
+            code: 'PARTY_CONFIGURATION_LOCKED',
+            message: 'Party configuration is published, locked and immutable. Deletion is not permitted.',
+          },
+        });
+      }
+
+      // TENANT ISOLATION CHECK
+      if (req.user?.role !== RoleType.SUPER_ADMIN && existingParty.organisationId !== req.user?.organisationId) {
+        return reply.status(403).send({
+          success: false,
+          error: { code: 'FORBIDDEN_TENANT', message: 'Access denied: Party belongs to another organization' },
+        });
       }
 
       await prisma.$transaction(async (tx) => {

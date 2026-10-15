@@ -399,6 +399,60 @@ export async function computeUserHierarchyScope(userId: string): Promise<UserHie
       accessibleVoterGroupIds.add(assignment.voterGroupId);
       if (assignment.boothId) accessibleBoothIds.add(assignment.boothId);
     }
+  } else if ((role === RoleType.STATE_ADMIN || role === RoleType.HIGH_COMMAND) && user.organisationId) {
+    const orgStates = await prisma.state.findMany({
+      where: { organisationId: user.organisationId },
+      include: {
+        zones: {
+          include: {
+            parliaments: {
+              include: {
+                constituencies: {
+                  include: {
+                    mandals: {
+                      include: {
+                        villages: {
+                          include: {
+                            booths: {
+                              include: {
+                                voterGroups: true,
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    for (const state of orgStates) {
+      accessibleStateIds.add(state.id);
+      state.zones.forEach((z) => {
+        accessibleZoneIds.add(z.id);
+        z.parliaments.forEach((p) => {
+          accessibleParliamentIds.add(p.id);
+          p.constituencies.forEach((c) => {
+            accessibleConstituencyIds.add(c.id);
+            c.mandals.forEach((m) => {
+              accessibleMandalIds.add(m.id);
+              m.villages.forEach((v) => {
+                accessibleVillageIds.add(v.id);
+                v.booths.forEach((b) => {
+                  accessibleBoothIds.add(b.id);
+                  b.voterGroups.forEach((vg) => accessibleVoterGroupIds.add(vg.id));
+                });
+              });
+            });
+          });
+        });
+      });
+    }
   }
 
   // Recursive organizationUnit subtree traversal for unitId

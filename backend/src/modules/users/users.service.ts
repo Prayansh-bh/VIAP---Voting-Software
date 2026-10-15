@@ -3,13 +3,25 @@ import { AuditAction, Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { logAudit } from '../../middleware/audit.js';
 import { CreateUserDto, UpdateUserDto, UpdateUserStatusDto, UserQueryDto } from './users.schema.js';
-
 export class UsersService {
-  static async listUsers(query: UserQueryDto, accessibleUnitIds?: Set<string>) {
+  static async listUsers(
+    query: UserQueryDto,
+    accessibleUnitIds?: Set<string>,
+    organisationId?: string | null,
+    isSuperAdmin = false,
+  ) {
     const { page, limit, search, role, unitId, accountStatus } = query;
     const skip = (page - 1) * limit;
 
+    if (!isSuperAdmin && !organisationId) {
+      return { total: 0, items: [], page, limit };
+    }
+
     const where: Prisma.UserWhereInput = {};
+
+    if (!isSuperAdmin || organisationId) {
+      where.organisationId = organisationId;
+    }
 
     if (role) where.role = role;
     if (accountStatus) where.accountStatus = accountStatus;

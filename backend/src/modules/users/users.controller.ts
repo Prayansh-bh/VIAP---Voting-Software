@@ -1,6 +1,6 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { paginatedResponse, successResponse } from '../../common/response.js';
-import { assertRoleHierarchy, assertUnitAccess, assertUserScope } from '../../middleware/rbac.js';
+import { assertOrganisationAccess, assertRoleHierarchy, assertUnitAccess, assertUserScope } from '../../middleware/rbac.js';
 import { UsersService } from './users.service.js';
 
 export class UsersController {
@@ -8,19 +8,35 @@ export class UsersController {
     const query = req.query as any;
     if (query?.unitId && !assertUnitAccess(req, reply, query.unitId)) return;
 
-    const result = await UsersService.listUsers(query, req.hierarchyScope?.accessibleUnitIds);
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const result = await UsersService.listUsers(
+      query,
+      req.hierarchyScope?.accessibleUnitIds,
+      req.user?.organisationId,
+      isSuperAdmin,
+    );
     return reply.status(200).send(paginatedResponse(result.items, result.total, result.page, result.limit));
   }
 
   static async getUser(req: FastifyRequest, reply: FastifyReply) {
     const params = req.params as { id: string };
     const user = await UsersService.getUserById(params.id);
+    if (!assertOrganisationAccess(req, reply, user.organisationId)) return;
     if (!assertUnitAccess(req, reply, user.unitId)) return;
     return reply.status(200).send(successResponse(user));
   }
 
   static async createUser(req: FastifyRequest, reply: FastifyReply) {
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
     const body = req.body as any;
+
+    if (!isSuperAdmin) {
+      if (!req.user?.organisationId) {
+        return reply.status(403).send({ success: false, error: { code: 'FORBIDDEN', message: 'Tenant context required' } });
+      }
+      body.organisationId = req.user.organisationId;
+    }
+
     if (body?.unitId && !assertUnitAccess(req, reply, body.unitId)) return;
     if (body?.role && !assertRoleHierarchy(req.user!.role, body.role)) {
       return reply.status(403).send({ success: false, error: { code: 'VERTICAL_PRIVILEGE_VIOLATION', message: `Cannot create user with role (${body.role}) higher than or equal to your own.` } });

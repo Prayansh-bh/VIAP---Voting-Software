@@ -176,6 +176,8 @@ model Organisation {
   users           User[]
   roles           Role[]
   cmsConfigs      CMSConfiguration[]
+  announcements   Announcement[]
+  trainingVideos  TrainingVideo[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
@@ -897,11 +899,14 @@ model TrainingVideo {
   isActive        Boolean              @default(true)
   unitId          String?              @db.Uuid
   unit            OrganizationUnit?    @relation("UnitTrainings", fields: [unitId], references: [id], onDelete: SetNull)
+  organisationId  String?              @db.Uuid
+  organisation    Organisation?        @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   assignments     TrainingAssignment[]
   progress        TrainingProgress[]
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
 
+  @@index([organisationId])
   @@index([category])
   @@index([isActive])
 }
@@ -1078,6 +1083,8 @@ model ElectionProjection {
 
 model Announcement {
   id              String           @id @default(uuid()) @db.Uuid
+  organisationId  String?          @db.Uuid
+  organisation    Organisation?    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   title           String
   content         String
   priority        TaskPriority     @default(HIGH)
@@ -1087,6 +1094,7 @@ model Announcement {
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
+  @@index([organisationId])
   @@index([priority])
   @@index([createdAt])
 }
