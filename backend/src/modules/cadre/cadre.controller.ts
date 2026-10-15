@@ -8,14 +8,27 @@ export class CadreController {
   static async listCadre(req: FastifyRequest<{ Querystring: { page?: string; limit?: string } }>, reply: FastifyReply) {
     const page = Math.max(1, Number(req.query?.page) || 1);
     const limit = Math.min(200, Math.max(1, Number(req.query?.limit) || 100));
-    const items = await CadreService.listCadres(req.hierarchyScope?.accessibleUnitIds, page, limit);
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const items = await CadreService.listCadres(
+      req.hierarchyScope?.accessibleUnitIds,
+      page,
+      limit,
+      req.user?.organisationId,
+      isSuperAdmin,
+    );
     return reply.send(successResponse(items));
   }
 
   static async createCadre(req: FastifyRequest, reply: FastifyReply) {
     const body = req.body as any;
     if (body?.userId && !(await assertUserScope(req, reply, body.userId))) return;
-    const item = await CadreService.createCadre(body, req.user!.userId);
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const item = await CadreService.createCadre(
+      body,
+      req.user!.userId,
+      req.user?.organisationId,
+      isSuperAdmin,
+    );
     return reply.status(201).send(successResponse(item, 'Cadre created'));
   }
 
@@ -59,13 +72,34 @@ export class CadreController {
     return reply.send(successResponse(item, 'Cadre updated'));
   }
 
+  static async deleteCadre(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const result = await CadreService.deleteCadre(
+      req.params.id,
+      req.user!.userId,
+      req.user?.organisationId,
+      isSuperAdmin,
+    );
+    return reply.send(successResponse(result, 'Cadre profile deleted successfully'));
+  }
+
   static async getCadreNetwork(req: FastifyRequest, reply: FastifyReply) {
-    const network = await CadreService.getCadreNetwork(req.hierarchyScope?.accessibleUnitIds);
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const network = await CadreService.getCadreNetwork(
+      req.hierarchyScope?.accessibleUnitIds,
+      req.user?.organisationId,
+      isSuperAdmin,
+    );
     return reply.send(successResponse(network));
   }
 
   static async getCadrePerformance(req: FastifyRequest, reply: FastifyReply) {
-    const perf = await CadreService.getCadrePerformance(req.hierarchyScope?.accessibleUnitIds);
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const perf = await CadreService.getCadrePerformance(
+      req.hierarchyScope?.accessibleUnitIds,
+      req.user?.organisationId,
+      isSuperAdmin,
+    );
     return reply.send(successResponse(perf));
   }
 }

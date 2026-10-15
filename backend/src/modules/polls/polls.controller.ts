@@ -29,4 +29,23 @@ export class PollsController {
     const poll = await PollsService.closePoll(req.params.id, user, req.hierarchyScope);
     return reply.status(200).send(successResponse(poll, 'Poll closed successfully'));
   }
+
+  static async getPoll(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    const user = (req as any).user;
+    const poll = await PollsService.getPollById(req.params.id, user, req.hierarchyScope);
+    return reply.status(200).send(successResponse(poll));
+  }
+
+  static async updatePoll(req: FastifyRequest<{ Params: { id: string }; Body: any }>, reply: FastifyReply) {
+    const user = (req as any).user;
+    const poll = await PollsService.updatePoll(req.params.id, req.body, user, req.hierarchyScope);
+    return reply.status(200).send(successResponse(poll, 'Poll updated successfully'));
+  }
+
+  static async deletePoll(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    const user = (req as any).user;
+    const result = await PollsService.deletePoll(req.params.id, user, req.hierarchyScope);
+    const message = (result as any).softArchived ? 'Poll soft-archived to preserve votes' : 'Poll deleted successfully';
+    return reply.status(200).send(successResponse(result, message));
+  }
 }

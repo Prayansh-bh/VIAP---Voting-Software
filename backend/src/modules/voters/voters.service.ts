@@ -677,15 +677,78 @@ export class VotersService {
   }
 
   static async deleteVoter(id: string, actorId: string) {
-    const existing = await prisma.voter.findUnique({ where: { id } });
-    if (!existing) throw new Error('Voter not found');
+    const existing = await prisma.voter.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: {
+            liveVoteEvents: true,
+            voteTrackings: true,
+          },
+        },
+      },
+    });
+
+    if (!existing) {
+      const err: any = new Error('Voter not found');
+      err.statusCode = 404;
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+
+    const hasVoteHistory =
+      existing.voteStatus === 'VOTE_DONE' ||
+      (existing._count.liveVoteEvents ?? 0) > 0 ||
+      (existing._count.voteTrackings ?? 0) > 0;
+
+    if (hasVoteHistory) {
+      // Soft-archive voter to preserve election voting and audit history
+      await prisma.$transaction([
+        prisma.voter.update({
+          where: { id },
+          data: {
+            voterStatus: 'UNKNOWN',
+            assignedInchargeId: null,
+          },
+        }),
+        prisma.voterStatusHistory.create({
+          data: {
+            voterId: id,
+            previousStatus: existing.voterStatus,
+            newStatus: 'UNKNOWN',
+            changedById: actorId,
+            reason: 'VOTER_SOFT_ARCHIVED_PRESERVE_ELECTION_DATA',
+          },
+        }),
+      ]);
+
+      await logAudit({
+        action: AuditAction.STATUS_CHANGE,
+        entityType: 'Voter',
+        entityId: id,
+        userId: actorId,
+        unitId: existing.unitId ?? undefined,
+        metadata: {
+          epicNumber: existing.epicNumber,
+          name: existing.name,
+          softArchived: true,
+          reason: 'ELECTION_VOTE_RECORDS_PRESERVED',
+        },
+      });
+
+      return {
+        id,
+        deleted: false,
+        softArchived: true,
+        voterStatus: 'UNKNOWN',
+        message: 'Voter soft-archived to preserve election voting history',
+      };
+    }
 
     await prisma.$transaction([
       prisma.voterStatusHistory.deleteMany({ where: { voterId: id } }),
       prisma.fakeVoterFlag.deleteMany({ where: { voterId: id } }),
       prisma.voterMigration.deleteMany({ where: { voterId: id } }),
-      prisma.voteTracking.deleteMany({ where: { voterId: id } }),
-      prisma.liveVoteEvent.deleteMany({ where: { voterId: id } }),
       prisma.voterAssignment.deleteMany({ where: { voterId: id } }),
       prisma.voter.delete({ where: { id } }),
     ]);
@@ -696,9 +759,9 @@ export class VotersService {
       entityId: id,
       userId: actorId,
       unitId: existing.unitId ?? undefined,
-      metadata: { epicNumber: existing.epicNumber, name: existing.name },
+      metadata: { epicNumber: existing.epicNumber, name: existing.name, deleted: true },
     });
 
-    return { id, deleted: true };
+    return { id, deleted: true, softArchived: false };
   }
 }

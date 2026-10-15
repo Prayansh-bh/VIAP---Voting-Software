@@ -20,7 +20,8 @@ export class UsersController {
 
   static async getUser(req: FastifyRequest, reply: FastifyReply) {
     const params = req.params as { id: string };
-    const user = await UsersService.getUserById(params.id);
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const user = await UsersService.getUserById(params.id, req.user?.organisationId, isSuperAdmin);
     if (!assertOrganisationAccess(req, reply, user.organisationId)) return;
     if (!assertUnitAccess(req, reply, user.unitId)) return;
     return reply.status(200).send(successResponse(user));
@@ -51,7 +52,8 @@ export class UsersController {
     if (!(await assertUserScope(req, reply, params.id, body?.role))) return;
     if (body?.unitId && !assertUnitAccess(req, reply, body.unitId)) return;
 
-    const user = await UsersService.updateUser(params.id, body, req.user!.userId);
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const user = await UsersService.updateUser(params.id, body, req.user!.userId, req.user?.organisationId, isSuperAdmin);
     return reply.status(200).send(successResponse(user, 'User updated successfully'));
   }
 
@@ -60,7 +62,8 @@ export class UsersController {
     const body = req.body as any;
     if (!(await assertUserScope(req, reply, params.id))) return;
 
-    const user = await UsersService.updateUserStatus(params.id, body, req.user!.userId);
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const user = await UsersService.updateUserStatus(params.id, body, req.user!.userId, req.user?.organisationId, isSuperAdmin);
     return reply.status(200).send(successResponse(user, 'User status updated successfully'));
   }
 
@@ -68,7 +71,9 @@ export class UsersController {
     const params = req.params as { id: string };
     if (!(await assertUserScope(req, reply, params.id))) return;
 
-    const result = await UsersService.deleteUser(params.id, req.user!.userId);
-    return reply.status(200).send(successResponse(result, 'User deleted successfully'));
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const result = await UsersService.deleteUser(params.id, req.user!.userId, req.user?.organisationId, isSuperAdmin);
+    const message = (result as any).softArchived ? 'User soft-archived to preserve audit history' : 'User deleted successfully';
+    return reply.status(200).send(successResponse(result, message));
   }
 }

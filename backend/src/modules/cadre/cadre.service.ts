@@ -3,10 +3,26 @@ import { prisma } from '../../lib/prisma.js';
 import { logAudit } from '../../middleware/audit.js';
 
 export class CadreService {
-  static async listCadres(accessibleUnitIds?: Set<string>, page = 1, limit = 100) {
+  static async listCadres(
+    accessibleUnitIds?: Set<string>,
+    page = 1,
+    limit = 100,
+    organisationId?: string | null,
+    isSuperAdmin = false,
+  ) {
+    if (!isSuperAdmin && !organisationId) {
+      return [];
+    }
+
     const where: any = {};
+    if (!isSuperAdmin || organisationId) {
+      where.user = { organisationId };
+    }
     if (accessibleUnitIds && accessibleUnitIds.size > 0) {
-      where.user = { unitId: { in: Array.from(accessibleUnitIds) } };
+      where.user = {
+        ...(where.user || {}),
+        unitId: { in: Array.from(accessibleUnitIds) },
+      };
     }
 
     const safePage = Math.max(1, Number(page) || 1);
@@ -26,7 +42,22 @@ export class CadreService {
     });
   }
 
-  static async createCadre(dto: any, actorId: string) {
+  static async createCadre(dto: any, actorId: string, actorOrgId?: string | null, isSuperAdmin = false) {
+    const user = await prisma.user.findUnique({ where: { id: dto.userId } });
+    if (!user) {
+      const err: any = new Error('User not found');
+      err.statusCode = 404;
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+
+    if (!isSuperAdmin && actorOrgId && user.organisationId !== actorOrgId) {
+      const err: any = new Error('Access denied: Target user belongs to another organization');
+      err.statusCode = 403;
+      err.code = 'FORBIDDEN_TENANT';
+      throw err;
+    }
+
     const safeData: any = {
       userId: dto.userId,
       skills: dto.skills || [],
@@ -107,8 +138,51 @@ export class CadreService {
     return cadre;
   }
 
-  static async getCadreNetwork(accessibleUnitIds?: Set<string>) {
+  static async deleteCadre(id: string, actorId: string, actorOrgId?: string | null, isSuperAdmin = false) {
+    const existing = await prisma.cadre.findUnique({
+      where: { id },
+      include: { user: true },
+    });
+    if (!existing) {
+      const err: any = new Error('Cadre profile not found');
+      err.statusCode = 404;
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+
+    if (!isSuperAdmin && (!actorOrgId || existing.user?.organisationId !== actorOrgId)) {
+      const err: any = new Error('Access denied: Cadre belongs to another organization');
+      err.statusCode = 403;
+      err.code = 'FORBIDDEN_TENANT';
+      throw err;
+    }
+
+    await prisma.cadre.delete({ where: { id } });
+
+    await logAudit({
+      action: AuditAction.DELETE,
+      entityType: 'Cadre',
+      entityId: id,
+      userId: actorId,
+      metadata: { userId: existing.userId },
+    });
+
+    return { id, deleted: true };
+  }
+
+  static async getCadreNetwork(
+    accessibleUnitIds?: Set<string>,
+    organisationId?: string | null,
+    isSuperAdmin = false,
+  ) {
+    if (!isSuperAdmin && !organisationId) {
+      return [];
+    }
+
     const where: any = {};
+    if (!isSuperAdmin || organisationId) {
+      where.organisationId = organisationId;
+    }
     if (accessibleUnitIds && accessibleUnitIds.size > 0) {
       where.unitId = { in: Array.from(accessibleUnitIds) };
     }
@@ -152,8 +226,12 @@ export class CadreService {
     });
   }
 
-  static async getCadrePerformance(accessibleUnitIds?: Set<string>) {
-    const network = await this.getCadreNetwork(accessibleUnitIds);
+  static async getCadrePerformance(
+    accessibleUnitIds?: Set<string>,
+    organisationId?: string | null,
+    isSuperAdmin = false,
+  ) {
+    const network = await this.getCadreNetwork(accessibleUnitIds, organisationId, isSuperAdmin);
     const topPerformers = [...network].sort((a, b) => b.performanceScore - a.performanceScore).slice(0, 10);
     const needsAttention = [...network].filter((c) => c.performanceScore < 60 || c.openTasks > 3);
 

@@ -12,6 +12,7 @@ export async function cadreRoutes(fastify: FastifyInstance) {
   fastify.get('/', CadreController.listCadre);
   fastify.post('/', { preValidation: [validateBody(createCadreSchema)] }, CadreController.createCadre);
   fastify.patch('/:id', { preValidation: [validateBody(updateCadreSchema)] }, CadreController.updateCadre);
+  fastify.delete('/:id', CadreController.deleteCadre);
   fastify.get('/network', CadreController.getCadreNetwork);
   fastify.get('/performance', CadreController.getCadrePerformance);
 }

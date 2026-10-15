@@ -278,4 +278,199 @@ export class PollsService {
 
     return poll;
   }
+
+  static async getPollById(pollId: string, user: AuthenticatedUserPayload, scope?: UserHierarchyScope) {
+    const poll = await prisma.poll.findUnique({
+      where: { id: pollId },
+      include: {
+        createdBy: { select: { organisationId: true } },
+        options: {
+          include: {
+            _count: {
+              select: { votes: true },
+            },
+          },
+          orderBy: { order: 'asc' },
+        },
+        votes: {
+          where: { userId: user.userId },
+        },
+      },
+    });
+
+    if (!poll) {
+      const err: any = new Error('Poll not found');
+      err.statusCode = 404;
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+
+    const isSuperAdmin = user.role === 'SUPER_ADMIN';
+    if (!isSuperAdmin) {
+      if (!user.organisationId || poll.createdBy?.organisationId !== user.organisationId) {
+        const err: any = new Error('Access denied: Poll belongs to another organization.');
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_TENANT';
+        throw err;
+      }
+
+      if (poll.unitId && scope && !scope.isGlobalScope && !scope.accessibleUnitIds.has(poll.unitId)) {
+        const err: any = new Error('Access denied: Poll is outside your authorized hierarchy scope.');
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_SCOPE';
+        throw err;
+      }
+    }
+
+    const totalVotes = poll.options.reduce((sum: number, opt: any) => sum + opt._count.votes, 0);
+    const userVote = poll.votes[0] || null;
+
+    return {
+      id: poll.id,
+      title: poll.title,
+      description: poll.description,
+      targetLevel: poll.targetLevel,
+      status: poll.status,
+      expiresAt: poll.expiresAt,
+      createdAt: poll.createdAt,
+      totalVotes,
+      hasVoted: !!userVote,
+      userVotedOptionId: userVote?.optionId || null,
+      options: poll.options.map((opt: any) => ({
+        id: opt.id,
+        label: opt.label,
+        order: opt.order,
+        votesCount: opt._count.votes,
+      })),
+    };
+  }
+
+  static async updatePoll(pollId: string, dto: any, user: AuthenticatedUserPayload, scope?: UserHierarchyScope) {
+    const existing = await prisma.poll.findUnique({
+      where: { id: pollId },
+      include: { createdBy: { select: { organisationId: true } } },
+    });
+
+    if (!existing) {
+      const err: any = new Error('Poll not found');
+      err.statusCode = 404;
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+
+    const isSuperAdmin = user.role === 'SUPER_ADMIN';
+    if (!isSuperAdmin) {
+      if (!user.organisationId || existing.createdBy?.organisationId !== user.organisationId) {
+        const err: any = new Error('Access denied: Poll belongs to another organization.');
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_TENANT';
+        throw err;
+      }
+
+      if (scope && !scope.isGlobalScope) {
+        const isCreator = existing.createdById === user.userId;
+        const isUnitAdmin = existing.unitId && scope.accessibleUnitIds.has(existing.unitId);
+        if (!isCreator && !isUnitAdmin && user.role !== 'STATE_ADMIN' && user.role !== 'HIGH_COMMAND') {
+          const err: any = new Error('Access denied: You do not have permission to modify this poll.');
+          err.statusCode = 403;
+          err.code = 'FORBIDDEN_SCOPE';
+          throw err;
+        }
+      }
+    }
+
+    const data: any = {};
+    if (dto.title) data.title = dto.title;
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.expiresAt) data.expiresAt = new Date(dto.expiresAt);
+    if (dto.status) data.status = dto.status;
+
+    const poll = await prisma.poll.update({
+      where: { id: pollId },
+      data,
+      include: { options: true },
+    });
+
+    await logAudit({
+      action: AuditAction.UPDATE,
+      entityType: 'Poll',
+      entityId: poll.id,
+      userId: user.userId,
+      changes: data,
+    });
+
+    return poll;
+  }
+
+  static async deletePoll(pollId: string, user: AuthenticatedUserPayload, scope?: UserHierarchyScope) {
+    const existing = await prisma.poll.findUnique({
+      where: { id: pollId },
+      include: {
+        createdBy: { select: { organisationId: true } },
+        _count: { select: { votes: true } },
+      },
+    });
+
+    if (!existing) {
+      const err: any = new Error('Poll not found');
+      err.statusCode = 404;
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+
+    const isSuperAdmin = user.role === 'SUPER_ADMIN';
+    if (!isSuperAdmin) {
+      if (!user.organisationId || existing.createdBy?.organisationId !== user.organisationId) {
+        const err: any = new Error('Access denied: Poll belongs to another organization.');
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_TENANT';
+        throw err;
+      }
+
+      if (scope && !scope.isGlobalScope) {
+        const isCreator = existing.createdById === user.userId;
+        const isUnitAdmin = existing.unitId && scope.accessibleUnitIds.has(existing.unitId);
+        if (!isCreator && !isUnitAdmin && user.role !== 'STATE_ADMIN' && user.role !== 'HIGH_COMMAND') {
+          const err: any = new Error('Access denied: You do not have permission to delete this poll.');
+          err.statusCode = 403;
+          err.code = 'FORBIDDEN_SCOPE';
+          throw err;
+        }
+      }
+    }
+
+    const hasVotes = (existing._count.votes ?? 0) > 0;
+    if (hasVotes) {
+      // Soft-archive by closing poll to preserve vote records
+      const poll = await prisma.poll.update({
+        where: { id: pollId },
+        data: { status: 'CLOSED' },
+      });
+
+      await logAudit({
+        action: AuditAction.STATUS_CHANGE,
+        entityType: 'Poll',
+        entityId: pollId,
+        userId: user.userId,
+        metadata: { softArchived: true, title: existing.title, reason: 'VOTES_PRESERVED' },
+      });
+
+      return { id: pollId, deleted: false, softArchived: true, status: 'CLOSED', message: 'Poll closed and soft-archived to preserve votes' };
+    }
+
+    await prisma.$transaction([
+      prisma.pollOption.deleteMany({ where: { pollId } }),
+      prisma.poll.delete({ where: { id: pollId } }),
+    ]);
+
+    await logAudit({
+      action: AuditAction.DELETE,
+      entityType: 'Poll',
+      entityId: pollId,
+      userId: user.userId,
+      metadata: { title: existing.title, deleted: true },
+    });
+
+    return { id: pollId, deleted: true, softArchived: false };
+  }
 }

@@ -446,4 +446,87 @@ export class TasksService {
 
     return task;
   }
+
+  static async deleteTask(id: string, actorId: string, scope?: import('../../common/types.js').UserHierarchyScope) {
+    const TASK_ACCESS_INCLUDE = {
+      createdBy: true,
+      assignee: true,
+      assignments: { include: { user: true } },
+      statusHistory: true,
+      constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } },
+      mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } },
+      village: { include: { mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } } } },
+      booth: { include: { village: { include: { mandal: { include: { constituency: { include: { parliament: { include: { zone: { include: { state: true } } } } } } } } } } } },
+    };
+
+    const existing = await prisma.task.findUnique({
+      where: { id },
+      include: TASK_ACCESS_INCLUDE,
+    });
+
+    if (!existing) {
+      const err: any = new Error('Task not found');
+      err.statusCode = 404;
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+
+    if (scope && !this.isTaskAccessible(existing, scope, actorId, 'update')) {
+      const err: any = new Error('Access denied: You do not have permission to delete this task.');
+      err.statusCode = 403;
+      err.code = 'FORBIDDEN_SCOPE';
+      throw err;
+    }
+
+    const hasHistory =
+      (existing.statusHistory?.length ?? 0) > 0 ||
+      (existing.assignments?.length ?? 0) > 0 ||
+      existing.status === 'COMPLETED';
+
+    if (hasHistory) {
+      // Soft-archive by marking CANCELLED
+      const task = await prisma.task.update({
+        where: { id },
+        data: { status: 'CANCELLED' },
+      });
+
+      await prisma.taskStatusHistory.create({
+        data: {
+          taskId: id,
+          previousStatus: existing.status,
+          newStatus: 'CANCELLED',
+          notes: 'Task cancelled and soft-archived to preserve audit trail',
+          changedById: actorId,
+        },
+      });
+
+      if (actorId) {
+        await logAudit({
+          action: AuditAction.STATUS_CHANGE,
+          entityType: 'Task',
+          entityId: id,
+          userId: actorId,
+          unitId: task.unitId ?? undefined,
+          metadata: { softArchived: true, title: task.title },
+        });
+      }
+
+      return { id, deleted: false, softArchived: true, status: 'CANCELLED', message: 'Task soft-archived to preserve audit history' };
+    }
+
+    await prisma.task.delete({ where: { id } });
+
+    if (actorId) {
+      await logAudit({
+        action: AuditAction.DELETE,
+        entityType: 'Task',
+        entityId: id,
+        userId: actorId,
+        unitId: existing.unitId ?? undefined,
+        metadata: { title: existing.title, deleted: true },
+      });
+    }
+
+    return { id, deleted: true, softArchived: false };
+  }
 }

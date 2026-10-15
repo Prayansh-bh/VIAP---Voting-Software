@@ -93,7 +93,8 @@ export class VotersController {
     if (!(await assertVoterScope(req, reply, params.id))) return;
 
     const result = await VotersService.deleteVoter(params.id, req.user!.userId);
-    return reply.status(200).send(successResponse(result, 'Voter deleted'));
+    const message = (result as any).softArchived ? 'Voter soft-archived to preserve election history' : 'Voter deleted';
+    return reply.status(200).send(successResponse(result, message));
   }
 
   static async bulkImport(req: FastifyRequest, reply: FastifyReply) {

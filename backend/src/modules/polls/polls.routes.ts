@@ -9,6 +9,9 @@ export async function pollsRoutes(fastify: FastifyInstance) {
 
   fastify.get('/', PollsController.listPolls);
   fastify.post('/', PollsController.createPoll);
+  fastify.get('/:id', PollsController.getPoll);
+  fastify.patch('/:id', PollsController.updatePoll);
   fastify.post('/:id/vote', PollsController.vote);
   fastify.patch('/:id/close', PollsController.closePoll);
+  fastify.delete('/:id', PollsController.deletePoll);
 }

@@ -582,11 +582,19 @@ export async function assertVoterScope(req: FastifyRequest, reply: FastifyReply,
       mandalId: true,
       constituencyId: true,
       assignedInchargeId: true,
+      stateId: true,
+      state: { select: { organisationId: true } },
     },
   });
 
   if (!voter) {
     reply.status(404).send(errorResponse('Voter record not found.', 'NOT_FOUND'));
+    return false;
+  }
+
+  // Tenant Isolation Check: Voter must belong to caller's organization
+  if (scope.organisationId && voter.state?.organisationId && voter.state.organisationId !== scope.organisationId) {
+    reply.status(403).send(errorResponse('Access denied: Voter belongs to another organization.', 'FORBIDDEN_TENANT'));
     return false;
   }
 
@@ -633,6 +641,15 @@ export async function assertVoterScope(req: FastifyRequest, reply: FastifyReply,
   if (scope.role === RoleType.CONSTITUENCY_INCHARGE || scope.role === RoleType.VIEWER) {
     if (voter.constituencyId && !scope.accessibleConstituencyIds.has(voter.constituencyId)) {
       reply.status(403).send(errorResponse('Access denied: This voter is not in your assigned Assembly Constituency.', 'FORBIDDEN_VOTER_SCOPE'));
+      return false;
+    }
+    return true;
+  }
+
+  // State / High Command Level
+  if (scope.role === RoleType.STATE_ADMIN || scope.role === RoleType.HIGH_COMMAND) {
+    if (voter.stateId && scope.accessibleStateIds.size > 0 && !scope.accessibleStateIds.has(voter.stateId)) {
+      reply.status(403).send(errorResponse('Access denied: This voter is not in your assigned State.', 'FORBIDDEN_VOTER_SCOPE'));
       return false;
     }
     return true;

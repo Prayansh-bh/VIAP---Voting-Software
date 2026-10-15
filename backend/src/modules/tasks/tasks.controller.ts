@@ -48,4 +48,11 @@ export class TasksController {
     const task = await TasksService.updateTaskStatus(params.id, TaskStatus.COMPLETED, 'Marked completed', req.user!.userId, req.hierarchyScope);
     return reply.send(successResponse(task, 'Task completed'));
   }
+
+  static async deleteTask(req: FastifyRequest, reply: FastifyReply) {
+    const params = req.params as { id: string };
+    const result = await TasksService.deleteTask(params.id, req.user!.userId, req.hierarchyScope);
+    const message = (result as any).softArchived ? 'Task soft-archived to preserve audit history' : 'Task deleted';
+    return reply.send(successResponse(result, message));
+  }
 }

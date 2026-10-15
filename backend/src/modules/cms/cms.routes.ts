@@ -1874,6 +1874,68 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     },
   );
 
+  fastify.get('/announcements/:id', { preHandler: [authenticate] }, async (req: FastifyRequest, reply: FastifyReply) => {
+    const params = req.params as { id: string };
+    const announcement = await prisma.announcement.findUnique({
+      where: { id: params.id },
+    });
+
+    if (!announcement) {
+      return reply.status(404).send({ error: { message: 'Announcement not found' } });
+    }
+
+    if (req.user?.role !== RoleType.SUPER_ADMIN && announcement.organisationId !== req.user?.organisationId) {
+      return reply.status(403).send({ error: { message: 'Access denied: Announcement belongs to another organization' } });
+    }
+
+    return reply.send(successResponse(announcement));
+  });
+
+  fastify.patch(
+    '/announcements/:id',
+    {
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN, RoleType.CONSTITUENCY_INCHARGE)],
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const params = req.params as { id: string };
+      const body = req.body as any;
+
+      const existing = await prisma.announcement.findUnique({
+        where: { id: params.id },
+      });
+
+      if (!existing) {
+        return reply.status(404).send({ error: { message: 'Announcement not found' } });
+      }
+
+      if (req.user?.role !== RoleType.SUPER_ADMIN && existing.organisationId !== req.user?.organisationId) {
+        return reply.status(403).send({ error: { message: 'Access denied: Announcement belongs to another organization' } });
+      }
+
+      const updateData: any = {};
+      if (body.title) updateData.title = body.title;
+      if (body.content) updateData.content = body.content;
+      if (body.priority) updateData.priority = body.priority;
+      if (body.targetLevel !== undefined) updateData.targetLevel = body.targetLevel;
+      if (body.expiresAt) updateData.expiresAt = new Date(body.expiresAt);
+
+      const announcement = await prisma.announcement.update({
+        where: { id: params.id },
+        data: updateData,
+      });
+
+      await logAudit({
+        action: AuditAction.UPDATE,
+        entityType: 'Announcement',
+        entityId: announcement.id,
+        req,
+        changes: updateData as unknown as Prisma.InputJsonValue,
+      });
+
+      return reply.send(successResponse(announcement, 'Announcement updated'));
+    },
+  );
+
   fastify.delete(
     '/announcements/:id',
     {
@@ -1881,6 +1943,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const params = req.params as { id: string };
+      const query = req.query as { archive?: string };
 
       const announcement = await prisma.announcement.findUnique({
         where: { id: params.id },
@@ -1892,6 +1955,23 @@ export async function cmsRoutes(fastify: FastifyInstance) {
 
       if (req.user?.role !== RoleType.SUPER_ADMIN && announcement.organisationId !== req.user?.organisationId) {
         return reply.status(403).send({ error: { message: 'Access denied: Announcement belongs to another organization' } });
+      }
+
+      if (query?.archive === 'true') {
+        const archived = await prisma.announcement.update({
+          where: { id: params.id },
+          data: { expiresAt: new Date() },
+        });
+
+        await logAudit({
+          action: AuditAction.STATUS_CHANGE,
+          entityType: 'Announcement',
+          entityId: params.id,
+          req,
+          changes: { softArchived: true, expiresAt: new Date() },
+        });
+
+        return reply.send(successResponse({ id: params.id, softArchived: true }, 'Announcement expired and soft-archived'));
       }
 
       await prisma.announcement.delete({

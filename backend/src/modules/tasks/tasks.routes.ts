@@ -16,4 +16,5 @@ export async function tasksRoutes(fastify: FastifyInstance) {
   fastify.post('/:id/assign', { preValidation: [validateBody(assignTaskSchema)] }, TasksController.assignTask);
   fastify.patch('/:id/status', { preValidation: [validateBody(updateTaskStatusSchema)] }, TasksController.updateTaskStatus);
   fastify.post('/:id/complete', TasksController.completeTask);
+  fastify.delete('/:id', TasksController.deleteTask);
 }
