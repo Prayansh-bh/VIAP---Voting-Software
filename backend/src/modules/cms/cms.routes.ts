@@ -95,6 +95,19 @@ const announcementSchema = z.object({
   expiresAt: z.string().datetime().optional(),
 });
 
+const tierInchargeInputSchema = z.object({
+  tier: z.string().optional(),
+  tierLevel: z.string().optional(),
+  name: z.string().min(1, 'Incharge name is required'),
+  mobileNumber: z.string().min(10, 'Valid 10-digit mobile number is required'),
+  role: z.nativeEnum(RoleType).optional(),
+  email: z.string().nullish(),
+  unitName: z.string().nullish(),
+  unitId: z.string().uuid().nullish(),
+}).passthrough().refine((data) => data.tier || data.tierLevel, {
+  message: 'Tier or tierLevel is required',
+});
+
 const buildApplicationSchema = z.object({
   id: z.string().nullish(),
   appKey: z.string().nullish(),
@@ -127,6 +140,7 @@ const buildApplicationSchema = z.object({
   candidateName: z.string().nullish(),
   candidateMobile: z.string().nullish(),
   candidateEmail: z.string().nullish(),
+  tierIncharges: z.array(tierInchargeInputSchema).nullish(),
   password: z.string().nullish(),
   tenantCode: z.string().nullish(),
   politicalParties: z.array(z.object({
@@ -250,6 +264,86 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         .replace(/[^A-Za-z0-9]/g, '-')
         .toUpperCase()
         .slice(0, 15);
+
+      // Extract and validate all incoming incharges
+      const incomingIncharges = Array.isArray(body.tierIncharges) && body.tierIncharges.length > 0
+        ? [...body.tierIncharges]
+        : [];
+
+      // Also support legacy candidateMobile if tierIncharges was not explicitly supplied
+      const rawCandidateMobile = (body as any).candidateMobile?.trim();
+      const legacyCandidateMobile = rawCandidateMobile ? rawCandidateMobile.replace(/\D/g, '').slice(-10) : undefined;
+      const candidateName = (body as any).candidateName?.trim() || 'Tenant Administrator';
+      const candidateEmail = (body as any).candidateEmail?.trim().toLowerCase() || `admin@${(body.appName || 'party').toLowerCase().replace(/[^a-z0-9]/g, '')}.org`;
+
+      const primaryRole = body.appScope === 'STATE'
+        ? RoleType.STATE_ADMIN
+        : body.appScope === 'ZONE'
+        ? RoleType.ZONE_INCHARGE
+        : body.appScope === 'PARLIAMENT_MP'
+        ? RoleType.PARLIAMENT_INCHARGE
+        : RoleType.CONSTITUENCY_INCHARGE;
+      const primaryTier = body.appScope === 'STATE'
+        ? 'STATE'
+        : body.appScope === 'ZONE'
+        ? 'ZONE'
+        : body.appScope === 'PARLIAMENT_MP'
+        ? 'PARLIAMENT'
+        : 'CONSTITUENCY';
+
+      if (incomingIncharges.length === 0 && legacyCandidateMobile) {
+        incomingIncharges.push({
+          tier: primaryTier,
+          name: candidateName,
+          mobileNumber: legacyCandidateMobile,
+          role: primaryRole,
+          email: candidateEmail,
+        });
+      }
+
+      // 1. Validate required fields, phone formats, duplicate numbers within the request
+      const seenMobiles = new Set<string>();
+      for (const incharge of incomingIncharges) {
+        const tierKey = ((incharge as any).tierLevel || incharge.tier || 'CONSTITUENCY').toUpperCase();
+        if (!incharge.name || !incharge.name.trim()) {
+          return reply.status(400).send(errorResponse(`Incharge name is required for tier '${tierKey}'.`, 'INVALID_INCHARGE_NAME'));
+        }
+        const cleanMobile = (incharge.mobileNumber || '').replace(/\D/g, '').slice(-10);
+        if (cleanMobile.length < 10) {
+          return reply.status(400).send(errorResponse(`Invalid mobile number '${incharge.mobileNumber}' for tier '${tierKey}'. Must be a valid 10-digit mobile number.`, 'INVALID_PHONE_NUMBER'));
+        }
+        if (seenMobiles.has(cleanMobile)) {
+          return reply.status(400).send(errorResponse(`Duplicate mobile number '${cleanMobile}' specified for multiple tiers. Each configured tier must have a unique mobile number.`, 'DUPLICATE_PHONE_NUMBER'));
+        }
+        seenMobiles.add(cleanMobile);
+
+        const ALLOWED_TIER_ROLES = [
+          RoleType.STATE_ADMIN,
+          RoleType.ZONE_INCHARGE,
+          RoleType.PARLIAMENT_INCHARGE,
+          RoleType.CONSTITUENCY_INCHARGE,
+          RoleType.MANDAL_INCHARGE,
+          RoleType.VILLAGE_INCHARGE,
+          RoleType.BOOTH_PRESIDENT,
+          RoleType.BOOTH_INCHARGE,
+          RoleType.VOTER_100_INCHARGE,
+        ];
+
+        if (incharge.role && !ALLOWED_TIER_ROLES.includes(incharge.role as any)) {
+          return reply.status(400).send(errorResponse(`Invalid role '${incharge.role}' for tier '${tierKey}'.`, 'INVALID_ROLE'));
+        }
+      }
+
+      // 2. Validate existing accounts: reject duplicate existing phone numbers
+      if (seenMobiles.size > 0) {
+        const existingUsers = await prisma.user.findMany({
+          where: { mobileNumber: { in: Array.from(seenMobiles) } },
+          select: { mobileNumber: true },
+        });
+        if (existingUsers.length > 0) {
+          return reply.status(409).send(errorResponse(`Mobile number '${existingUsers[0].mobileNumber}' is already registered to an existing account. Duplicate account registration rejected.`, 'EXISTING_ACCOUNT_CONFLICT'));
+        }
+      }
 
       // Preflight uniqueness check: reject if tenant already exists rather than silently overwriting
       const existingOrg = await prisma.organisation.findFirst({
@@ -449,46 +543,57 @@ export async function cmsRoutes(fastify: FastifyInstance) {
             }
 
             // 6. Sync Political Parties
-            if (body.politicalParties && body.politicalParties.length > 0) {
-              for (let i = 0; i < body.politicalParties.length; i++) {
-                const p = body.politicalParties[i];
-                const partyCode = p.code.trim().toUpperCase();
-                if (!partyCode) continue;
+            const incomingParties = body.politicalParties && body.politicalParties.length > 0
+              ? body.politicalParties
+              : [{
+                  name: body.appName || body.organisationName || 'Default Political Party',
+                  code: (body.activePartyCode || 'TDP').toUpperCase(),
+                  shortName: (body.activePartyCode || 'TDP').toUpperCase().slice(0, 6),
+                  primaryColor: body.primaryColor || '#eab308',
+                  secondaryColor: body.secondaryColor || null,
+                  accentColor: body.accentColor || null,
+                  isActive: true,
+                  sortOrder: 1,
+                }];
 
-                const existingParty = await tx.politicalParty.findUnique({ where: { code: partyCode } });
-                if (!existingParty) {
-                  await tx.politicalParty.create({
-                    data: {
-                      organisationId: org.id,
-                      name: p.name,
-                      code: partyCode,
-                      shortName: p.shortName || partyCode,
-                      primaryColor: p.primaryColor || '#eab308',
-                      secondaryColor: p.secondaryColor || null,
-                      accentColor: p.accentColor || null,
-                      symbolName: p.symbolName || null,
-                      logoUrl: p.logoUrl || null,
-                      isActive: p.isActive !== false,
-                      sortOrder: p.sortOrder !== undefined && p.sortOrder !== null ? p.sortOrder : i,
-                    },
-                  });
-                } else {
-                  await tx.politicalParty.update({
-                    where: { id: existingParty.id },
-                    data: {
-                      name: p.name,
-                      shortName: p.shortName || partyCode,
-                      primaryColor: p.primaryColor || '#eab308',
-                      secondaryColor: p.secondaryColor || null,
-                      accentColor: p.accentColor || null,
-                      symbolName: p.symbolName || null,
-                      logoUrl: p.logoUrl || null,
-                      isActive: p.isActive !== false,
-                      sortOrder: p.sortOrder !== undefined && p.sortOrder !== null ? p.sortOrder : i,
-                      ...(!existingParty.organisationId ? { organisationId: org.id } : {}),
-                    },
-                  });
-                }
+            for (let i = 0; i < incomingParties.length; i++) {
+              const p = incomingParties[i];
+              const partyCode = p.code.trim().toUpperCase();
+              if (!partyCode) continue;
+
+              const existingParty = await tx.politicalParty.findUnique({ where: { code: partyCode } });
+              if (!existingParty) {
+                await tx.politicalParty.create({
+                  data: {
+                    organisationId: org.id,
+                    name: p.name,
+                    code: partyCode,
+                    shortName: p.shortName || partyCode,
+                    primaryColor: p.primaryColor || '#eab308',
+                    secondaryColor: p.secondaryColor || null,
+                    accentColor: p.accentColor || null,
+                    symbolName: p.symbolName || null,
+                    logoUrl: p.logoUrl || null,
+                    isActive: p.isActive !== false,
+                    sortOrder: p.sortOrder !== undefined && p.sortOrder !== null ? p.sortOrder : i,
+                  },
+                });
+              } else {
+                await tx.politicalParty.update({
+                  where: { id: existingParty.id },
+                  data: {
+                    name: p.name,
+                    shortName: p.shortName || partyCode,
+                    primaryColor: p.primaryColor || '#eab308',
+                    secondaryColor: p.secondaryColor || null,
+                    accentColor: p.accentColor || null,
+                    symbolName: p.symbolName || null,
+                    logoUrl: p.logoUrl || null,
+                    isActive: p.isActive !== false,
+                    sortOrder: p.sortOrder !== undefined && p.sortOrder !== null ? p.sortOrder : i,
+                    ...(!existingParty.organisationId ? { organisationId: org.id } : {}),
+                  },
+                });
               }
             }
 
@@ -535,12 +640,44 @@ export async function cmsRoutes(fastify: FastifyInstance) {
               tx,
             );
 
-            // 8. Provision Primary Candidate / Admin Credentials
-            const rawCandidateMobile = (body as any).candidateMobile?.trim();
-            const candidateMobile = rawCandidateMobile ? rawCandidateMobile.replace(/\D/g, '').slice(-10) : undefined;
-            const candidateEmail = (body as any).candidateEmail?.trim().toLowerCase() || `admin@${(body.appName || 'party').toLowerCase().replace(/[^a-z0-9]/g, '')}.org`;
-            const candidateName = (body as any).candidateName?.trim() || 'Tenant Administrator';
+            // In-transaction uniqueness re-check for incharge mobile numbers
+            if (seenMobiles.size > 0) {
+              const inTxExistingUsers = await tx.user.findMany({
+                where: { mobileNumber: { in: Array.from(seenMobiles) } },
+                select: { mobileNumber: true },
+              });
+              if (inTxExistingUsers.length > 0) {
+                const conflictErr: any = new Error(
+                  `Mobile number '${inTxExistingUsers[0].mobileNumber}' is already registered to an existing account. Duplicate account registration rejected.`
+                );
+                conflictErr.code = 'EXISTING_ACCOUNT_CONFLICT';
+                conflictErr.statusCode = 409;
+                throw conflictErr;
+              }
+            }
 
+            // Validate any explicit unit IDs against foreign tenants
+            for (const incharge of incomingIncharges) {
+              if (incharge.unitId) {
+                const targetUnit = await tx.organizationUnit.findUnique({
+                  where: { id: incharge.unitId },
+                });
+                if (!targetUnit) {
+                  const err: any = new Error(`Hierarchy unit '${incharge.unitId}' not found.`);
+                  err.code = 'NOT_FOUND';
+                  err.statusCode = 404;
+                  throw err;
+                }
+                if (!targetUnit.code || !targetUnit.code.includes(org.code.slice(0, 4))) {
+                  const err: any = new Error(`Cannot assign cross-tenant hierarchy unit '${incharge.unitId}'.`);
+                  err.code = 'FORBIDDEN_TENANT';
+                  err.statusCode = 403;
+                  throw err;
+                }
+              }
+            }
+
+            // 8. Ensure hierarchy units down the tree exist for this organisation
             const stateUnitRecord = await tx.organizationUnit.findFirst({
               where: { code: state.code, level: OrgHierarchyLevel.STATE },
             });
@@ -556,81 +693,208 @@ export async function cmsRoutes(fastify: FastifyInstance) {
                 })
               : null;
 
-            const primaryRole = body.appScope === 'STATE'
-              ? RoleType.STATE_ADMIN
-              : body.appScope === 'ZONE'
-              ? RoleType.ZONE_INCHARGE
-              : body.appScope === 'PARLIAMENT_MP'
-              ? RoleType.PARLIAMENT_INCHARGE
-              : RoleType.CONSTITUENCY_INCHARGE;
+            // Ensure Mandal exists for primary constituency
+            const primaryConstituency = createdConstituencies[0];
+            const cleanMandalName = `${primaryConstituency?.name || 'Constituency'} Central Mandal`;
+            let mandalCode = `MD-${org.code.slice(0, 4)}-01`;
+            const mCollision = await tx.mandal.findUnique({ where: { code: mandalCode } });
+            if (mCollision) mandalCode = `MD-${org.code.slice(0, 4)}-${Date.now().toString().slice(-4)}`;
+            const mandalRecord = await tx.mandal.create({
+              data: {
+                constituencyId: primaryConstituency.id,
+                name: cleanMandalName,
+                code: mandalCode,
+                totalVoters: 0,
+              },
+            });
+            const mandalUnitRecord = await tx.organizationUnit.upsert({
+              where: { code: mandalCode },
+              update: { name: cleanMandalName, level: OrgHierarchyLevel.MANDAL, parentId: constUnitRecord?.id },
+              create: { name: cleanMandalName, code: mandalCode, level: OrgHierarchyLevel.MANDAL, parentId: constUnitRecord?.id },
+            });
 
-            const primaryUnitId = body.appScope === 'STATE'
-              ? stateUnitRecord?.id
-              : body.appScope === 'ZONE'
-              ? zoneUnitRecord?.id
-              : body.appScope === 'PARLIAMENT_MP'
-              ? parUnitRecord?.id
-              : constUnitRecord?.id || null;
+            // Ensure Village exists for Mandal
+            const cleanVillageName = `${cleanMandalName} Ward 1`;
+            let villageCode = `VL-${org.code.slice(0, 4)}-01`;
+            const vCollision = await tx.village.findUnique({ where: { code: villageCode } });
+            if (vCollision) villageCode = `VL-${org.code.slice(0, 4)}-${Date.now().toString().slice(-4)}`;
+            const villageRecord = await tx.village.create({
+              data: {
+                mandalId: mandalRecord.id,
+                name: cleanVillageName,
+                code: villageCode,
+                totalVoters: 0,
+              },
+            });
+            const villageUnitRecord = await tx.organizationUnit.upsert({
+              where: { code: villageCode },
+              update: { name: cleanVillageName, level: OrgHierarchyLevel.VILLAGE, parentId: mandalUnitRecord?.id },
+              create: { name: cleanVillageName, code: villageCode, level: OrgHierarchyLevel.VILLAGE, parentId: mandalUnitRecord?.id },
+            });
 
-            let candidateUser: any = null;
-            if (candidateMobile) {
-              candidateUser = await tx.user.upsert({
-                where: { mobileNumber: candidateMobile },
+            // Ensure Booth exists for Village
+            const cleanBoothName = `Polling Station 1`;
+            let boothCode = `BT-${org.code.slice(0, 4)}-01`;
+            const bCollision = await tx.booth.findUnique({ where: { code: boothCode } });
+            if (bCollision) boothCode = `BT-${org.code.slice(0, 4)}-${Date.now().toString().slice(-4)}`;
+            const boothRecord = await tx.booth.create({
+              data: {
+                villageId: villageRecord.id,
+                boothNumber: '1',
+                name: cleanBoothName,
+                code: boothCode,
+                totalVoters: 0,
+              },
+            });
+            const boothUnitRecord = await tx.organizationUnit.upsert({
+              where: { code: boothCode },
+              update: { name: cleanBoothName, level: OrgHierarchyLevel.BOOTH, parentId: villageUnitRecord?.id },
+              create: { name: cleanBoothName, code: boothCode, level: OrgHierarchyLevel.BOOTH, parentId: villageUnitRecord?.id },
+            });
+
+            // Ensure VoterGroup exists for Booth
+            const cleanVgName = `Cluster 1 (1-100)`;
+            let vgCode = `VG-${org.code.slice(0, 4)}-01`;
+            const vgCollision = await tx.voterGroup.findUnique({ where: { code: vgCode } });
+            if (vgCollision) vgCode = `VG-${org.code.slice(0, 4)}-${Date.now().toString().slice(-4)}`;
+            const vgRecord = await tx.voterGroup.create({
+              data: {
+                boothId: boothRecord.id,
+                name: cleanVgName,
+                code: vgCode,
+                rangeStart: 1,
+                rangeEnd: 100,
+                totalVoters: 100,
+              },
+            });
+            const vgUnitRecord = await tx.organizationUnit.upsert({
+              where: { code: vgCode },
+              update: { name: cleanVgName, level: OrgHierarchyLevel.VOTER_GROUP, parentId: boothUnitRecord?.id },
+              create: { name: cleanVgName, code: vgCode, level: OrgHierarchyLevel.VOTER_GROUP, parentId: boothUnitRecord?.id },
+            });
+
+            const tierDataMap: Record<string, { unit: any; role: RoleType; assignment: any }> = {
+              STATE: {
+                unit: stateUnitRecord,
+                role: RoleType.STATE_ADMIN,
+                assignment: { stateId: state.id },
+              },
+              ZONE: {
+                unit: zoneUnitRecord,
+                role: RoleType.ZONE_INCHARGE,
+                assignment: { stateId: state.id, zoneId: zone.id },
+              },
+              PARLIAMENT: {
+                unit: parUnitRecord,
+                role: RoleType.PARLIAMENT_INCHARGE,
+                assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id },
+              },
+              DISTRICT: {
+                unit: constUnitRecord,
+                role: RoleType.CONSTITUENCY_INCHARGE,
+                assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id },
+              },
+              CONSTITUENCY: {
+                unit: constUnitRecord,
+                role: RoleType.CONSTITUENCY_INCHARGE,
+                assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id },
+              },
+              MANDAL: {
+                unit: mandalUnitRecord,
+                role: RoleType.MANDAL_INCHARGE,
+                assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id, mandalId: mandalRecord.id },
+              },
+              VILLAGE: {
+                unit: villageUnitRecord,
+                role: RoleType.VILLAGE_INCHARGE,
+                assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id, mandalId: mandalRecord.id, villageId: villageRecord.id },
+              },
+              BOOTH: {
+                unit: boothUnitRecord,
+                role: RoleType.BOOTH_PRESIDENT,
+                assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id, mandalId: mandalRecord.id, villageId: villageRecord.id, boothId: boothRecord.id },
+              },
+              VOTER_GROUP: {
+                unit: vgUnitRecord,
+                role: RoleType.VOTER_100_INCHARGE,
+                assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id, mandalId: mandalRecord.id, villageId: villageRecord.id, boothId: boothRecord.id, voterGroupId: vgRecord.id },
+              },
+            };
+
+            // Provision each incharge atomically
+            const provisionedIncharges: any[] = [];
+            for (let idx = 0; idx < incomingIncharges.length; idx++) {
+              const incharge = incomingIncharges[idx];
+              const cleanMobile = incharge.mobileNumber.replace(/\D/g, '').slice(-10);
+              const tierKey = ((incharge as any).tierLevel || incharge.tier || 'CONSTITUENCY').toUpperCase();
+              const tierData = tierDataMap[tierKey] || tierDataMap.CONSTITUENCY;
+              const inchargeRole = incharge.role || tierData.role;
+              const resolvedUnitId = incharge.unitId || tierData.unit?.id || null;
+
+              let userCode = `LEADER-${inchargeRole.slice(0, 3)}-${cleanMobile.slice(-4)}`;
+              const codeCollision = await tx.user.findUnique({ where: { userCode } });
+              if (codeCollision) {
+                userCode = `LEADER-${inchargeRole.slice(0, 3)}-${cleanMobile.slice(-4)}-${idx + 1}`;
+              }
+
+              const inchargeUser = await tx.user.upsert({
+                where: { mobileNumber: cleanMobile },
                 update: {
-                  name: candidateName,
-                  email: candidateEmail,
+                  name: incharge.name.trim(),
+                  email: incharge.email?.trim().toLowerCase() || `${inchargeRole.toLowerCase()}-${cleanMobile.slice(-4)}@${org.code.toLowerCase()}.org`,
                   passwordHash,
-                  role: primaryRole,
+                  role: inchargeRole,
                   accountStatus: 'ACTIVE',
                   organisationId: org.id,
-                  unitId: primaryUnitId,
+                  unitId: resolvedUnitId,
                   isVerified: true,
                 },
                 create: {
                   organisationId: org.id,
-                  userCode: `LEADER-${primaryRole.slice(0, 3)}-${candidateMobile.slice(-4)}`,
-                  name: candidateName,
-                  mobileNumber: candidateMobile,
-                  email: candidateEmail,
+                  userCode,
+                  name: incharge.name.trim(),
+                  mobileNumber: cleanMobile,
+                  email: incharge.email?.trim().toLowerCase() || `${inchargeRole.toLowerCase()}-${cleanMobile.slice(-4)}@${org.code.toLowerCase()}.org`,
                   passwordHash,
-                  role: primaryRole,
+                  role: inchargeRole,
                   accountStatus: 'ACTIVE',
                   isVerified: true,
-                  unitId: primaryUnitId,
+                  unitId: resolvedUnitId,
                 },
               });
 
-              if (primaryUnitId) {
+              if (resolvedUnitId) {
                 const existingAssignment = await tx.userHierarchyAssignment.findFirst({
-                  where: { userId: candidateUser.id },
+                  where: { userId: inchargeUser.id },
                 });
                 if (existingAssignment) {
                   await tx.userHierarchyAssignment.update({
                     where: { id: existingAssignment.id },
                     data: {
-                      roleType: primaryRole,
+                      roleType: inchargeRole,
                       isActive: true,
-                      stateId: state.id,
-                      zoneId: zone.id,
-                      parliamentId: parliament.id,
-                      constituencyId: createdConstituencies[0]?.id || null,
+                      ...tierData.assignment,
                     },
                   });
                 } else {
                   await tx.userHierarchyAssignment.create({
                     data: {
-                      userId: candidateUser.id,
-                      roleType: primaryRole,
+                      userId: inchargeUser.id,
+                      roleType: inchargeRole,
                       isActive: true,
-                      stateId: state.id,
-                      zoneId: zone.id,
-                      parliamentId: parliament.id,
-                      constituencyId: createdConstituencies[0]?.id || null,
+                      ...tierData.assignment,
                     },
                   });
                 }
               }
+
+              provisionedIncharges.push({
+                ...inchargeUser,
+                tier: tierKey,
+              });
             }
+
+            const candidateUser = provisionedIncharges[0] || null;
 
             return {
               org,
@@ -640,7 +904,8 @@ export async function cmsRoutes(fastify: FastifyInstance) {
               createdConstituencies,
               updatedConfig,
               candidateUser,
-              primaryRole,
+              primaryRole: candidateUser?.role || primaryRole,
+              provisionedIncharges,
             };
           },
           { timeout: 45000 },
@@ -671,6 +936,15 @@ export async function cmsRoutes(fastify: FastifyInstance) {
           req.log.warn({ err: auditErr }, 'ApplicationBuilder audit logging failed after transaction commit');
         }
 
+        const formattedIncharges = provisionResult.provisionedIncharges.map((u: any) => ({
+          id: u.id,
+          tier: u.tier,
+          name: u.name,
+          mobileNumber: u.mobileNumber,
+          role: u.role,
+          unitId: u.unitId,
+        }));
+
         return reply.status(201).send(
           successResponse(
             {
@@ -691,18 +965,21 @@ export async function cmsRoutes(fastify: FastifyInstance) {
                 appScope: body.appScope,
                 activeHierarchyLevels: body.activeHierarchyLevels,
                 parliamentName: provisionResult.parliament.name,
-                candidateName: (body as any).candidateName,
-                candidateMobile: (body as any).candidateMobile,
+                candidateName: provisionResult.candidateUser?.name || (body as any).candidateName,
+                candidateMobile: provisionResult.candidateUser?.mobileNumber || (body as any).candidateMobile,
                 candidateRole: provisionResult.primaryRole,
+                tierIncharges: formattedIncharges,
                 constituencies: provisionResult.createdConstituencies,
                 parties: allParties,
               },
               credentials: {
-                mobileNumber: (body as any).candidateMobile,
+                mobileNumber: provisionResult.candidateUser?.mobileNumber || (body as any).candidateMobile,
                 role: provisionResult.primaryRole,
                 password: initialPassword || undefined,
                 tenantCode: provisionResult.org.code,
+                tierIncharges: formattedIncharges,
               },
+              tierIncharges: formattedIncharges,
               constituencies: provisionResult.createdConstituencies,
               parties: allParties,
             },

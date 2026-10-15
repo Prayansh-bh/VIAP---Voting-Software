@@ -29,7 +29,7 @@ const ROLE_TO_LEVEL: Record<string, string> = {
 };
 
 interface OtpLoginModalProps {
-  role: CommandRole;
+  role?: CommandRole;
   onClose: () => void;
   onSuccess: (session: UserSession, token: string) => void;
 }
@@ -109,12 +109,18 @@ export const ROLE_DEMO_PROFILES: Array<{
 const DEMO_MOBILE_SET = new Set(ROLE_DEMO_PROFILES.map((p) => p.mobile));
 
 export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModalProps) {
-  const currentDemo = ROLE_DEMO_PROFILES.find((p) => p.roleId === role.id) || {
+  const currentDemo = role ? (ROLE_DEMO_PROFILES.find((p) => p.roleId === role.id) || {
     roleId: role.id,
     name: role.name,
     title: role.subtitle,
     mobile: '9848012345',
     badge: 'Incharge',
+  }) : {
+    roleId: 'CONSTITUENCY_INCHARGE',
+    name: 'Direct Mobile Incharge',
+    title: 'Direct Multi-tier OTP Access',
+    mobile: '9848012345',
+    badge: 'Direct Login',
   };
 
   // Tab: 'login' = Registered Mobile Login, 'demo' = 1-Click Demo Accounts
@@ -183,7 +189,7 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
     setIsSubmitting(true);
 
     try {
-      const response = await requestOtp(targetNum, role.id, channel);
+      const response = await requestOtp(targetNum, role?.id, channel);
 
       setRequestId(response.requestId);
       setCooldown(response.cooldownSeconds || 30);
@@ -248,7 +254,7 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
             </div>
             <div>
               <h3 className="text-sm font-black text-slate-900 leading-tight">Command Station Login</h3>
-              <p className="text-[11px] text-amber-700 font-bold mt-0.5">{role.name}</p>
+              <p className="text-[11px] text-amber-700 font-bold mt-0.5">{role ? role.name : 'Direct Mobile OTP Login'}</p>
             </div>
           </div>
           <button

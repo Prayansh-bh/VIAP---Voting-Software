@@ -135,6 +135,17 @@ const ALL_HIERARCHY_TIERS: HierarchyTierDefinition[] = [
   },
 ];
 
+const TIER_TO_ROLE_DEFAULT: Record<string, { role: string; roleName: string; defaultName: string; defaultUnit: string }> = {
+  STATE: { role: 'STATE_ADMIN', roleName: 'State Incharge', defaultName: 'State Incharge', defaultUnit: 'State Headquarters' },
+  ZONE: { role: 'ZONE_INCHARGE', roleName: 'Zone Coordinator', defaultName: 'Zone Coordinator', defaultUnit: 'Regional Zone HQ' },
+  PARLIAMENT: { role: 'PARLIAMENT_INCHARGE', roleName: 'Parliament Incharge', defaultName: 'Parliament Incharge', defaultUnit: 'Parliament MP Seat' },
+  CONSTITUENCY: { role: 'CONSTITUENCY_INCHARGE', roleName: 'Constituency Incharge', defaultName: 'Constituency MLA Incharge', defaultUnit: 'Assembly Constituency' },
+  MANDAL: { role: 'MANDAL_INCHARGE', roleName: 'Mandal President', defaultName: 'Mandal President', defaultUnit: 'Mandal Division' },
+  VILLAGE: { role: 'VILLAGE_INCHARGE', roleName: 'Village Incharge', defaultName: 'Village Incharge', defaultUnit: 'Village Ward Unit' },
+  BOOTH: { role: 'BOOTH_PRESIDENT', roleName: 'Booth President', defaultName: 'Booth President', defaultUnit: 'Polling Booth Station' },
+  VOTER_GROUP: { role: 'VOTER_100_INCHARGE', roleName: '100 Voter Incharge', defaultName: '100-Voter Incharge', defaultUnit: '100-Voter Cluster Committee' },
+};
+
 const PRESET_THEMES = [
   {
     id: 'tdp_gold',
@@ -315,6 +326,18 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
   const [constituencyName, setConstituencyName] = useState(
     config.constituencies?.[0]?.name || 'Kondapi (SC)'
   );
+
+  // Multi-tier hierarchy incharges configuration state
+  const [tierInchargesState, setTierInchargesState] = useState<Record<string, { name: string; mobileNumber: string; unitName: string }>>({
+    STATE: { name: 'State Incharge', mobileNumber: '9848088888', unitName: 'State Headquarters' },
+    ZONE: { name: 'Zone Coordinator', mobileNumber: '9848099998', unitName: 'Regional Zone HQ' },
+    PARLIAMENT: { name: 'Parliament Incharge', mobileNumber: '9848088887', unitName: 'Ongole Parliament' },
+    CONSTITUENCY: { name: 'Constituency MLA Incharge', mobileNumber: '9848012345', unitName: 'Kondapi Assembly' },
+    MANDAL: { name: 'Mandal President', mobileNumber: '9848010001', unitName: 'Kondapi Mandal' },
+    VILLAGE: { name: 'Village Incharge', mobileNumber: '9848010002', unitName: 'Kondapi Village' },
+    BOOTH: { name: 'Booth President', mobileNumber: '9848010003', unitName: 'Booth 101' },
+    VOTER_GROUP: { name: '100-Voter Incharge', mobileNumber: '9848010004', unitName: 'Cluster 101-A' },
+  });
 
   // 1. Parliament MP: 7 Assembly segments (Constituency Name + Candidate/Person Name)
   const [parliamentName, setParliamentName] = useState(
@@ -656,6 +679,33 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
       return;
     }
 
+    // Format & validate multi-tier hierarchy incharges for each selected level
+    const formattedTierIncharges = selectedHierarchyLevels.map((tierKey) => {
+      const meta = TIER_TO_ROLE_DEFAULT[tierKey] || { role: 'CONSTITUENCY_INCHARGE', roleName: 'Incharge', defaultName: 'Tier Incharge', defaultUnit: tierKey };
+      const val = tierInchargesState[tierKey] || { name: meta.defaultName, mobileNumber: '', unitName: meta.defaultUnit };
+      const cleanNum = (val.mobileNumber || '').replace(/\D/g, '').slice(-10);
+      return {
+        tierLevel: tierKey as any,
+        role: meta.role as any,
+        name: val.name.trim() || meta.defaultName,
+        mobileNumber: cleanNum || (tierKey === 'CONSTITUENCY' ? cleanMobile : ''),
+        unitName: val.unitName.trim() || meta.defaultUnit,
+      };
+    });
+
+    const seenMobiles = new Set<string>();
+    for (const item of formattedTierIncharges) {
+      if (!item.mobileNumber || item.mobileNumber.length < 10) {
+        notify.warning(`Please enter a valid 10-digit mobile number for ${item.tierLevel} incharge (${item.name}).`, 'Valid Mobile Required');
+        return;
+      }
+      if (seenMobiles.has(item.mobileNumber)) {
+        notify.warning(`Duplicate phone number detected: +91 ${item.mobileNumber} is assigned to multiple tier incharges. Each tier must have a unique phone number.`, 'Duplicate Phone Number');
+        return;
+      }
+      seenMobiles.add(item.mobileNumber);
+    }
+
     setIsBuilding(true);
 
     try {
@@ -744,6 +794,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
         parliamentName: appScope === 'PARLIAMENT_MP' ? parliamentName.trim() : undefined,
         activePartyCode,
         activeHierarchyLevels: selectedHierarchyLevels,
+        tierIncharges: formattedTierIncharges,
         constituencies: finalConstituencies,
         politicalParties: (partyList || []).map((p, idx) => ({
           name: p.name || 'Party',
@@ -811,6 +862,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
         mobileNumber: returnedCreds.mobileNumber,
         password: returnedCreds.password,
         role: returnedCreds.role,
+        tierIncharges: buildRes?.credentials?.tierIncharges || formattedTierIncharges,
       });
 
       notify.success('Application branding, isolated tenant, and candidate account successfully registered in DB!', 'Tenant Provisioned');
@@ -1524,6 +1576,103 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
                     </button>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Multi-Tier Hierarchy Incharges & Dedicated Phone Configuration */}
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-black text-white">
+                    Multi-Tier Incharge Provisioning &amp; Phone Numbers ({selectedHierarchyLevels.length} Configured Tiers)
+                  </span>
+                </div>
+                <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 font-bold px-2 py-0.5 rounded-full">
+                  Atomic Multi-Tier Provisioning
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Each enabled hierarchy tier is assigned its own dedicated mobile number, role, and jurisdiction unit. All incharge accounts are provisioned atomically on deployment.
+              </p>
+
+              <div className="space-y-3">
+                {selectedHierarchyLevels.map((tierKey) => {
+                  const meta = TIER_TO_ROLE_DEFAULT[tierKey] || { role: 'CONSTITUENCY_INCHARGE', roleName: tierKey, defaultName: 'Incharge', defaultUnit: tierKey };
+                  const currentVal = tierInchargesState[tierKey] || { name: meta.defaultName, mobileNumber: '', unitName: meta.defaultUnit };
+                  return (
+                    <div key={tierKey} className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[10px] font-black uppercase">
+                            {tierKey}
+                          </span>
+                          <span className="text-xs font-bold text-white">{meta.roleName}</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-slate-400">{meta.role}</span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400">Incharge Name</label>
+                          <input
+                            type="text"
+                            value={currentVal.name}
+                            onChange={(e) => {
+                              const newName = e.target.value;
+                              setTierInchargesState((prev) => ({
+                                ...prev,
+                                [tierKey]: { ...currentVal, name: newName },
+                              }));
+                            }}
+                            placeholder={meta.defaultName}
+                            className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs font-semibold text-white placeholder-slate-600 focus:border-amber-400 focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400">Dedicated Mobile (+91)</label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 font-mono">
+                              +91
+                            </span>
+                            <input
+                              type="tel"
+                              maxLength={10}
+                              value={currentVal.mobileNumber}
+                              onChange={(e) => {
+                                const newNum = e.target.value.replace(/\D/g, '').slice(0, 10);
+                                setTierInchargesState((prev) => ({
+                                  ...prev,
+                                  [tierKey]: { ...currentVal, mobileNumber: newNum },
+                                }));
+                              }}
+                              placeholder="10-digit mobile"
+                              className="w-full pl-9 pr-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono font-bold text-white placeholder-slate-600 focus:border-amber-400 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-400">Jurisdiction Unit Name</label>
+                          <input
+                            type="text"
+                            value={currentVal.unitName}
+                            onChange={(e) => {
+                              const newUnit = e.target.value;
+                              setTierInchargesState((prev) => ({
+                                ...prev,
+                                [tierKey]: { ...currentVal, unitName: newUnit },
+                              }));
+                            }}
+                            placeholder={meta.defaultUnit}
+                            className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs font-semibold text-white placeholder-slate-600 focus:border-amber-400 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -2285,6 +2434,31 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
                   <span>Candidate logs in directly on Port 3000 using their verified mobile number.</span>
                 </div>
               </div>
+
+              {createdCredentialsModal.tierIncharges && createdCredentialsModal.tierIncharges.length > 0 && (
+                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center justify-between">
+                    <span>Provisioned Hierarchy-Tier Incharges</span>
+                    <span className="text-amber-400 font-bold">{createdCredentialsModal.tierIncharges.length} Tiers</span>
+                  </div>
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                    {createdCredentialsModal.tierIncharges.map((ti: any, idx: number) => (
+                      <div key={idx} className="p-2 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs">
+                        <div>
+                          <div className="font-bold text-white flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-400/20 text-amber-300 font-black">{ti.tierLevel}</span>
+                            <span>{ti.name}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-400">{ti.role} • {ti.unitName || ti.tierLevel}</div>
+                        </div>
+                        <div className="font-mono font-bold text-emerald-400 text-xs">
+                          +91 {ti.mobileNumber}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3 pt-2">

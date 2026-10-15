@@ -33,7 +33,7 @@ export class AuthService {
     const cooldownSeconds = Math.ceil(env.OTP_RESEND_COOLDOWN_MS / 1000);
 
     // 2. Authoritative database lookup of existing user with organisation and parties
-    let user = await prisma.user.findFirst({
+    const matchingUsers = await prisma.user.findMany({
       where: {
         mobileNumber: {
           endsWith: cleanMobile,
@@ -50,6 +50,43 @@ export class AuthService {
         hierarchyAssignments: { where: { isActive: true } },
       },
     });
+
+    if (matchingUsers.length > 1) {
+      await logAudit({
+        action: AuditAction.CREATE,
+        entityType: 'OTPVerification',
+        entityId: 'ambiguous-request',
+        changes: {
+          event: 'OTP_REQUEST_REJECTED',
+          reason: 'AMBIGUOUS_ACCOUNT_MATCH',
+          matchingCount: matchingUsers.length,
+          cleanMobile,
+        },
+        ipAddress: reqInfo?.ip,
+        userAgent: reqInfo?.userAgent,
+      });
+
+      if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
+        const error: any = new Error(
+          `Multiple accounts found matching mobile number +91 ${cleanMobile}. Ambiguous account match.`
+        );
+        error.statusCode = 409;
+        error.code = 'AMBIGUOUS_ACCOUNT_MATCH';
+        throw error;
+      }
+
+      await AuthService.enforceTimingFloor(startTime);
+      return {
+        requestId: crypto.randomUUID(),
+        expiresAt: new Date(Date.now() + env.OTP_EXPIRY_MS),
+        cooldownSeconds,
+        provider: smsProvider.name,
+        channel,
+        message: 'If an eligible account exists, an OTP has been dispatched.',
+      };
+    }
+
+    let user = matchingUsers[0] || null;
 
     const roleToLevelMap: Record<string, string> = {
       STATE_ADMIN: 'STATE',
@@ -88,6 +125,7 @@ export class AuthService {
     const isSuperAdmin = user?.role === RoleType.SUPER_ADMIN;
     const isStateAdmin = user?.role === RoleType.STATE_ADMIN;
     const hasActiveParty = isSuperAdmin || (await PartyEligibilityService.hasActiveParty(user?.organisationId, user?.organisation));
+    const isOrgActive = !user?.organisation || user.organisation.isActive !== false;
 
     // A user is authorized for the requested role if:
     // - No role was explicitly requested (default to their DB role), OR
@@ -105,6 +143,7 @@ export class AuthService {
     const isEligible = Boolean(
       user &&
       user.accountStatus === 'ACTIVE' &&
+      isOrgActive &&
       (isSuperAdmin || hasActiveParty) &&
       isRoleAuthorized &&
       !isTierRestricted
@@ -116,8 +155,12 @@ export class AuthService {
         ? 'USER_NOT_FOUND'
         : user.accountStatus !== 'ACTIVE'
         ? 'ACCOUNT_INACTIVE'
+        : !isOrgActive
+        ? 'ORGANISATION_DISABLED'
         : !hasActiveParty && !isSuperAdmin
         ? 'NOT_REGISTERED_TO_PARTY'
+        : isTierRestricted
+        ? 'HIERARCHY_TIER_RESTRICTED'
         : 'ROLE_MISMATCH';
 
       await logAudit({
@@ -141,8 +184,12 @@ export class AuthService {
             ? `Mobile number +91 ${cleanMobile} is not registered in the database. Please register in CMS Studio first, or enter a registered mobile number.`
             : user.accountStatus !== 'ACTIVE'
             ? `Account for +91 ${cleanMobile} is not active (Status: ${user.accountStatus}).`
+            : !isOrgActive
+            ? `Organisation for +91 ${cleanMobile} is disabled or inactive.`
             : !hasActiveParty && !isSuperAdmin
             ? `Mobile number +91 ${cleanMobile} is not registered with any active political party. Please register your party or contact your administrator.`
+            : isTierRestricted
+            ? `Hierarchy tier '${requestedLevel}' (${dto.role}) is restricted for this party application.`
             : `Role mismatch: Mobile +91 ${cleanMobile} is registered as ${user.role}, but login was attempted as ${dto.role}. Please select ${user.role} or enter the correct registered mobile.`
         );
         error.statusCode = !user ? 404 : 403;
@@ -465,6 +512,14 @@ export class AuthService {
     if (user.accountStatus !== 'ACTIVE') {
       const error: any = new Error('User account is currently inactive.');
       error.statusCode = 403;
+      error.code = 'ACCOUNT_INACTIVE';
+      throw error;
+    }
+
+    if (user.organisation && user.organisation.isActive === false) {
+      const error: any = new Error('Organisation is disabled or inactive.');
+      error.statusCode = 403;
+      error.code = 'ORGANISATION_DISABLED';
       throw error;
     }
 

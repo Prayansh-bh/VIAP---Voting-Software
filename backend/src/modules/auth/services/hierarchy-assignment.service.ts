@@ -21,10 +21,18 @@ export class HierarchyAssignmentService {
       isActive: true,
     };
 
-    const constituency = await prisma.constituency.findFirst();
-    const state = await prisma.state.findFirst();
-    const zone = await prisma.zone.findFirst();
-    const parliament = await prisma.parliament.findFirst();
+    const state = user.organisationId
+      ? await prisma.state.findFirst({ where: { organisationId: user.organisationId } })
+      : await prisma.state.findFirst();
+    const zone = state
+      ? await prisma.zone.findFirst({ where: { stateId: state.id } })
+      : await prisma.zone.findFirst();
+    const parliament = zone
+      ? await prisma.parliament.findFirst({ where: { zoneId: zone.id } })
+      : await prisma.parliament.findFirst();
+    const constituency = parliament
+      ? await prisma.constituency.findFirst({ where: { parliamentId: parliament.id } })
+      : await prisma.constituency.findFirst();
 
     if (role === RoleType.SUPER_ADMIN || role === RoleType.STATE_ADMIN) {
       const stateUnit = await prisma.organizationUnit.findFirst({ where: { level: OrgHierarchyLevel.STATE } });

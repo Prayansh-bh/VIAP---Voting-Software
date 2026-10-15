@@ -505,6 +505,16 @@ export function buildPartyThemes(parties: CmsParty[]): Record<VoterPreference, P
   return themes;
 }
 
+export interface TierInchargeInput {
+  tierLevel: 'STATE' | 'ZONE' | 'PARLIAMENT' | 'CONSTITUENCY' | 'MANDAL' | 'VILLAGE' | 'BOOTH' | 'VOTER_GROUP';
+  role: 'STATE_ADMIN' | 'ZONE_INCHARGE' | 'PARLIAMENT_INCHARGE' | 'CONSTITUENCY_INCHARGE' | 'MANDAL_INCHARGE' | 'VILLAGE_INCHARGE' | 'BOOTH_PRESIDENT' | 'BOOTH_INCHARGE' | 'VOTER_100_INCHARGE';
+  name: string;
+  mobileNumber: string;
+  unitId?: string;
+  unitName?: string;
+  unitCode?: string;
+}
+
 export async function buildApplicationApi(payload: {
   appName: string;
   organisationName: string;
@@ -523,6 +533,10 @@ export async function buildApplicationApi(payload: {
   politicalParties: { name: string; code: string; shortName: string; primaryColor: string; symbolName?: string; logoUrl?: string }[];
   hierarchyLabels?: Record<string, string>;
   featureToggles?: Record<string, boolean>;
+  candidateMobile?: string;
+  candidateName?: string;
+  candidateRole?: string;
+  tierIncharges?: TierInchargeInput[];
 }, token?: string): Promise<any> {
   const authToken = token || getAuthToken();
   return apiFetch('/api/cms/build-application', {

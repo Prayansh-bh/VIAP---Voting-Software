@@ -360,6 +360,7 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
       onLock={() => {}}
       onChangePasscode={() => {}}
       isPanelLocked={false}
+      onLoginSuccess={handleLoginSuccess}
     />
   );
 

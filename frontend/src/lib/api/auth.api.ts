@@ -3,7 +3,7 @@ import { getOrCreateDeviceId, setDeviceToken, clearDeviceToken } from '../authSt
 
 export async function requestOtpApi(
   mobileNumber: string,
-  role: string,
+  role?: string,
   channel: 'SMS' | 'WHATSAPP' = 'SMS',
   options?: { devMode?: boolean; name?: string }
 ): Promise<{ requestId: string; expiresAt?: string; cooldownSeconds?: number; provider?: string; channel?: string; devOtp?: string; message?: string }> {
@@ -13,7 +13,7 @@ export async function requestOtpApi(
       method: 'POST',
       body: JSON.stringify({
         mobileNumber,
-        role,
+        ...(role ? { role } : {}),
         channel,
         devMode: options?.devMode,
         name: options?.name,
@@ -24,7 +24,7 @@ export async function requestOtpApi(
 
 export async function requestOtp(
   mobileNumber: string,
-  role: string,
+  role?: string,
   channel: 'SMS' | 'WHATSAPP' = 'SMS',
   options?: { devMode?: boolean; name?: string }
 ): Promise<{ requestId: string; expiresAt?: string; cooldownSeconds?: number; provider?: string; channel?: string; devOtp?: string; message?: string }> {
