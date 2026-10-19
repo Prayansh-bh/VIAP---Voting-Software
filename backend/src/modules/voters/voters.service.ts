@@ -35,6 +35,8 @@ export class VotersService {
       voterLocationStatus,
       politicalPreference,
       caste,
+      applicationId,
+      organisationId,
       sortBy,
       sortOrder,
     } = query;
@@ -93,10 +95,31 @@ export class VotersService {
     if (politicalPreference) where.politicalPreference = politicalPreference;
     if (caste) where.caste = caste;
 
+    // Resolve target organisation if explicitly requested by applicationId or organisationId
+    let targetOrgId = organisationId;
+    if (applicationId && !targetOrgId) {
+      const appConfig = await prisma.cMSConfiguration.findFirst({
+        where: {
+          OR: [
+            { id: applicationId },
+            { configKey: applicationId.toLowerCase() },
+          ],
+        },
+        select: { organisationId: true },
+      });
+      targetOrgId = appConfig?.organisationId || '00000000-0000-0000-0000-000000000000';
+    }
+
     // Enforce Hierarchy Authorization Scope & Tenant Isolation
     if (!scope || !scope.isGlobalScope) {
       if (!scope?.organisationId) {
         return { total: 0, items: [], page, limit }; // Missing scope or organization context must fail closed
+      }
+      if (targetOrgId && targetOrgId !== scope.organisationId) {
+        const err: any = new Error('Access denied: You cannot view voters of another tenant organization.');
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_TENANT';
+        throw err;
       }
       where.state = { organisationId: scope.organisationId };
 
@@ -142,8 +165,13 @@ export class VotersService {
       } else if (scope.accessibleUnitIds.size > 0) {
         where.unitId = { in: Array.from(scope.accessibleUnitIds) };
       }
-    } else if (unitId) {
-      where.unitId = unitId;
+    } else {
+      if (targetOrgId) {
+        where.state = { organisationId: targetOrgId };
+      }
+      if (unitId) {
+        where.unitId = unitId;
+      }
     }
 
     if (search) {

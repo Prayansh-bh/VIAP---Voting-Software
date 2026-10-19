@@ -1,3 +1,4 @@
+import { getAppUrl } from '../lib/env';
 import React from 'react';
 import {
   LayoutDashboard,
@@ -124,7 +125,7 @@ export default function AdminSidebar({
           </div>
           <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Port 5432</span>
+            <span>Online</span>
           </div>
         </div>
 
@@ -168,7 +169,7 @@ export default function AdminSidebar({
       <div className="p-4 border-t border-slate-800/80 space-y-3 bg-slate-950/60">
         {/* Launch Party App Button */}
         <a
-          href="http://localhost:3000"
+          href={getAppUrl()}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center justify-between w-full px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-slate-200 text-xs font-bold transition group"

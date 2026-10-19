@@ -28,9 +28,20 @@ export class AnalyticsService {
 
     const currentUnit = allUnits.find((u) => u.id === unitId);
 
-    // Fetch all voters in this hierarchy subtree
+    // Fetch only needed scalar fields for voters in this hierarchy subtree (avoids fetching large unneeded columns)
     const voters = await prisma.voter.findMany({
       where: { unitId: { in: descendantUnitIds } },
+      select: {
+        unitId: true,
+        voteStatus: true,
+        voterStatus: true,
+        voterLocationStatus: true,
+        politicalPreference: true,
+        caste: true,
+        profession: true,
+        age: true,
+        gender: true,
+      },
     });
 
     // Counts

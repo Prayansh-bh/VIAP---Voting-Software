@@ -76,7 +76,7 @@ export default function LandingPage({
     if (onGetStarted) {
       onGetStarted();
     } else {
-      window.location.hash = '/roles';
+      window.location.hash = '/login';
     }
   };
 
@@ -84,7 +84,7 @@ export default function LandingPage({
     if (onOpenLogin) {
       onOpenLogin();
     } else {
-      window.location.hash = '/roles';
+      window.location.hash = '/login';
     }
   };
 

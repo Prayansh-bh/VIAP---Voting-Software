@@ -101,31 +101,50 @@ const PARTY_COLORS: Record<VoterPreference, { bg: string; text: string; hex: str
   OTH: { bg: 'bg-purple-600', text: 'text-white', hex: '#9333ea', lightBg: 'bg-purple-50', border: 'border-purple-200', darkText: 'text-purple-800' }
 };
 
+import { useLocation, useNavigate } from 'react-router-dom';
+
+type Voter100Tab = 'dashboard' | 'voters' | 'live-track' | 'fake-doubtful' | 'tasks' | 'videos';
+
+const TAB_TO_PATH: Record<Voter100Tab, string> = {
+  dashboard: '/100-voter',
+  voters: '/100-voter/voters',
+  'live-track': '/100-voter/live-track',
+  'fake-doubtful': '/100-voter/fake-doubtful',
+  tasks: '/100-voter/tasks',
+  videos: '/100-voter/training',
+};
+
+const PATH_TO_TAB: Record<string, Voter100Tab> = {
+  '': 'dashboard',
+  dashboard: 'dashboard',
+  voters: 'voters',
+  'live-track': 'live-track',
+  'fake-doubtful': 'fake-doubtful',
+  tasks: 'tasks',
+  training: 'videos',
+  videos: 'videos',
+};
+
 export default function Voter100Dashboard({ session, onLogout }: Voter100DashboardProps) {
   const { config } = useCms();
-  // Navigation tabs state: 'dashboard' | 'voters' | 'live-track' | 'fake-doubtful' | 'tasks' | 'videos'
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'voters' | 'live-track' | 'fake-doubtful' | 'tasks' | 'videos'>(() => {
-    const hash = window.location.hash.replace('#', '');
-    if (hash === '/100-voter/voters') return 'voters';
-    if (hash === '/100-voter/live-track') return 'live-track';
-    if (hash === '/100-voter/fake-doubtful') return 'fake-doubtful';
-    if (hash === '/100-voter/tasks') return 'tasks';
-    if (hash === '/100-voter/training') return 'videos';
-    return 'dashboard';
-  });
+  const location = useLocation();
+  const navigate = useNavigate();
 
-  // Track tab route updates
+  const subPath = location.pathname.replace(/^\/100-voter\/?/, '').split('/')[0] || '';
+  const isKnownSubPath = subPath === '' || subPath in PATH_TO_TAB;
+  const activeTab: Voter100Tab = isKnownSubPath ? (PATH_TO_TAB[subPath] || 'dashboard') : 'dashboard';
+
+  // Unknown sub-routes safely return to base route
   useEffect(() => {
-    const pathMap = {
-      dashboard: '/100-voter',
-      voters: '/100-voter/voters',
-      'live-track': '/100-voter/live-track',
-      'fake-doubtful': '/100-voter/fake-doubtful',
-      tasks: '/100-voter/tasks',
-      videos: '/100-voter/training'
-    };
-    window.location.hash = pathMap[activeTab];
-  }, [activeTab]);
+    if (!isKnownSubPath) {
+      navigate('/100-voter', { replace: true });
+    }
+  }, [isKnownSubPath, navigate]);
+
+  const setActiveTab = (tab: Voter100Tab) => {
+    navigate(TAB_TO_PATH[tab]);
+    setIsSidebarOpen(false);
+  };
 
   // Mobile sidebar state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -2073,22 +2092,32 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                 <X className="w-5 h-5" />
               </button>
             </div>
-            {/* Embedded player mockup */}
+            {/* Embedded player */}
             <div className="relative aspect-video bg-black flex items-center justify-center text-white">
-              <div className="text-center space-y-4 p-6">
-                <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center mx-auto shadow-lg animate-pulse">
-                  <Play className="w-6 h-6 fill-current ml-1" />
+              {watchingVideo.videoUrl && watchingVideo.videoUrl.startsWith('http') ? (
+                <iframe
+                  src={watchingVideo.videoUrl}
+                  title={watchingVideo.title}
+                  className="w-full h-full border-0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              ) : (
+                <div className="text-center space-y-4 p-6">
+                  <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center mx-auto shadow-lg">
+                    <Play className="w-6 h-6 fill-current ml-1" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-bold">{watchingVideo.title}</p>
+                    <p className="text-xs text-gray-400 font-semibold max-w-md mx-auto">
+                      {watchingVideo.description || 'Secure training video stream loaded from database.'}
+                    </p>
+                  </div>
+                  <div className="text-xs font-mono bg-slate-900/60 inline-block px-3 py-1.5 rounded text-yellow-400 font-bold border border-slate-800">
+                    Worker ID: {session.userId} | Class ID: {watchingVideo.id}
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-bold">Mock Training Video Stream Active</p>
-                  <p className="text-xs text-gray-400 font-semibold max-w-md mx-auto">
-                    In production, this module embeds secure training videos for ground campaign volunteers.
-                  </p>
-                </div>
-                <div className="text-xs font-mono bg-slate-900/60 inline-block px-3 py-1.5 rounded text-yellow-400 font-bold border border-slate-800">
-                  Worker ID: {session.userId} | Class ID: {watchingVideo.id}
-                </div>
-              </div>
+              )}
             </div>
           </div>
         </div>

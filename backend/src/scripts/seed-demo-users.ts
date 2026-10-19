@@ -4,6 +4,10 @@ import bcrypt from 'bcryptjs';
 import { HierarchyAssignmentService } from '../modules/auth/services/hierarchy-assignment.service.js';
 
 export async function seedDemoAccounts() {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('FATAL: seedDemoAccounts cannot be executed in production environment.');
+    throw new Error('Production guard: Demo accounts seeding is disabled in production.');
+  }
   console.log('--- Starting Demo Accounts Seeding ---');
 
   const org = await prisma.organisation.findFirst();

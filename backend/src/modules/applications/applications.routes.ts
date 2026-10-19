@@ -4,10 +4,12 @@ import { validateBody } from '../../common/validation.js';
 import { authenticate } from '../../middleware/auth.js';
 import { populateHierarchyScope, requireRoles } from '../../middleware/rbac.js';
 import { ApplicationsController } from './applications.controller.js';
+import { buildApplicationSchema } from '../cms/cms.service.js';
 import {
   assignInchargeSchema,
   importDataSchema,
   mappingSchema,
+  updateApplicationSchema,
   validateDataSchema,
 } from './applications.schema.js';
 
@@ -21,19 +23,26 @@ const ADMIN_DATA_ROLES = [
 export async function applicationsRoutes(fastify: FastifyInstance) {
   // 1. Applications List & Configuration
   fastify.get('/', { preHandler: [authenticate] }, ApplicationsController.getApplications);
-  fastify.post('/', { preHandler: [authenticate] }, async (req, reply) => {
-    const res = await fastify.inject({
-      method: 'POST',
-      url: '/api/cms/build-application',
-      headers: {
-        authorization: req.headers.authorization || '',
-        'content-type': 'application/json',
-      },
-      payload: req.body as any,
-    });
-    return reply.status(res.statusCode).send(JSON.parse(res.payload));
-  });
+  fastify.post(
+    '/',
+    {
+      preHandler: [authenticate],
+      preValidation: [validateBody(buildApplicationSchema)],
+    },
+    ApplicationsController.createApplication,
+  );
   fastify.get('/:applicationId/configuration', { preHandler: [authenticate] }, ApplicationsController.getConfiguration);
+  fastify.put(
+    '/:id',
+    {
+      preHandler: [
+        authenticate,
+        requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN),
+        validateBody(updateApplicationSchema),
+      ],
+    },
+    ApplicationsController.updateApplication,
+  );
   fastify.delete(
     '/:id',
     {

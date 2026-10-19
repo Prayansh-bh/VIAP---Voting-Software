@@ -23,6 +23,8 @@ export const voterQuerySchema = z.object({
   voterLocationStatus: z.nativeEnum(VoterLocationStatus).optional(),
   politicalPreference: z.string().optional(),
   caste: z.string().optional(),
+  applicationId: z.string().optional(),
+  organisationId: z.string().uuid().optional(),
   sortBy: z.enum(['serialNumber', 'name', 'age', 'epicNumber', 'createdAt', 'updatedAt', 'voteDoneTime']).default('serialNumber'),
   sortOrder: z.enum(['asc', 'desc']).default('asc'),
 });

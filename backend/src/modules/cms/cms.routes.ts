@@ -18,6 +18,8 @@ import {
   loadCmsBundle,
   persistCmsConfig,
   serializeCmsConfig,
+  buildApplicationSchema,
+  provisionApplication,
 } from './cms.service.js';
 
 // Schemas
@@ -97,87 +99,38 @@ const announcementSchema = z.object({
   expiresAt: z.string().datetime().optional(),
 });
 
-const tierInchargeInputSchema = z.object({
-  tier: z.string().optional(),
-  tierLevel: z.string().optional(),
-  name: z.string().min(1, 'Incharge name is required'),
-  mobileNumber: z.string().min(10, 'Valid 10-digit mobile number is required'),
-  role: z.nativeEnum(RoleType).optional(),
-  email: z.string().nullish(),
-  unitName: z.string().nullish(),
-  unitId: z.string().uuid().nullish(),
-}).passthrough().refine((data) => data.tier || data.tierLevel, {
-  message: 'Tier or tierLevel is required',
-});
-
-const buildApplicationSchema = z.object({
-  id: z.string().nullish(),
-  appKey: z.string().nullish(),
-  appName: z.string().min(1).default('My Application'),
-  organisationName: z.string().min(1).default('My Organisation'),
-  headerTitle: z.string().nullish(),
-  slogan: z.string().nullish(),
-  logoUrl: z.string().nullish(),
-  faviconUrl: z.string().nullish(),
-  stateName: z.string().nullish().default('Andhra Pradesh'),
-  primaryColor: z.string().nullish().default('#eab308'),
-  secondaryColor: z.string().nullish().default('#1e293b'),
-  accentColor: z.string().nullish().default('#3b82f6'),
-  activePartyCode: z.string().nullish().default('TDP'),
-  appScope: z.enum(['SINGLE_MLA', 'PARLIAMENT_MP', 'ZONE', 'STATE']).default('SINGLE_MLA'),
-  activeHierarchyLevels: z.array(z.string()).default(['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP']),
-  parliamentName: z.string().nullish(),
-  parliamentCode: z.string().nullish(),
-  constituencies: z.array(z.object({
-    id: z.string().nullish(),
-    name: z.string().min(1),
-    code: z.string().nullish(),
-    totalVoters: z.number().nullish(),
-    votersCount: z.number().nullish(),
-    candidateName: z.string().nullish(),
-    mlaName: z.string().nullish(),
-    parliamentName: z.string().nullish(),
-    candidateEmail: z.string().nullish(),
-  }).passthrough()).default([]),
-  candidateName: z.string().nullish(),
-  candidateMobile: z.string().nullish(),
-  candidateEmail: z.string().nullish(),
-  tierIncharges: z.array(tierInchargeInputSchema).nullish(),
-  password: z.string().nullish(),
-  tenantCode: z.string().nullish(),
-  politicalParties: z.array(z.object({
-    name: z.string().min(1),
-    code: z.string().min(1),
-    shortName: z.string().nullish(),
-    primaryColor: z.string().nullish().default('#eab308'),
-    secondaryColor: z.string().nullish(),
-    accentColor: z.string().nullish(),
-    symbolName: z.string().nullish(),
-    logoUrl: z.string().nullish(),
-    isActive: z.boolean().default(true),
-    sortOrder: z.number().nullish(),
-  }).passthrough()).default([]),
-  hierarchyLabels: z.record(z.string(), z.string()).nullish(),
-  featureToggles: z.record(z.string(), z.boolean()).nullish(),
-}).passthrough();
-
 export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // PUBLIC / APP CONFIG ENDPOINT (Consumed dynamically by Frontend)
   // --------------------------------------------------------------------------
   fastify.get('/config', { preHandler: [optionalAuthenticate] }, async (req: FastifyRequest, reply: FastifyReply) => {
     const query = (req.query || {}) as Record<string, string>;
-    const orgId = (req as any).user?.organisationId || (req.headers['x-organisation-id'] as string) || query.organisationId || query.orgId;
-    const tenantCode = (req.headers['x-tenant-code'] as string) || query.app || query.tenant || query.tenantCode;
-    const bundle = await loadCmsBundle({ organisationId: orgId, configKey: tenantCode });
-    return reply.send(
-      successResponse({
-        config: bundle.config,
-        parties: bundle.parties,
-        announcements: bundle.announcements,
-        constituencies: bundle.constituencies,
-      }),
-    );
+    const authUser = (req as any).user;
+    const isSuperAdmin = authUser?.role === RoleType.SUPER_ADMIN;
+    let orgId: string | undefined = undefined;
+
+    if (authUser && !isSuperAdmin) {
+      orgId = authUser.organisationId;
+    } else {
+      orgId = authUser?.organisationId || (req.headers['x-organisation-id'] as string) || query.organisationId || query.orgId;
+    }
+
+    const appId = (req.headers['x-application-id'] as string) || query.applicationId || query.appId;
+    const tenantCode = (req.headers['x-tenant-code'] as string) || query.app || query.tenant || query.tenantCode || query.configKey;
+
+    try {
+      const bundle = await loadCmsBundle({ organisationId: orgId, configKey: tenantCode, applicationId: appId });
+      return reply.send(
+        successResponse({
+          config: bundle.config,
+          parties: bundle.parties,
+          announcements: bundle.announcements,
+          constituencies: bundle.constituencies,
+        }),
+      );
+    } catch (err: any) {
+      return reply.status(err.statusCode || 404).send(errorResponse(err.message, err.code || 'APPLICATION_NOT_FOUND'));
+    }
   });
 
   fastify.put(
@@ -189,9 +142,34 @@ export async function cmsRoutes(fastify: FastifyInstance) {
       const body = (req.body || {}) as Record<string, any>;
       const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
       const targetOrgId = isSuperAdmin ? (body.organisationId || req.user?.organisationId) : req.user?.organisationId;
+      const targetAppId = body.id || body.applicationId || (req.headers['x-application-id'] as string);
+
+      let existingApp: any = null;
+      if (targetAppId) {
+        existingApp = await prisma.cMSConfiguration.findFirst({
+          where: {
+            id: targetAppId,
+            ...(targetOrgId ? { organisationId: targetOrgId } : {}),
+          },
+        });
+        if (!existingApp) {
+          return reply.status(404).send(errorResponse(`Application '${targetAppId}' not found.`, 'APPLICATION_NOT_FOUND'));
+        }
+      } else if (!isSuperAdmin && targetOrgId) {
+        // Resolve canonical application identity from the authenticated server-side context
+        existingApp = await prisma.cMSConfiguration.findFirst({
+          where: { organisationId: targetOrgId },
+          orderBy: { updatedAt: 'desc' },
+        });
+        if (!existingApp) {
+          return reply.status(404).send(errorResponse('No active application found for your organisation.', 'APPLICATION_NOT_FOUND'));
+        }
+      }
 
       const saved = await persistCmsConfig({
-        organisationId: targetOrgId || undefined,
+        id: existingApp?.id || (isSuperAdmin ? targetAppId : undefined),
+        configKey: existingApp?.configKey || (isSuperAdmin ? body.configKey : undefined),
+        organisationId: existingApp?.organisationId || targetOrgId || undefined,
         organisationName: body.organisationName || body.appName,
         headerTitle: body.headerTitle || body.organisationName || body.appName,
         slogan: body.slogan,
@@ -327,751 +305,12 @@ export async function cmsRoutes(fastify: FastifyInstance) {
       preValidation: [validateBody(buildApplicationSchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
-      const body = req.body as z.infer<typeof buildApplicationSchema>;
-
-      // Pre-compute credential hash outside the transaction to minimize transaction holding time
-      const initialPassword = body.password?.trim();
-      const passwordToHash = initialPassword || crypto.randomBytes(32).toString('hex');
-      const passwordHash = await bcrypt.hash(passwordToHash, 10);
-
-      const rawCode = (body.tenantCode || body.appKey || `${body.activePartyCode || 'APP'}-${body.appName || 'DEFAULT'}`)
-        .replace(/[^A-Za-z0-9]/g, '-')
-        .toUpperCase()
-        .slice(0, 15);
-
-      // Extract and validate all incoming incharges
-      const incomingIncharges = Array.isArray(body.tierIncharges) && body.tierIncharges.length > 0
-        ? [...body.tierIncharges]
-        : [];
-
-      // Also support legacy candidateMobile if tierIncharges was not explicitly supplied
-      const rawCandidateMobile = (body as any).candidateMobile?.trim();
-      const legacyCandidateMobile = rawCandidateMobile ? rawCandidateMobile.replace(/\D/g, '').slice(-10) : undefined;
-      const candidateName = (body as any).candidateName?.trim() || 'Tenant Administrator';
-      const candidateEmail = (body as any).candidateEmail?.trim().toLowerCase() || `admin@${(body.appName || 'party').toLowerCase().replace(/[^a-z0-9]/g, '')}.org`;
-
-      const primaryRole = body.appScope === 'STATE'
-        ? RoleType.STATE_ADMIN
-        : body.appScope === 'ZONE'
-        ? RoleType.ZONE_INCHARGE
-        : body.appScope === 'PARLIAMENT_MP'
-        ? RoleType.PARLIAMENT_INCHARGE
-        : RoleType.CONSTITUENCY_INCHARGE;
-      const primaryTier = body.appScope === 'STATE'
-        ? 'STATE'
-        : body.appScope === 'ZONE'
-        ? 'ZONE'
-        : body.appScope === 'PARLIAMENT_MP'
-        ? 'PARLIAMENT'
-        : 'CONSTITUENCY';
-
-      if (incomingIncharges.length === 0 && legacyCandidateMobile) {
-        incomingIncharges.push({
-          tier: primaryTier,
-          name: candidateName,
-          mobileNumber: legacyCandidateMobile,
-          role: primaryRole,
-          email: candidateEmail,
-        });
-      }
-
-      // 1. Validate required fields, phone formats, duplicate numbers within the request
-      const seenMobiles = new Set<string>();
-      for (const incharge of incomingIncharges) {
-        const tierKey = ((incharge as any).tierLevel || incharge.tier || 'CONSTITUENCY').toUpperCase();
-        if (!incharge.name || !incharge.name.trim()) {
-          return reply.status(400).send(errorResponse(`Incharge name is required for tier '${tierKey}'.`, 'INVALID_INCHARGE_NAME'));
-        }
-        const cleanMobile = (incharge.mobileNumber || '').replace(/\D/g, '').slice(-10);
-        if (cleanMobile.length < 10) {
-          return reply.status(400).send(errorResponse(`Invalid mobile number '${incharge.mobileNumber}' for tier '${tierKey}'. Must be a valid 10-digit mobile number.`, 'INVALID_PHONE_NUMBER'));
-        }
-        if (seenMobiles.has(cleanMobile)) {
-          return reply.status(400).send(errorResponse(`Duplicate mobile number '${cleanMobile}' specified for multiple tiers. Each configured tier must have a unique mobile number.`, 'DUPLICATE_PHONE_NUMBER'));
-        }
-        seenMobiles.add(cleanMobile);
-
-        const ALLOWED_TIER_ROLES = [
-          RoleType.STATE_ADMIN,
-          RoleType.ZONE_INCHARGE,
-          RoleType.PARLIAMENT_INCHARGE,
-          RoleType.CONSTITUENCY_INCHARGE,
-          RoleType.MANDAL_INCHARGE,
-          RoleType.VILLAGE_INCHARGE,
-          RoleType.BOOTH_PRESIDENT,
-          RoleType.BOOTH_INCHARGE,
-          RoleType.VOTER_100_INCHARGE,
-        ];
-
-        if (incharge.role && !ALLOWED_TIER_ROLES.includes(incharge.role as any)) {
-          return reply.status(400).send(errorResponse(`Invalid role '${incharge.role}' for tier '${tierKey}'.`, 'INVALID_ROLE'));
-        }
-      }
-
-      // 2. Validate existing accounts: reject duplicate existing phone numbers
-      if (seenMobiles.size > 0) {
-        const existingUsers = await prisma.user.findMany({
-          where: { mobileNumber: { in: Array.from(seenMobiles) } },
-          select: { mobileNumber: true },
-        });
-        if (existingUsers.length > 0) {
-          return reply.status(409).send(errorResponse(`Mobile number '${existingUsers[0].mobileNumber}' is already registered to an existing account. Duplicate account registration rejected.`, 'EXISTING_ACCOUNT_CONFLICT'));
-        }
-      }
-
-      // Preflight uniqueness check: reject if tenant already exists rather than silently overwriting
-      const existingOrg = await prisma.organisation.findFirst({
-        where: {
-          OR: [
-            { code: rawCode },
-            { name: { equals: body.organisationName || body.appName, mode: 'insensitive' } },
-          ],
-        },
-      });
-
-      if (existingOrg) {
-        return reply.status(409).send(
-          errorResponse(
-            `Tenant organization already exists with code '${existingOrg.code}' or name '${existingOrg.name}'. Duplicate provisioning is rejected.`,
-            'TENANT_ALREADY_EXISTS'
-          )
-        );
-      }
-
       try {
-        const provisionResult = await prisma.$transaction(
-          async (tx) => {
-            const orgName = (body.organisationName || body.appName).trim();
-
-            // Advisory transaction lock on case-insensitive organization name to serialize concurrent attempts
-            try {
-              await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(lower(${orgName})))`;
-            } catch {
-              // Non-PostgreSQL test fallback
-            }
-
-            // In-transaction uniqueness re-check for concurrency safety
-            const inTxExisting = await tx.organisation.findFirst({
-              where: {
-                OR: [
-                  { code: rawCode },
-                  { name: { equals: orgName, mode: 'insensitive' } },
-                ],
-              },
-            });
-
-            if (inTxExisting) {
-              const conflictErr: any = new Error(
-                `Tenant organization already exists with code '${inTxExisting.code}' or name '${inTxExisting.name}'. Duplicate provisioning is rejected.`
-              );
-              conflictErr.code = 'TENANT_ALREADY_EXISTS';
-              conflictErr.statusCode = 409;
-              throw conflictErr;
-            }
-
-            // 1. Resolve & permanently persist logo asset if uploaded as base64
-            let resolvedLogoUrl = (body.logoUrl || '').trim() || undefined;
-            if (resolvedLogoUrl && resolvedLogoUrl.startsWith('data:')) {
-              try {
-                const commaIdx = resolvedLogoUrl.indexOf(',');
-                const base64Str = commaIdx !== -1 ? resolvedLogoUrl.slice(commaIdx + 1) : resolvedLogoUrl;
-                const buffer = Buffer.from(base64Str, 'base64');
-                const cleanSlug = orgName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
-                const saved = await saveAsset(buffer, `${cleanSlug}-logo.png`);
-                resolvedLogoUrl = saved.assetUrl;
-              } catch (e) {
-                console.warn('Failed to auto-persist base64 logo in build-application:', e);
-              }
-            }
-
-            // Create distinct isolated Organisation
-            const org = await tx.organisation.create({
-              data: {
-                name: orgName,
-                code: rawCode,
-                logoUrl: resolvedLogoUrl,
-                isActive: true,
-              },
-            });
-
-            // 2. Ensure State exists for this organisation
-            const targetStateName = body.stateName || 'Andhra Pradesh';
-            let stateCode = `${(body.stateName || 'AP').slice(0, 3).toUpperCase()}-${org.code.slice(0, 4)}`;
-            const stateCodeCollision = await tx.state.findUnique({ where: { code: stateCode } });
-            if (stateCodeCollision) {
-              stateCode = `${(body.stateName || 'AP').slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}`;
-            }
-            const state = await tx.state.create({
-              data: {
-                organisationId: org.id,
-                name: targetStateName,
-                code: stateCode,
-                totalVoters: 0,
-              },
-            });
-            await tx.organizationUnit.upsert({
-              where: { code: state.code },
-              update: {
-                name: `${state.name} (${org.name})`,
-                level: OrgHierarchyLevel.STATE,
-              },
-              create: {
-                name: `${state.name} (${org.name})`,
-                code: state.code,
-                level: OrgHierarchyLevel.STATE,
-              },
-            });
-
-            // 3. Ensure Zone exists for this State
-            let zoneCode = `ZN-${state.code}-01`;
-            const zoneCollision = await tx.zone.findUnique({ where: { code: zoneCode } });
-            if (zoneCollision) zoneCode = `ZN-${state.code}-${Date.now().toString().slice(-4)}`;
-            const zone = await tx.zone.create({
-              data: {
-                stateId: state.id,
-                name: `${state.name} Central Zone`,
-                code: zoneCode,
-                totalVoters: 0,
-              },
-            });
-            const stateUnit = await tx.organizationUnit.findFirst({
-              where: { code: state.code, level: OrgHierarchyLevel.STATE },
-            });
-            await tx.organizationUnit.upsert({
-              where: { code: zone.code },
-              update: {
-                name: zone.name,
-                level: OrgHierarchyLevel.ZONE,
-                parentId: stateUnit?.id,
-              },
-              create: {
-                name: zone.name,
-                code: zone.code,
-                level: OrgHierarchyLevel.ZONE,
-                parentId: stateUnit?.id,
-              },
-            });
-
-            // 4. Ensure Parliament exists for this Zone
-            const parName = body.parliamentName || (body.appScope === 'PARLIAMENT_MP' ? 'Ongole Parliament Constituency' : 'Central Parliament');
-            let parCode = body.parliamentCode || `PC-${parName.slice(0, 4).toUpperCase()}-${org.code.slice(0, 4)}`;
-            const parCollision = await tx.parliament.findUnique({ where: { code: parCode } });
-            if (parCollision) parCode = `PC-${parName.slice(0, 4).toUpperCase()}-${Date.now().toString().slice(-4)}`;
-            const parliament = await tx.parliament.create({
-              data: {
-                zoneId: zone.id,
-                name: parName,
-                code: parCode,
-                totalVoters: 0,
-              },
-            });
-            const zoneUnit = await tx.organizationUnit.findFirst({
-              where: { code: zone.code, level: OrgHierarchyLevel.ZONE },
-            });
-            await tx.organizationUnit.upsert({
-              where: { code: parliament.code },
-              update: {
-                name: parliament.name,
-                level: OrgHierarchyLevel.PARLIAMENT,
-                parentId: zoneUnit?.id,
-              },
-              create: {
-                name: parliament.name,
-                code: parliament.code,
-                level: OrgHierarchyLevel.PARLIAMENT,
-                parentId: zoneUnit?.id,
-              },
-            });
-
-            const parUnit = await tx.organizationUnit.findFirst({
-              where: { code: parliament.code, level: OrgHierarchyLevel.PARLIAMENT },
-            });
-
-            // 5. Create Assembly Constituencies (zero default voters)
-            const createdConstituencies: any[] = [];
-            const incomingConstituencies = body.constituencies && body.constituencies.length > 0
-              ? body.constituencies
-              : [{ name: body.headerTitle || body.organisationName || 'Kondapi', code: `AC-${org.code.slice(0, 4)}-01`, totalVoters: 0 }];
-
-            for (let i = 0; i < incomingConstituencies.length; i++) {
-              const c = incomingConstituencies[i];
-              const cleanName = c.name.trim();
-              if (!cleanName) continue;
-
-              let code = c.code || `AC-${cleanName.slice(0, 4).toUpperCase()}-${org.code.slice(0, 4)}-${i + 1}`;
-              const codeCollision = await tx.constituency.findUnique({ where: { code } });
-              if (codeCollision) {
-                code = `AC-${cleanName.slice(0, 4).toUpperCase()}-${Date.now().toString().slice(-4)}-${i + 1}`;
-              }
-              const totalVoters = c.totalVoters || (c as any).votersCount || 0;
-
-              const constRecord = await tx.constituency.create({
-                data: {
-                  parliamentId: parliament.id,
-                  name: cleanName,
-                  code,
-                  totalVoters,
-                },
-              });
-              await tx.organizationUnit.upsert({
-                where: { code },
-                update: {
-                  name: cleanName,
-                  level: OrgHierarchyLevel.CONSTITUENCY,
-                  parentId: parUnit?.id,
-                },
-                create: {
-                  name: cleanName,
-                  code,
-                  level: OrgHierarchyLevel.CONSTITUENCY,
-                  parentId: parUnit?.id,
-                },
-              });
-
-              createdConstituencies.push(constRecord);
-            }
-
-            // 6. Sync Political Parties
-            const incomingParties = body.politicalParties && body.politicalParties.length > 0
-              ? body.politicalParties
-              : [{
-                  name: body.appName || body.organisationName || 'Default Political Party',
-                  code: (body.activePartyCode || 'TDP').toUpperCase(),
-                  shortName: (body.activePartyCode || 'TDP').toUpperCase().slice(0, 6),
-                  primaryColor: body.primaryColor || '#eab308',
-                  secondaryColor: body.secondaryColor || null,
-                  accentColor: body.accentColor || null,
-                  isActive: true,
-                  sortOrder: 1,
-                }];
-
-            for (let i = 0; i < incomingParties.length; i++) {
-              const p = incomingParties[i];
-              const partyCode = p.code.trim().toUpperCase();
-              if (!partyCode) continue;
-
-              const existingParty = await tx.politicalParty.findUnique({ where: { code: partyCode } });
-              if (!existingParty) {
-                await tx.politicalParty.create({
-                  data: {
-                    organisationId: org.id,
-                    name: p.name,
-                    code: partyCode,
-                    shortName: p.shortName || partyCode,
-                    primaryColor: p.primaryColor || '#eab308',
-                    secondaryColor: p.secondaryColor || null,
-                    accentColor: p.accentColor || null,
-                    symbolName: p.symbolName || null,
-                    logoUrl: p.logoUrl || null,
-                    isActive: p.isActive !== false,
-                    sortOrder: p.sortOrder !== undefined && p.sortOrder !== null ? p.sortOrder : i,
-                  },
-                });
-              } else {
-                await tx.politicalParty.update({
-                  where: { id: existingParty.id },
-                  data: {
-                    name: p.name,
-                    shortName: p.shortName || partyCode,
-                    primaryColor: p.primaryColor || '#eab308',
-                    secondaryColor: p.secondaryColor || null,
-                    accentColor: p.accentColor || null,
-                    symbolName: p.symbolName || null,
-                    logoUrl: p.logoUrl || null,
-                    isActive: p.isActive !== false,
-                    sortOrder: p.sortOrder !== undefined && p.sortOrder !== null ? p.sortOrder : i,
-                    ...(!existingParty.organisationId ? { organisationId: org.id } : {}),
-                  },
-                });
-              }
-            }
-
-            // 7. Store / Update CMSConfiguration
-            const mergedHierarchyLabels = {
-              STATE: 'State',
-              ZONE: 'Zone',
-              PARLIAMENT: 'Parliament',
-              CONSTITUENCY: 'Constituency',
-              MANDAL: 'Mandal',
-              VILLAGE: 'Village',
-              BOOTH: 'Booth',
-              VOTER_GROUP: '100-Voter Incharge',
-              ...(body.hierarchyLabels || {}),
-            };
-
-            const tenantConfigKey = (body.appKey || body.tenantCode || org.code).toLowerCase();
-            const configPayload = {
-              organisationId: org.id,
-              organisationName: body.organisationName || body.appName,
-              headerTitle: body.headerTitle || body.appName,
-              slogan: body.slogan || undefined,
-              logoUrl: resolvedLogoUrl,
-              faviconUrl: body.faviconUrl || undefined,
-              stateName: body.stateName || 'Andhra Pradesh',
-              primaryColor: body.primaryColor || '#eab308',
-              secondaryColor: body.secondaryColor || '#1e293b',
-              accentColor: body.accentColor || '#3b82f6',
-              activePartyCode: body.activePartyCode || 'TDP',
-              appScope: body.appScope,
-              parliamentName: parliament.name,
-              parliamentCode: parliament.code,
-              candidateName: ((body as any).candidateName || undefined) as string | undefined,
-              hierarchyLabels: mergedHierarchyLabels,
-              featureToggles: body.featureToggles || undefined,
-              activeHierarchyLevels: body.activeHierarchyLevels,
-            };
-
-            const updatedConfig = await persistCmsConfig(
-              {
-                ...configPayload,
-                configKey: tenantConfigKey,
-              },
-              tx,
-            );
-
-            // In-transaction uniqueness re-check for incharge mobile numbers
-            if (seenMobiles.size > 0) {
-              const inTxExistingUsers = await tx.user.findMany({
-                where: { mobileNumber: { in: Array.from(seenMobiles) } },
-                select: { mobileNumber: true },
-              });
-              if (inTxExistingUsers.length > 0) {
-                const conflictErr: any = new Error(
-                  `Mobile number '${inTxExistingUsers[0].mobileNumber}' is already registered to an existing account. Duplicate account registration rejected.`
-                );
-                conflictErr.code = 'EXISTING_ACCOUNT_CONFLICT';
-                conflictErr.statusCode = 409;
-                throw conflictErr;
-              }
-            }
-
-            // Validate any explicit unit IDs against foreign tenants
-            for (const incharge of incomingIncharges) {
-              if (incharge.unitId) {
-                const targetUnit = await tx.organizationUnit.findUnique({
-                  where: { id: incharge.unitId },
-                });
-                if (!targetUnit) {
-                  const err: any = new Error(`Hierarchy unit '${incharge.unitId}' not found.`);
-                  err.code = 'NOT_FOUND';
-                  err.statusCode = 404;
-                  throw err;
-                }
-                if (!targetUnit.code || !targetUnit.code.includes(org.code.slice(0, 4))) {
-                  const err: any = new Error(`Cannot assign cross-tenant hierarchy unit '${incharge.unitId}'.`);
-                  err.code = 'FORBIDDEN_TENANT';
-                  err.statusCode = 403;
-                  throw err;
-                }
-              }
-            }
-
-            // 8. Ensure hierarchy units down the tree exist for this organisation
-            const stateUnitRecord = await tx.organizationUnit.findFirst({
-              where: { code: state.code, level: OrgHierarchyLevel.STATE },
-            });
-            const zoneUnitRecord = await tx.organizationUnit.findFirst({
-              where: { code: zone.code, level: OrgHierarchyLevel.ZONE },
-            });
-            const parUnitRecord = await tx.organizationUnit.findFirst({
-              where: { code: parliament.code, level: OrgHierarchyLevel.PARLIAMENT },
-            });
-            const constUnitRecord = createdConstituencies[0]
-              ? await tx.organizationUnit.findFirst({
-                  where: { code: createdConstituencies[0].code, level: OrgHierarchyLevel.CONSTITUENCY },
-                })
-              : null;
-
-            // Ensure Mandal exists for primary constituency
-            const primaryConstituency = createdConstituencies[0];
-            const cleanMandalName = `${primaryConstituency?.name || 'Constituency'} Central Mandal`;
-            let mandalCode = `MD-${org.code.slice(0, 4)}-01`;
-            const mCollision = await tx.mandal.findUnique({ where: { code: mandalCode } });
-            if (mCollision) mandalCode = `MD-${org.code.slice(0, 4)}-${Date.now().toString().slice(-4)}`;
-            const mandalRecord = await tx.mandal.create({
-              data: {
-                constituencyId: primaryConstituency.id,
-                name: cleanMandalName,
-                code: mandalCode,
-                totalVoters: 0,
-              },
-            });
-            const mandalUnitRecord = await tx.organizationUnit.upsert({
-              where: { code: mandalCode },
-              update: { name: cleanMandalName, level: OrgHierarchyLevel.MANDAL, parentId: constUnitRecord?.id },
-              create: { name: cleanMandalName, code: mandalCode, level: OrgHierarchyLevel.MANDAL, parentId: constUnitRecord?.id },
-            });
-
-            // Ensure Village exists for Mandal
-            const cleanVillageName = `${cleanMandalName} Ward 1`;
-            let villageCode = `VL-${org.code.slice(0, 4)}-01`;
-            const vCollision = await tx.village.findUnique({ where: { code: villageCode } });
-            if (vCollision) villageCode = `VL-${org.code.slice(0, 4)}-${Date.now().toString().slice(-4)}`;
-            const villageRecord = await tx.village.create({
-              data: {
-                mandalId: mandalRecord.id,
-                name: cleanVillageName,
-                code: villageCode,
-                totalVoters: 0,
-              },
-            });
-            const villageUnitRecord = await tx.organizationUnit.upsert({
-              where: { code: villageCode },
-              update: { name: cleanVillageName, level: OrgHierarchyLevel.VILLAGE, parentId: mandalUnitRecord?.id },
-              create: { name: cleanVillageName, code: villageCode, level: OrgHierarchyLevel.VILLAGE, parentId: mandalUnitRecord?.id },
-            });
-
-            // Ensure Booth exists for Village
-            const cleanBoothName = `Polling Station 1`;
-            let boothCode = `BT-${org.code.slice(0, 4)}-01`;
-            const bCollision = await tx.booth.findUnique({ where: { code: boothCode } });
-            if (bCollision) boothCode = `BT-${org.code.slice(0, 4)}-${Date.now().toString().slice(-4)}`;
-            const boothRecord = await tx.booth.create({
-              data: {
-                villageId: villageRecord.id,
-                boothNumber: '1',
-                name: cleanBoothName,
-                code: boothCode,
-                totalVoters: 0,
-              },
-            });
-            const boothUnitRecord = await tx.organizationUnit.upsert({
-              where: { code: boothCode },
-              update: { name: cleanBoothName, level: OrgHierarchyLevel.BOOTH, parentId: villageUnitRecord?.id },
-              create: { name: cleanBoothName, code: boothCode, level: OrgHierarchyLevel.BOOTH, parentId: villageUnitRecord?.id },
-            });
-
-            // Ensure VoterGroup exists for Booth
-            const cleanVgName = `Cluster 1 (1-100)`;
-            let vgCode = `VG-${org.code.slice(0, 4)}-01`;
-            const vgCollision = await tx.voterGroup.findUnique({ where: { code: vgCode } });
-            if (vgCollision) vgCode = `VG-${org.code.slice(0, 4)}-${Date.now().toString().slice(-4)}`;
-            const vgRecord = await tx.voterGroup.create({
-              data: {
-                boothId: boothRecord.id,
-                name: cleanVgName,
-                code: vgCode,
-                rangeStart: 1,
-                rangeEnd: 100,
-                totalVoters: 100,
-              },
-            });
-            const vgUnitRecord = await tx.organizationUnit.upsert({
-              where: { code: vgCode },
-              update: { name: cleanVgName, level: OrgHierarchyLevel.VOTER_GROUP, parentId: boothUnitRecord?.id },
-              create: { name: cleanVgName, code: vgCode, level: OrgHierarchyLevel.VOTER_GROUP, parentId: boothUnitRecord?.id },
-            });
-
-            const tierDataMap: Record<string, { unit: any; role: RoleType; assignment: any }> = {
-              STATE: {
-                unit: stateUnitRecord,
-                role: RoleType.STATE_ADMIN,
-                assignment: { stateId: state.id },
-              },
-              ZONE: {
-                unit: zoneUnitRecord,
-                role: RoleType.ZONE_INCHARGE,
-                assignment: { stateId: state.id, zoneId: zone.id },
-              },
-              PARLIAMENT: {
-                unit: parUnitRecord,
-                role: RoleType.PARLIAMENT_INCHARGE,
-                assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id },
-              },
-              DISTRICT: {
-                unit: constUnitRecord,
-                role: RoleType.CONSTITUENCY_INCHARGE,
-                assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id },
-              },
-              CONSTITUENCY: {
-                unit: constUnitRecord,
-                role: RoleType.CONSTITUENCY_INCHARGE,
-                assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id },
-              },
-              MANDAL: {
-                unit: mandalUnitRecord,
-                role: RoleType.MANDAL_INCHARGE,
-                assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id, mandalId: mandalRecord.id },
-              },
-              VILLAGE: {
-                unit: villageUnitRecord,
-                role: RoleType.VILLAGE_INCHARGE,
-                assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id, mandalId: mandalRecord.id, villageId: villageRecord.id },
-              },
-              BOOTH: {
-                unit: boothUnitRecord,
-                role: RoleType.BOOTH_PRESIDENT,
-                assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id, mandalId: mandalRecord.id, villageId: villageRecord.id, boothId: boothRecord.id },
-              },
-              VOTER_GROUP: {
-                unit: vgUnitRecord,
-                role: RoleType.VOTER_100_INCHARGE,
-                assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id, mandalId: mandalRecord.id, villageId: villageRecord.id, boothId: boothRecord.id, voterGroupId: vgRecord.id },
-              },
-            };
-
-            // Provision each incharge atomically
-            const provisionedIncharges: any[] = [];
-            for (let idx = 0; idx < incomingIncharges.length; idx++) {
-              const incharge = incomingIncharges[idx];
-              const cleanMobile = incharge.mobileNumber.replace(/\D/g, '').slice(-10);
-              const tierKey = ((incharge as any).tierLevel || incharge.tier || 'CONSTITUENCY').toUpperCase();
-              const tierData = tierDataMap[tierKey] || tierDataMap.CONSTITUENCY;
-              const inchargeRole = incharge.role || tierData.role;
-              const resolvedUnitId = incharge.unitId || tierData.unit?.id || null;
-
-              let userCode = `LEADER-${inchargeRole.slice(0, 3)}-${cleanMobile.slice(-4)}`;
-              const codeCollision = await tx.user.findUnique({ where: { userCode } });
-              if (codeCollision) {
-                userCode = `LEADER-${inchargeRole.slice(0, 3)}-${cleanMobile.slice(-4)}-${idx + 1}`;
-              }
-
-              const inchargeUser = await tx.user.upsert({
-                where: { mobileNumber: cleanMobile },
-                update: {
-                  name: incharge.name.trim(),
-                  email: incharge.email?.trim().toLowerCase() || `${inchargeRole.toLowerCase()}-${cleanMobile.slice(-4)}@${org.code.toLowerCase()}.org`,
-                  passwordHash,
-                  role: inchargeRole,
-                  accountStatus: 'ACTIVE',
-                  organisationId: org.id,
-                  unitId: resolvedUnitId,
-                  isVerified: true,
-                },
-                create: {
-                  organisationId: org.id,
-                  userCode,
-                  name: incharge.name.trim(),
-                  mobileNumber: cleanMobile,
-                  email: incharge.email?.trim().toLowerCase() || `${inchargeRole.toLowerCase()}-${cleanMobile.slice(-4)}@${org.code.toLowerCase()}.org`,
-                  passwordHash,
-                  role: inchargeRole,
-                  accountStatus: 'ACTIVE',
-                  isVerified: true,
-                  unitId: resolvedUnitId,
-                },
-              });
-
-              if (resolvedUnitId) {
-                const existingAssignment = await tx.userHierarchyAssignment.findFirst({
-                  where: { userId: inchargeUser.id },
-                });
-                if (existingAssignment) {
-                  await tx.userHierarchyAssignment.update({
-                    where: { id: existingAssignment.id },
-                    data: {
-                      roleType: inchargeRole,
-                      isActive: true,
-                      ...tierData.assignment,
-                    },
-                  });
-                } else {
-                  await tx.userHierarchyAssignment.create({
-                    data: {
-                      userId: inchargeUser.id,
-                      roleType: inchargeRole,
-                      isActive: true,
-                      ...tierData.assignment,
-                    },
-                  });
-                }
-              }
-
-              provisionedIncharges.push({
-                ...inchargeUser,
-                tier: tierKey,
-              });
-            }
-
-            const candidateUser = provisionedIncharges[0] || null;
-
-            return {
-              org,
-              state,
-              zone,
-              parliament,
-              createdConstituencies,
-              updatedConfig,
-              candidateUser,
-              primaryRole: candidateUser?.role || primaryRole,
-              provisionedIncharges,
-            };
-          },
-          { timeout: 45000 },
-        );
-
-        const allParties = await prisma.politicalParty.findMany({
-          where: {
-            isActive: true,
-            NOT: {
-              code: { startsWith: 'TEST_' },
-            },
-          },
-          orderBy: { sortOrder: 'asc' },
-        });
-
-        // Audit logging (external side effect, outside transaction)
-        try {
-          const auditChanges = { ...body };
-          delete (auditChanges as any).password;
-          await logAudit({
-            action: AuditAction.CREATE,
-            entityType: 'ApplicationBuilder',
-            entityId: provisionResult.updatedConfig.id,
-            req,
-            changes: auditChanges as unknown as Prisma.InputJsonValue,
-          });
-        } catch (auditErr) {
-          req.log.warn({ err: auditErr }, 'ApplicationBuilder audit logging failed after transaction commit');
-        }
-
-        const formattedIncharges = provisionResult.provisionedIncharges.map((u: any) => ({
-          id: u.id,
-          tier: u.tier,
-          name: u.name,
-          mobileNumber: u.mobileNumber,
-          role: u.role,
-          unitId: u.unitId,
-        }));
-
+        const body = req.body as any;
+        const result = await provisionApplication(body, req.user);
         return reply.status(201).send(
           successResponse(
-            {
-              application: {
-                appKey: body.appKey || `app_${Date.now()}`,
-                tenantCode: provisionResult.org.code,
-                organisationId: provisionResult.org.id,
-                appName: body.appName,
-                organisationName: body.organisationName,
-                headerTitle: body.headerTitle || body.appName,
-                slogan: body.slogan,
-                logoUrl: body.logoUrl,
-                stateName: body.stateName,
-                primaryColor: body.primaryColor,
-                secondaryColor: body.secondaryColor,
-                accentColor: body.accentColor,
-                activePartyCode: body.activePartyCode,
-                appScope: body.appScope,
-                activeHierarchyLevels: body.activeHierarchyLevels,
-                parliamentName: provisionResult.parliament.name,
-                candidateName: provisionResult.candidateUser?.name || (body as any).candidateName,
-                candidateMobile: provisionResult.candidateUser?.mobileNumber || (body as any).candidateMobile,
-                candidateRole: provisionResult.primaryRole,
-                tierIncharges: formattedIncharges,
-                constituencies: provisionResult.createdConstituencies,
-                parties: allParties,
-              },
-              credentials: {
-                mobileNumber: provisionResult.candidateUser?.mobileNumber || (body as any).candidateMobile,
-                role: provisionResult.primaryRole,
-                password: initialPassword || undefined,
-                tenantCode: provisionResult.org.code,
-                tierIncharges: formattedIncharges,
-              },
-              tierIncharges: formattedIncharges,
-              constituencies: provisionResult.createdConstituencies,
-              parties: allParties,
-            },
+            result,
             'Application built and provisioned successfully! Ready for Data & Incharge Assignment.',
           ),
         );
@@ -1080,6 +319,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
           err.code === 'P2002' ||
           err.code === '23505' ||
           err.code === 'TENANT_ALREADY_EXISTS' ||
+          err.statusCode === 409 ||
           err.message?.includes('Organisation_lower_name_key') ||
           err.message?.includes('Unique constraint failed')
         ) {
@@ -1089,6 +329,9 @@ export async function cmsRoutes(fastify: FastifyInstance) {
               'TENANT_ALREADY_EXISTS',
             ),
           );
+        }
+        if (err.statusCode === 400 || err.code === 'INVALID_ROLE' || err.code === 'INVALID_INCHARGE_NAME' || err.code === 'INVALID_PHONE_NUMBER' || err.code === 'DUPLICATE_PHONE_NUMBER') {
+          return reply.status(400).send(errorResponse(err.message, err.code || 'BAD_REQUEST'));
         }
         throw err;
       }
@@ -1527,9 +770,22 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 3. BRANDING & THEME CONFIGURATION
   // --------------------------------------------------------------------------
-  fastify.get('/branding', async (_req: FastifyRequest, reply: FastifyReply) => {
-    const bundle = await loadCmsBundle();
-    return reply.send(successResponse(bundle.config));
+  fastify.get('/branding', { preHandler: [optionalAuthenticate] }, async (req: FastifyRequest, reply: FastifyReply) => {
+    const query = (req.query || {}) as Record<string, string>;
+    const authUser = (req as any).user;
+    const isSuperAdmin = authUser?.role === RoleType.SUPER_ADMIN;
+    const orgId = (authUser && !isSuperAdmin)
+      ? authUser.organisationId
+      : (authUser?.organisationId || (req.headers['x-organisation-id'] as string) || query.organisationId || query.orgId);
+    const appId = (req.headers['x-application-id'] as string) || query.applicationId || query.appId;
+    const tenantCode = (req.headers['x-tenant-code'] as string) || query.app || query.tenant || query.tenantCode || query.configKey;
+
+    try {
+      const bundle = await loadCmsBundle({ organisationId: orgId, configKey: tenantCode, applicationId: appId });
+      return reply.send(successResponse(bundle.config));
+    } catch (err: any) {
+      return reply.status(err.statusCode || 404).send(errorResponse(err.message, err.code || 'APPLICATION_NOT_FOUND'));
+    }
   });
 
   fastify.put(
@@ -1540,8 +796,35 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as z.infer<typeof brandingSchema>;
+      const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
+      const targetOrgId = isSuperAdmin ? ((body as any).organisationId || req.user?.organisationId) : req.user?.organisationId;
+      const targetAppId = (body as any).id || (body as any).applicationId || (req.headers['x-application-id'] as string);
+
+      let existingApp: any = null;
+      if (targetAppId) {
+        existingApp = await prisma.cMSConfiguration.findFirst({
+          where: {
+            id: targetAppId,
+            ...(targetOrgId ? { organisationId: targetOrgId } : {}),
+          },
+        });
+        if (!existingApp) {
+          return reply.status(404).send(errorResponse(`Application '${targetAppId}' not found.`, 'APPLICATION_NOT_FOUND'));
+        }
+      } else if (!isSuperAdmin && targetOrgId) {
+        existingApp = await prisma.cMSConfiguration.findFirst({
+          where: { organisationId: targetOrgId },
+          orderBy: { updatedAt: 'desc' },
+        });
+        if (!existingApp) {
+          return reply.status(404).send(errorResponse('No active application found for your organisation.', 'APPLICATION_NOT_FOUND'));
+        }
+      }
 
       const config = await persistCmsConfig({
+        id: existingApp?.id || (isSuperAdmin ? targetAppId : undefined),
+        configKey: existingApp?.configKey,
+        organisationId: existingApp?.organisationId || targetOrgId,
         organisationName: body.appName,
         headerTitle: body.headerTitle,
         slogan: body.slogan,
@@ -1556,7 +839,10 @@ export async function cmsRoutes(fastify: FastifyInstance) {
       // Also update primary party color if specified
       if (body.activePartyCode) {
         await prisma.politicalParty.updateMany({
-          where: { code: body.activePartyCode },
+          where: {
+            code: body.activePartyCode,
+            ...(targetOrgId ? { organisationId: targetOrgId } : {}),
+          },
           data: {
             primaryColor: body.primaryColor,
             secondaryColor: body.secondaryColor,
@@ -1705,10 +991,38 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 5. FEATURE CONFIGURATION
   // --------------------------------------------------------------------------
-  fastify.get('/features', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
-    const config = (await prisma.cMSConfiguration.findUnique({
-      where: { configKey: 'default' },
-    })) || (await prisma.cMSConfiguration.findFirst({ orderBy: { updatedAt: 'desc' } }));
+  // --------------------------------------------------------------------------
+  // 5. FEATURE CONFIGURATION
+  // --------------------------------------------------------------------------
+  fastify.get('/features', { preHandler: [authenticate] }, async (req: FastifyRequest, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
+    const targetOrgId = isSuperAdmin ? ((req.query as any)?.organisationId || req.user?.organisationId) : req.user?.organisationId;
+    const targetAppId = (req.query as any)?.applicationId || (req.query as any)?.appId || (req.headers['x-application-id'] as string);
+
+    let config: any = null;
+    if (targetAppId) {
+      config = await prisma.cMSConfiguration.findFirst({
+        where: {
+          id: targetAppId,
+          ...(targetOrgId ? { organisationId: targetOrgId } : {}),
+        },
+      });
+      if (!config) {
+        return reply.status(404).send(errorResponse(`Application '${targetAppId}' not found.`, 'APPLICATION_NOT_FOUND'));
+      }
+    } else if (targetOrgId) {
+      config = await prisma.cMSConfiguration.findFirst({
+        where: { organisationId: targetOrgId },
+        orderBy: { updatedAt: 'desc' },
+      });
+    }
+
+    if (!config && !targetOrgId) {
+      config = await prisma.cMSConfiguration.findUnique({
+        where: { configKey: 'default' },
+      });
+    }
+
     return reply.send(successResponse(config?.featureToggles || {}));
   });
 
@@ -1720,8 +1034,37 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as Record<string, boolean>;
+      const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
+      const targetOrgId = isSuperAdmin ? ((req.query as any)?.organisationId || req.user?.organisationId) : req.user?.organisationId;
+      const targetAppId = (req.query as any)?.applicationId || (req.query as any)?.appId || (req.headers['x-application-id'] as string);
 
-      const config = await persistCmsConfig({ featureToggles: body });
+      let existingApp: any = null;
+      if (targetAppId) {
+        existingApp = await prisma.cMSConfiguration.findFirst({
+          where: {
+            id: targetAppId,
+            ...(targetOrgId ? { organisationId: targetOrgId } : {}),
+          },
+        });
+        if (!existingApp) {
+          return reply.status(404).send(errorResponse(`Application '${targetAppId}' not found.`, 'APPLICATION_NOT_FOUND'));
+        }
+      } else if (!isSuperAdmin && targetOrgId) {
+        existingApp = await prisma.cMSConfiguration.findFirst({
+          where: { organisationId: targetOrgId },
+          orderBy: { updatedAt: 'desc' },
+        });
+        if (!existingApp) {
+          return reply.status(404).send(errorResponse('No active application found for your organisation.', 'APPLICATION_NOT_FOUND'));
+        }
+      }
+
+      const config = await persistCmsConfig({
+        id: existingApp?.id || (isSuperAdmin ? targetAppId : undefined),
+        configKey: existingApp?.configKey,
+        organisationId: existingApp?.organisationId || targetOrgId,
+        featureToggles: body,
+      });
 
       await logAudit({
         action: AuditAction.UPDATE,
@@ -1738,10 +1081,35 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 6. DASHBOARD CONFIGURATION (Per-role Card & Section Visibility)
   // --------------------------------------------------------------------------
-  fastify.get('/dashboard-config', { preHandler: [authenticate] }, async (_req: FastifyRequest, reply: FastifyReply) => {
-    const config = (await prisma.cMSConfiguration.findUnique({
-      where: { configKey: 'default' },
-    })) || (await prisma.cMSConfiguration.findFirst({ orderBy: { updatedAt: 'desc' } }));
+  fastify.get('/dashboard-config', { preHandler: [authenticate] }, async (req: FastifyRequest, reply: FastifyReply) => {
+    const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
+    const targetOrgId = isSuperAdmin ? ((req.query as any)?.organisationId || req.user?.organisationId) : req.user?.organisationId;
+    const targetAppId = (req.query as any)?.applicationId || (req.query as any)?.appId || (req.headers['x-application-id'] as string);
+
+    let config: any = null;
+    if (targetAppId) {
+      config = await prisma.cMSConfiguration.findFirst({
+        where: {
+          id: targetAppId,
+          ...(targetOrgId ? { organisationId: targetOrgId } : {}),
+        },
+      });
+      if (!config) {
+        return reply.status(404).send(errorResponse(`Application '${targetAppId}' not found.`, 'APPLICATION_NOT_FOUND'));
+      }
+    } else if (targetOrgId) {
+      config = await prisma.cMSConfiguration.findFirst({
+        where: { organisationId: targetOrgId },
+        orderBy: { updatedAt: 'desc' },
+      });
+    }
+
+    if (!config && !targetOrgId) {
+      config = await prisma.cMSConfiguration.findUnique({
+        where: { configKey: 'default' },
+      });
+    }
+
     return reply.send(successResponse(config?.dashboardConfig || DEFAULT_DASHBOARD_CONFIG));
   });
 
@@ -1753,8 +1121,37 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as Record<string, any>;
+      const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
+      const targetOrgId = isSuperAdmin ? ((req.query as any)?.organisationId || req.user?.organisationId) : req.user?.organisationId;
+      const targetAppId = (req.query as any)?.applicationId || (req.query as any)?.appId || (req.headers['x-application-id'] as string);
 
-      const saved = await persistCmsConfig({ dashboardConfig: body });
+      let existingApp: any = null;
+      if (targetAppId) {
+        existingApp = await prisma.cMSConfiguration.findFirst({
+          where: {
+            id: targetAppId,
+            ...(targetOrgId ? { organisationId: targetOrgId } : {}),
+          },
+        });
+        if (!existingApp) {
+          return reply.status(404).send(errorResponse(`Application '${targetAppId}' not found.`, 'APPLICATION_NOT_FOUND'));
+        }
+      } else if (!isSuperAdmin && targetOrgId) {
+        existingApp = await prisma.cMSConfiguration.findFirst({
+          where: { organisationId: targetOrgId },
+          orderBy: { updatedAt: 'desc' },
+        });
+        if (!existingApp) {
+          return reply.status(404).send(errorResponse('No active application found for your organisation.', 'APPLICATION_NOT_FOUND'));
+        }
+      }
+
+      const saved = await persistCmsConfig({
+        id: existingApp?.id || (isSuperAdmin ? targetAppId : undefined),
+        configKey: existingApp?.configKey,
+        organisationId: existingApp?.organisationId || targetOrgId,
+        dashboardConfig: body,
+      });
 
       await logAudit({
         action: AuditAction.UPDATE,
@@ -2012,12 +1409,38 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     {
       preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN)],
     },
-    async (_req: FastifyRequest, reply: FastifyReply) => {
-    const config = (await prisma.cMSConfiguration.findUnique({
-      where: { configKey: 'default' },
-    })) || (await prisma.cMSConfiguration.findFirst({ orderBy: { updatedAt: 'desc' } }));
-    return reply.send(successResponse(config?.analyticsConfig || DEFAULT_ANALYTICS_CONFIG));
-  });
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
+      const targetOrgId = isSuperAdmin ? ((req.query as any)?.organisationId || req.user?.organisationId) : req.user?.organisationId;
+      const targetAppId = (req.query as any)?.applicationId || (req.query as any)?.appId || (req.headers['x-application-id'] as string);
+
+      let config: any = null;
+      if (targetAppId) {
+        config = await prisma.cMSConfiguration.findFirst({
+          where: {
+            id: targetAppId,
+            ...(targetOrgId ? { organisationId: targetOrgId } : {}),
+          },
+        });
+        if (!config) {
+          return reply.status(404).send(errorResponse(`Application '${targetAppId}' not found.`, 'APPLICATION_NOT_FOUND'));
+        }
+      } else if (targetOrgId) {
+        config = await prisma.cMSConfiguration.findFirst({
+          where: { organisationId: targetOrgId },
+          orderBy: { updatedAt: 'desc' },
+        });
+      }
+
+      if (!config && !targetOrgId) {
+        config = await prisma.cMSConfiguration.findUnique({
+          where: { configKey: 'default' },
+        });
+      }
+
+      return reply.send(successResponse(config?.analyticsConfig || DEFAULT_ANALYTICS_CONFIG));
+    },
+  );
 
   fastify.put(
     '/analytics-config',
@@ -2027,8 +1450,37 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as z.infer<typeof analyticsConfigSchema>;
+      const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
+      const targetOrgId = isSuperAdmin ? ((req.query as any)?.organisationId || req.user?.organisationId) : req.user?.organisationId;
+      const targetAppId = (req.query as any)?.applicationId || (req.query as any)?.appId || (req.headers['x-application-id'] as string);
 
-      const saved = await persistCmsConfig({ analyticsConfig: body });
+      let existingApp: any = null;
+      if (targetAppId) {
+        existingApp = await prisma.cMSConfiguration.findFirst({
+          where: {
+            id: targetAppId,
+            ...(targetOrgId ? { organisationId: targetOrgId } : {}),
+          },
+        });
+        if (!existingApp) {
+          return reply.status(404).send(errorResponse(`Application '${targetAppId}' not found.`, 'APPLICATION_NOT_FOUND'));
+        }
+      } else if (!isSuperAdmin && targetOrgId) {
+        existingApp = await prisma.cMSConfiguration.findFirst({
+          where: { organisationId: targetOrgId },
+          orderBy: { updatedAt: 'desc' },
+        });
+        if (!existingApp) {
+          return reply.status(404).send(errorResponse('No active application found for your organisation.', 'APPLICATION_NOT_FOUND'));
+        }
+      }
+
+      const saved = await persistCmsConfig({
+        id: existingApp?.id || (isSuperAdmin ? targetAppId : undefined),
+        configKey: existingApp?.configKey,
+        organisationId: existingApp?.organisationId || targetOrgId,
+        analyticsConfig: body,
+      });
 
       await logAudit({
         action: AuditAction.UPDATE,

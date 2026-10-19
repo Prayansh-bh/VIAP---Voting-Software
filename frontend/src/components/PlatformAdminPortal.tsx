@@ -556,7 +556,7 @@ export default function PlatformAdminPortal() {
                 if (typeof window !== 'undefined' && window.history.length > 1) {
                   window.history.back();
                 } else {
-                  window.location.hash = '/roles';
+                  window.location.hash = '/';
                 }
               }}
               className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-200 transition-colors shadow-xs cursor-pointer"

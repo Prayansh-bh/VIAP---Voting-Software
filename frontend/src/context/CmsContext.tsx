@@ -19,6 +19,8 @@ import {
   fetchConstituenciesApi,
   APPLICATION_TEMPLATES,
   ApplicationTemplate,
+  getCmsCacheKey,
+  getCustomPartiesCacheKey,
 } from '../lib/cms';
 
 interface CmsContextValue {
@@ -36,7 +38,7 @@ interface CmsContextValue {
   updateParties: (nextParties: CmsParty[]) => void;
   updateFeatureToggles: (toggles: Partial<CmsConfig['featureToggles']>) => Promise<void>;
   updateHierarchyLabels: (labels: Record<string, string>) => Promise<void>;
-  reloadConfig: (options?: { organisationId?: string; tenantCode?: string }) => Promise<void>;
+  reloadConfig: (options?: { organisationId?: string; tenantCode?: string; applicationId?: string; configKey?: string }) => Promise<void>;
   t: (hierarchyLevel: string, fallback?: string) => string;
   isFeatureEnabled: (feature: keyof CmsConfig['featureToggles']) => boolean;
 }
@@ -64,7 +66,25 @@ const CmsContext = createContext<CmsContextValue>({
 export function CmsProvider({ children }: { children: React.ReactNode }) {
   const [config, setConfig] = useState<CmsConfig>(() => {
     if (typeof window === 'undefined') return DEFAULT_CONFIG;
-    const saved = localStorage.getItem('kdp_cms_config');
+    let saved = null;
+    try {
+      const urlParams = new URLSearchParams(window.location.search || window.location.hash.split('?')[1] || '');
+      const tenant = urlParams.get('app') || urlParams.get('tenant') || urlParams.get('applicationId');
+      const sessionStr = localStorage.getItem('kdp_active_session');
+      let session: any = null;
+      if (sessionStr) {
+        try { session = JSON.parse(sessionStr); } catch {}
+      }
+      const requestedApp = tenant || session?.configKey || session?.applicationId;
+      if (requestedApp && requestedApp.toLowerCase() !== 'default') {
+        const cacheKey = getCmsCacheKey(requestedApp);
+        if (cacheKey) {
+          saved = localStorage.getItem(cacheKey);
+        }
+      } else if (!tenant && !session?.configKey && !session?.applicationId && !session?.organisationId) {
+        saved = localStorage.getItem('kdp_cms_config_default');
+      }
+    } catch {}
     if (saved) {
       try {
         const parsed = JSON.parse(saved) as CmsConfig;
@@ -92,24 +112,25 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
   const [constituencies, setConstituencies] = useState<ConstituencyItem[]>(config.constituencies || DEFAULT_CONFIG.constituencies);
   const [isReady, setIsReady] = useState(false);
 
-  const loadData = async (options?: { organisationId?: string; tenantCode?: string }) => {
+  const loadData = async (options?: { organisationId?: string; tenantCode?: string; applicationId?: string; configKey?: string }) => {
     try {
       // Auto-detect tenant options from session or URL if not explicitly passed
       let effectiveOptions = options;
       if (!effectiveOptions && typeof window !== 'undefined') {
         const urlParams = new URLSearchParams(window.location.search || window.location.hash.split('?')[1] || '');
-        const urlTenant = urlParams.get('app') || urlParams.get('tenant');
+        const urlTenant = urlParams.get('app') || urlParams.get('tenant') || urlParams.get('applicationId');
         const sessionStr = localStorage.getItem('kdp_active_session');
         let session: any = null;
         if (sessionStr) {
           try { session = JSON.parse(sessionStr); } catch {}
         }
         const sessionOrgId = session?.organisationId || session?.organisation?.id;
-        const sessionTenant = session?.organisation?.code;
+        const sessionTenant = session?.organisation?.code || session?.configKey;
         if (sessionOrgId || urlTenant || sessionTenant) {
           effectiveOptions = {
             organisationId: sessionOrgId,
             tenantCode: urlTenant || sessionTenant,
+            applicationId: urlParams.get('applicationId') || session?.applicationId,
           };
         }
       }
@@ -137,11 +158,16 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
         (p: any) => !p.code?.startsWith('TEST_') && p.name !== 'Democratic Progressive Front'
       );
       setParties(cleanParties);
-      if (cleanParties.length > 0) {
-        localStorage.setItem('kdp_custom_parties', JSON.stringify(cleanParties));
-      } else {
-        localStorage.removeItem('kdp_custom_parties');
-      }
+      const cacheKey = getCmsCacheKey(data?.config || effectiveOptions);
+      const customPartiesKey = getCustomPartiesCacheKey(data?.config || effectiveOptions);
+      try {
+        if (cacheKey) {
+          localStorage.setItem(cacheKey, JSON.stringify(data?.config || {}));
+        }
+        if (customPartiesKey && cleanParties.length > 0) {
+          localStorage.setItem(customPartiesKey, JSON.stringify(cleanParties));
+        }
+      } catch {}
 
       setAnnouncements(Array.isArray(data?.announcements) ? data.announcements : []);
       if (constList.length > 0) {
@@ -178,7 +204,12 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
       if (toStore.faviconUrl && toStore.faviconUrl.startsWith('data:')) {
         toStore.faviconUrl = '';
       }
-      localStorage.setItem('kdp_cms_config', JSON.stringify(toStore));
+      const cacheKey = getCmsCacheKey(config);
+      try {
+        if (cacheKey) {
+          localStorage.setItem(cacheKey, JSON.stringify(toStore));
+        }
+      } catch {}
     }
   }, [config]);
 

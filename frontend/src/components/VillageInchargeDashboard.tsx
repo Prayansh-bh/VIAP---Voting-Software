@@ -127,10 +127,57 @@ const PARTY_BG_COLORS: Record<VoterPreference, string> = {
   OTH: 'bg-purple-50 text-purple-800 border-purple-200'
 };
 
+import { useLocation, useNavigate } from 'react-router-dom';
+
+const VILLAGE_TAB_TO_PATH: Record<TabType, string> = {
+  dashboard: '/village',
+  voters: '/village/voters',
+  live_track: '/village/live_track',
+  fake_votes: '/village/fake_votes',
+  tasks: '/village/tasks',
+  caste_analytics: '/village/caste_analytics',
+  cadre_network: '/village/cadre_network',
+  training: '/village/training',
+};
+
+const VILLAGE_PATH_TO_TAB: Record<string, TabType> = {
+  '': 'dashboard',
+  dashboard: 'dashboard',
+  voters: 'voters',
+  live_track: 'live_track',
+  'live-track': 'live_track',
+  fake_votes: 'fake_votes',
+  'fake-votes': 'fake_votes',
+  tasks: 'tasks',
+  caste_analytics: 'caste_analytics',
+  caste: 'caste_analytics',
+  cadre_network: 'cadre_network',
+  cadre: 'cadre_network',
+  training: 'training',
+  videos: 'training',
+};
+
 export default function VillageInchargeDashboard({ session, onLogout }: VillageInchargeDashboardProps) {
   const { config } = useCms();
   const { notify } = useNotification();
-  const [activeTab, setActiveTab] = useState<TabType>('dashboard');
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const subPath = location.pathname.replace(/^\/village\/?/, '').split('/')[0] || '';
+  const isKnownSubPath = subPath === '' || subPath in VILLAGE_PATH_TO_TAB;
+  const activeTab: TabType = isKnownSubPath ? (VILLAGE_PATH_TO_TAB[subPath] || 'dashboard') : 'dashboard';
+
+  // Unknown sub-routes safely return to base route
+  useEffect(() => {
+    if (!isKnownSubPath) {
+      navigate('/village', { replace: true });
+    }
+  }, [isKnownSubPath, navigate]);
+
+  const setActiveTab = (tab: TabType) => {
+    navigate(VILLAGE_TAB_TO_PATH[tab]);
+    setIsSidebarOpen(false);
+  };
   const [cadreActiveTab, setCadreActiveTab] = useState<'booth' | 'voter'>('booth');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [voters, setVoters] = useState<Voter[]>([]);

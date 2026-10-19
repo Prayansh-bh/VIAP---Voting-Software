@@ -3,7 +3,18 @@ import QRCode from 'qrcode';
 import { errorResponse, successResponse } from '../../common/response.js';
 import { isOriginAllowed } from '../../common/origin.js';
 import { AuthService } from './auth.service.js';
-import { RequestOtpDto, RegisterOtpDto, VerifyRegisterOtpDto, VerifyOtpDto, DeviceSessionDto, DemoLoginDto } from './auth.schema.js';
+import {
+  RequestOtpDto,
+  RegisterOtpDto,
+  VerifyRegisterOtpDto,
+  VerifyOtpDto,
+  DeviceSessionDto,
+  DemoLoginDto,
+  UpdateProfileDto,
+  ChangePasswordDto,
+  RequestMobileChangeOtpDto,
+  VerifyMobileChangeOtpDto,
+} from './auth.schema.js';
 
 export class AuthController {
   /**
@@ -122,6 +133,9 @@ export class AuthController {
     } catch (err: any) {
       const statusCode = err.statusCode || 400;
       const code = err.code || 'OTP_REQUEST_FAILED';
+      if (err.retryAfter) {
+        reply.header('Retry-After', err.retryAfter.toString());
+      }
       return reply.status(statusCode).send(errorResponse(err.message, code, {
         retryAfter: err.retryAfter,
       }));
@@ -139,6 +153,9 @@ export class AuthController {
     } catch (err: any) {
       const statusCode = err.statusCode || 400;
       const code = err.code || 'OTP_REQUEST_FAILED';
+      if (err.retryAfter) {
+        reply.header('Retry-After', err.retryAfter.toString());
+      }
       return reply.status(statusCode).send(errorResponse(err.message, code, {
         retryAfter: err.retryAfter,
       }));
@@ -276,6 +293,121 @@ export class AuthController {
     } catch (err: any) {
       const statusCode = err.statusCode || 404;
       return reply.status(statusCode).send(errorResponse(err.message, err.code || 'USER_NOT_FOUND'));
+    }
+  }
+
+  static async updateProfile(req: FastifyRequest, reply: FastifyReply) {
+    if (!req.user) {
+      return reply.status(401).send(errorResponse('Authentication required.', 'UNAUTHORIZED'));
+    }
+
+    const body = req.body as UpdateProfileDto;
+    try {
+      const updatedUser = await AuthService.updateUserProfile(req.user.userId, body, {
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+      return reply.status(200).send(successResponse(updatedUser, 'Profile updated successfully.'));
+    } catch (err: any) {
+      const statusCode = err.statusCode || 400;
+      return reply.status(statusCode).send(errorResponse(err.message, err.code || 'PROFILE_UPDATE_FAILED'));
+    }
+  }
+
+  static async changePassword(req: FastifyRequest, reply: FastifyReply) {
+    if (!req.user) {
+      return reply.status(401).send(errorResponse('Authentication required.', 'UNAUTHORIZED'));
+    }
+
+    const body = req.body as ChangePasswordDto;
+    try {
+      const result = await AuthService.changePassword(req.user.userId, body, {
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+
+      reply.setCookie('access_token', result.token, {
+        path: '/',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 86400,
+      });
+
+      reply.setCookie('refresh_token', result.refreshToken, {
+        path: '/api/auth',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 86400,
+      });
+
+      return reply.status(200).send(successResponse(result, result.message));
+    } catch (err: any) {
+      const statusCode = err.statusCode || 400;
+      return reply.status(statusCode).send(errorResponse(err.message, err.code || 'PASSWORD_CHANGE_FAILED'));
+    }
+  }
+
+  static async requestMobileChangeOtp(req: FastifyRequest, reply: FastifyReply) {
+    if (!req.user) {
+      return reply.status(401).send(errorResponse('Authentication required.', 'UNAUTHORIZED'));
+    }
+
+    const body = req.body as RequestMobileChangeOtpDto;
+    try {
+      const result = await AuthService.requestMobileChangeOtp(req.user.userId, body, {
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+      return reply.status(200).send(successResponse(result, result.message));
+    } catch (err: any) {
+      const statusCode = err.statusCode || 400;
+      if (err.retryAfter) {
+        reply.header('Retry-After', err.retryAfter.toString());
+      }
+      return reply.status(statusCode).send(
+        errorResponse(
+          err.message,
+          err.code || 'MOBILE_CHANGE_OTP_FAILED',
+          err.retryAfter ? { retryAfter: err.retryAfter } : undefined
+        )
+      );
+    }
+  }
+
+  static async verifyMobileChangeOtp(req: FastifyRequest, reply: FastifyReply) {
+    if (!req.user) {
+      return reply.status(401).send(errorResponse('Authentication required.', 'UNAUTHORIZED'));
+    }
+
+    const body = req.body as VerifyMobileChangeOtpDto;
+    try {
+      const result = await AuthService.verifyMobileChangeOtp(req.user.userId, body, {
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+
+      reply.setCookie('access_token', result.token, {
+        path: '/',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 86400,
+      });
+
+      reply.setCookie('refresh_token', result.refreshToken, {
+        path: '/api/auth',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 86400,
+      });
+
+      return reply.status(200).send(successResponse(result, result.message));
+    } catch (err: any) {
+      const statusCode = err.statusCode || 400;
+      return reply.status(statusCode).send(errorResponse(err.message, err.code || 'MOBILE_CHANGE_VERIFY_FAILED'));
     }
   }
 

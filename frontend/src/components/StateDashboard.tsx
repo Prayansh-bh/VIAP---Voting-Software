@@ -56,9 +56,58 @@ type StateTabType =
   | 'cadre_network'
   | 'ai_intel';
 
+import { useLocation, useNavigate } from 'react-router-dom';
+
+const STATE_TAB_TO_PATH: Record<StateTabType, string> = {
+  dashboard: '/state',
+  constituency_list: '/state/constituency_list',
+  parliament_list: '/state/parliament_list',
+  zone_list: '/state/zone_list',
+  ground_reports: '/state/ground_reports',
+  campaign: '/state/campaign',
+  poll: '/state/poll',
+  cadre_network: '/state/cadre_network',
+  ai_intel: '/state/ai_intel',
+};
+
+const STATE_PATH_TO_TAB: Record<string, StateTabType> = {
+  '': 'dashboard',
+  dashboard: 'dashboard',
+  constituency_list: 'constituency_list',
+  constituencies: 'constituency_list',
+  parliament_list: 'parliament_list',
+  parliaments: 'parliament_list',
+  zone_list: 'zone_list',
+  zones: 'zone_list',
+  ground_reports: 'ground_reports',
+  reports: 'ground_reports',
+  campaign: 'campaign',
+  poll: 'poll',
+  cadre_network: 'cadre_network',
+  cadre: 'cadre_network',
+  ai_intel: 'ai_intel',
+  'ai-intel': 'ai_intel',
+};
+
 export default function StateDashboard({ session, onLogout }: StateDashboardProps) {
   const { config } = useCms();
-  const [activeTab, setActiveTab] = useState<StateTabType>('dashboard');
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const subPath = location.pathname.replace(/^\/state\/?/, '').split('/')[0] || '';
+  const isKnownSubPath = subPath === '' || subPath in STATE_PATH_TO_TAB;
+  const activeTab: StateTabType = isKnownSubPath ? (STATE_PATH_TO_TAB[subPath] || 'dashboard') : 'dashboard';
+
+  // Unknown sub-routes safely return to base route
+  useEffect(() => {
+    if (!isKnownSubPath) {
+      navigate('/state', { replace: true });
+    }
+  }, [isKnownSubPath, navigate]);
+
+  const setActiveTab = (tab: StateTabType) => {
+    navigate(STATE_TAB_TO_PATH[tab]);
+  };
   const [assemblyFilter, setAssemblyFilter] = useState<'all' | 'winning' | 'trailing'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedZone, setSelectedZone] = useState<string | null>(null);
@@ -97,7 +146,7 @@ export default function StateDashboard({ session, onLogout }: StateDashboardProp
         district: config.stateName || 'State District',
         parliament: c.parliamentName || config.parliamentName || 'Parliament Segment',
         incharge: c.mlaName || c.candidateName || 'Assigned Incharge',
-        phone: '+91 00000 00000',
+        phone: 'Not available',
         voters: hasVoters ? (c.totalVoters || c._count?.voters || 0) : 0,
         incVotes: 0,
         brsVotes: 0,
@@ -106,7 +155,7 @@ export default function StateDashboard({ session, onLogout }: StateDashboardProp
         neutralVotes: 0,
         fakeVotes: 0,
         status: hasVoters ? ('WINNING' as 'WINNING' | 'TRAILING' | 'AWAITING_INGESTION') : ('AWAITING_INGESTION' as 'WINNING' | 'TRAILING' | 'AWAITING_INGESTION'),
-        margin: hasVoters ? '+15.2%' : '0',
+        margin: '0.0%',
       }));
     }
     return [];
@@ -118,11 +167,11 @@ export default function StateDashboard({ session, onLogout }: StateDashboardProp
         id: 1,
         name: config.parliamentName,
         candidate: config.candidateName || 'Active Candidate',
-        margin: '0',
+        margin: '0.0%',
         voters: totalVotersCount,
         status: hasVoters ? ('WINNING' as const) : ('AWAITING_INGESTION' as const),
         incharge: session.userName || 'Assigned Incharge',
-        phone: session.mobileNumber || '+91 00000 00000'
+        phone: session.mobileNumber || 'Not available'
       }];
     }
     const distinct = Array.from(new Set(relevantConstituencies.map(c => c.parliament).filter(Boolean)));
@@ -131,11 +180,11 @@ export default function StateDashboard({ session, onLogout }: StateDashboardProp
         id: idx + 1,
         name: pName,
         candidate: 'Assigned Candidate',
-        margin: '0',
+        margin: '0.0%',
         voters: relevantConstituencies.filter(c => c.parliament === pName).reduce((sum, c) => sum + c.voters, 0),
         status: hasVoters ? ('WINNING' as const) : ('AWAITING_INGESTION' as const),
         incharge: session.userName || 'Assigned Incharge',
-        phone: session.mobileNumber || '+91 00000 00000'
+        phone: session.mobileNumber || 'Not available'
       }));
     }
     return [];
@@ -146,15 +195,15 @@ export default function StateDashboard({ session, onLogout }: StateDashboardProp
       {
         name: `${config.stateName || 'State'} Command Zone`,
         coordinator: session.userName || 'State Incharge',
-        phone: session.mobileNumber || '+91 00000 00000',
+        phone: session.mobileNumber || 'Not available',
         parliaments: parliamentsList.map(p => p.name),
         assembliesCount: relevantConstituencies.length,
         projectedWins: hasVoters ? relevantConstituencies.length : 0,
         voters: totalVotersFormatted,
-        voteShare: hasVoters ? '48.5%' : '0.0%'
+        voteShare: stateAnalytics?.summary?.turnoutPercentage ? `${stateAnalytics.summary.turnoutPercentage}%` : '0.0%'
       }
     ];
-  }, [config.stateName, session, parliamentsList, relevantConstituencies, hasVoters, totalVotersFormatted]);
+  }, [config.stateName, session, parliamentsList, relevantConstituencies, hasVoters, totalVotersFormatted, stateAnalytics]);
 
   const totalSeats = relevantConstituencies.length;
   const projectedWins = hasVoters ? totalSeats : 0;

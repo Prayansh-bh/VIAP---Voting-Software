@@ -10,6 +10,10 @@ import {
   deviceSessionSchema,
   revokeDeviceSchema,
   demoLoginSchema,
+  updateProfileSchema,
+  changePasswordSchema,
+  requestMobileChangeOtpSchema,
+  verifyMobileChangeOtpSchema,
 } from './auth.schema.js';
 import { AuthController } from './auth.controller.js';
 
@@ -143,6 +147,46 @@ export async function authRoutes(fastify: FastifyInstance) {
       preHandler: [authenticate],
     },
     AuthController.me,
+  );
+
+  // Authenticated user profile update (name, email)
+  fastify.patch(
+    '/profile',
+    {
+      preHandler: [authenticate],
+      preValidation: [validateBody(updateProfileSchema)],
+    },
+    AuthController.updateProfile,
+  );
+
+  // Secure password/passcode change
+  fastify.post(
+    '/change-password',
+    {
+      preHandler: [authenticate],
+      preValidation: [validateBody(changePasswordSchema)],
+    },
+    AuthController.changePassword,
+  );
+
+  // Tenant user mobile number change - Phase A: Request OTP to proposed number
+  fastify.post(
+    '/mobile-change/request-otp',
+    {
+      preHandler: [authenticate],
+      preValidation: [validateBody(requestMobileChangeOtpSchema)],
+    },
+    AuthController.requestMobileChangeOtp,
+  );
+
+  // Tenant user mobile number change - Phase B: Verify OTP & update registered number
+  fastify.post(
+    '/mobile-change/verify',
+    {
+      preHandler: [authenticate],
+      preValidation: [validateBody(verifyMobileChangeOtpSchema)],
+    },
+    AuthController.verifyMobileChangeOtp,
   );
 
   // List user's authorized devices

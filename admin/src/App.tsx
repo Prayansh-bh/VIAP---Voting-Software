@@ -1,4 +1,13 @@
+import { getAppUrl } from './lib/env';
 import React, { useState, useEffect } from 'react';
+import {
+  useLocation,
+  useNavigate,
+  useParams,
+  Routes,
+  Route,
+  Navigate,
+} from 'react-router-dom';
 import AdminSidebar from './components/AdminSidebar';
 import DashboardOverview from './components/DashboardOverview';
 import ApplicationManagement from './components/ApplicationManagement';
@@ -6,9 +15,10 @@ import DataIngestion from './components/DataIngestion';
 import InchargeManagement from './components/InchargeManagement';
 import ApprovalEngine from './components/ApprovalEngine';
 import AdminLogin from './components/AdminLogin';
-import CmsBrandStudio from './components/CmsBrandStudio';
 import CmsStudio from './components/CmsStudio';
+import CmsBrandGateway from './components/CmsBrandGateway';
 import ApiCredentialsManager from './components/ApiCredentialsManager';
+import AdminProfileSecurity from './components/AdminProfileSecurity';
 import {
   AppInstance,
   InchargeRecord,
@@ -19,6 +29,7 @@ import {
 import {
   fetchApplications,
   createApplication,
+  updateApplication,
   deleteApplication,
   fetchApplicationSummary,
   fetchIncharges,
@@ -35,116 +46,279 @@ import {
   setAdminSession,
   clearAdminToken,
 } from './lib/auth';
-import { Shield, Radio, Server, ExternalLink } from 'lucide-react';
+import { useNotification } from './context/NotificationContext';
+import { useCms } from './context/CmsContext';
+import { Shield, Radio, Server, ExternalLink, AlertTriangle, ArrowLeft, Plus, Layers, Palette, Sparkles } from 'lucide-react';
+
+// 404 Route View
+function AdminNotFound() {
+  const navigate = useNavigate();
+  return (
+    <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-3xl max-w-xl mx-auto my-12 space-y-4">
+      <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto text-2xl font-black">
+        404
+      </div>
+      <h2 className="text-xl font-bold text-white">Route Not Found</h2>
+      <p className="text-xs text-slate-400">The administrative route you navigated to does not exist or has moved.</p>
+      <button
+        onClick={() => navigate('/admin/dashboard')}
+        className="px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs cursor-pointer shadow-lg shadow-amber-400/20 transition"
+      >
+        Return to Executive Command
+      </button>
+    </div>
+  );
+}
+
+// Wrapper for /admin/applications/:id/edit
+function RouteAppEditor({
+  apps,
+  onAppSaved,
+}: {
+  apps: AppInstance[];
+  onAppSaved: () => Promise<void>;
+}) {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const matchedApp = apps.find(
+    (a) => a.id === id || a.configKey === id || a.tenantCode === id
+  );
+
+  if (!matchedApp && apps.length > 0) {
+    return (
+      <div className="p-8 text-center bg-slate-900 border border-slate-800 rounded-3xl max-w-lg mx-auto my-12 space-y-3">
+        <AlertTriangle className="w-10 h-10 text-amber-400 mx-auto" />
+        <h3 className="text-base font-bold text-white">Application Not Found</h3>
+        <p className="text-xs text-slate-400">
+          No political party application matches identifier: <code className="text-amber-300 font-mono">{id}</code>
+        </p>
+        <button
+          onClick={() => navigate('/admin/applications')}
+          className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition"
+        >
+          Back to Party Applications
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-slate-900/90 rounded-3xl overflow-hidden shadow-2xl border border-slate-800 text-slate-100">
+      <CmsStudio
+        isOpen={true}
+        mode="editor"
+        currentApp={matchedApp || null}
+        targetAppId={id}
+        onClose={() => navigate('/admin/applications')}
+        onAppBuilt={async () => {
+          await onAppSaved();
+          navigate('/admin/applications');
+        }}
+        onOpenRoleModules={() => navigate('/admin/applications')}
+      />
+    </div>
+  );
+}
+
+// Wrapper for /admin/cms/:applicationId
+function RouteCmsEditor({
+  apps,
+  selectedApp,
+  onAppSaved,
+}: {
+  apps: AppInstance[];
+  selectedApp: AppInstance | null;
+  onAppSaved: () => Promise<void>;
+}) {
+  const { applicationId } = useParams<{ applicationId?: string }>();
+  const navigate = useNavigate();
+
+  // If route is /admin/cms/new, redirect directly to the new application wizard
+  if (applicationId === 'new') {
+    return <Navigate to="/admin/applications/new" replace />;
+  }
+
+  const targetApp = applicationId
+    ? apps.find(
+        (a) => a.id === applicationId || a.configKey === applicationId || a.tenantCode === applicationId
+      ) || null
+    : selectedApp;
+
+  if (applicationId && !targetApp && apps.length > 0) {
+    return (
+      <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-3xl max-w-xl mx-auto my-12 space-y-4">
+        <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto text-2xl font-black">
+          <Palette className="w-8 h-8" />
+        </div>
+        <h2 className="text-xl font-bold text-white">Party Application Not Found</h2>
+        <p className="text-xs text-slate-400">
+          The requested application ID was not found among your active political tenants.
+        </p>
+        <div className="flex items-center justify-center gap-3 pt-2">
+          <button
+            onClick={() => navigate('/admin/cms')}
+            className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs cursor-pointer border border-slate-700 transition"
+          >
+            Back to CMS Studio Hub
+          </button>
+          <button
+            onClick={() => navigate('/admin/applications/new')}
+            className="px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs cursor-pointer shadow-lg shadow-amber-400/20 transition"
+          >
+            Provision New Party
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Contextual Top Bar when inside CMS Editor */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl px-5 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/admin/cms')}
+            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold transition flex items-center gap-1.5 cursor-pointer border border-slate-700/60"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>All Parties (CMS Hub)</span>
+          </button>
+
+          {targetApp && (
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500">•</span>
+              <span className="text-slate-400">Editing Brand Identity for:</span>
+              <span className="px-2.5 py-1 rounded-lg font-bold bg-amber-400/10 text-amber-300 border border-amber-400/30 flex items-center gap-1.5">
+                <span
+                  className="w-2 h-2 rounded-full"
+                  style={{ backgroundColor: targetApp.primaryColor || '#F59E0B' }}
+                />
+                {targetApp.name} ({targetApp.partyCode})
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {targetApp && (
+            <button
+              onClick={() => navigate('/admin/applications')}
+              className="px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition font-medium flex items-center gap-1.5 cursor-pointer"
+              title="Edit Administrative Hierarchy Tiers (Booths, Mandals, etc.)"
+            >
+              <Layers className="w-3.5 h-3.5 text-amber-400" />
+              <span>Party Tiers & Hierarchy</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => navigate('/admin/applications/new')}
+            className="px-3 py-1.5 rounded-xl bg-amber-400/10 hover:bg-amber-400 text-amber-300 hover:text-slate-950 font-bold transition flex items-center gap-1.5 cursor-pointer border border-amber-400/30"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Provision New Party</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-slate-900/90 rounded-3xl overflow-hidden shadow-2xl border border-slate-800 text-slate-100">
+        <CmsStudio
+          isOpen={true}
+          mode="editor"
+          currentApp={targetApp}
+          targetAppId={applicationId || targetApp?.id}
+          onClose={() => navigate('/admin/cms')}
+          onAppBuilt={async () => {
+            await onAppSaved();
+            navigate('/admin/cms');
+          }}
+          onOpenRoleModules={() => navigate('/admin/applications')}
+        />
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
+  const { notify } = useNotification();
+  const { reloadConfig } = useCms();
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const [adminUser, setAdminUser] = useState<AdminUser | null>(() => getAdminSession());
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [isCreateAppModalOpen, setIsCreateAppModalOpen] = useState(false);
 
   // Multi-party state
   const [apps, setApps] = useState<AppInstance[]>([]);
   const [selectedApp, setSelectedApp] = useState<AppInstance | null>(null);
 
-  // Incharges and Approvals state
+  // Incharge state
   const [incharges, setIncharges] = useState<InchargeRecord[]>([]);
+
+  // Approval state
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
+
+  // Summary telemetry state
   const [summary, setSummary] = useState<ApplicationSummary | null>(null);
+
   const [loading, setLoading] = useState(true);
 
-  // Listen for session expiry to reset auth state cleanly
-  useEffect(() => {
-    const handleExpired = () => {
-      setAdminUser(null);
-    };
-    window.addEventListener('admin_session_expired', handleExpired);
-    return () => window.removeEventListener('admin_session_expired', handleExpired);
-  }, []);
+  // Determine active tab from URL path
+  const currentTab = (() => {
+    const p = location.pathname;
+    if (p.startsWith('/admin/applications')) return 'applications';
+    if (p.startsWith('/admin/cms')) return 'cms';
+    if (p.startsWith('/admin/data')) return 'data';
+    if (p.startsWith('/admin/incharges')) return 'incharges';
+    if (p.startsWith('/admin/approvals')) return 'approvals';
+    if (p.startsWith('/admin/credentials')) return 'credentials';
+    if (p.startsWith('/admin/settings')) return 'settings';
+    return 'dashboard';
+  })();
 
-  // Load initial data from Postgres backend with localStorage tenant memory
-  useEffect(() => {
-    async function loadData() {
-      setLoading(true);
-      try {
-        const loadedApps = await fetchApplications();
-        setApps(loadedApps);
+  const loadData = async () => {
+    try {
+      const [appsData, inchargesData, approvalsData, summaryData] = await Promise.all([
+        fetchApplications(),
+        fetchIncharges(),
+        fetchApprovals(),
+        fetchApplicationSummary(),
+      ]);
 
-        const savedTenantId = localStorage.getItem('pc_admin_active_tenant_id');
-        const savedDefaultId = localStorage.getItem('pc_admin_default_tenant_id');
-        const activeApp =
-          (savedTenantId && loadedApps.find((a) => a.id === savedTenantId)) ||
-          (savedDefaultId && loadedApps.find((a) => a.id === savedDefaultId)) ||
-          loadedApps.find((a) => a.isDefault) ||
-          loadedApps[0] ||
-          null;
+      setApps(appsData);
+      setIncharges(inchargesData);
+      setApprovals(approvalsData);
+      setSummary(summaryData);
 
-        setSelectedApp(activeApp);
-        if (activeApp?.id) {
-          localStorage.setItem('pc_admin_active_tenant_id', activeApp.id);
-        }
-
-        const [loadedIncharges, loadedApprovals, loadedSummary] = await Promise.all([
-          fetchIncharges(activeApp?.id),
-          fetchApprovals(),
-          fetchApplicationSummary(activeApp?.id || 'default'),
-        ]);
-        setIncharges(loadedIncharges);
-        setApprovals(loadedApprovals);
-        setSummary(loadedSummary);
-      } catch (err) {
-        console.error('Failed to load initial data:', err);
-      } finally {
-        setLoading(false);
+      if (appsData.length > 0 && !selectedApp) {
+        const defaultApp = appsData.find((a) => a.isDefault) || appsData[0];
+        setSelectedApp(defaultApp);
+        reloadConfig({
+          organisationId: (defaultApp as any).organisationId || (defaultApp.id && defaultApp.id.length === 36 ? defaultApp.id : undefined),
+          tenantCode: defaultApp.tenantCode || defaultApp.configKey,
+        });
       }
+    } catch (err: any) {
+      console.warn('Backend connection issue:', err);
+      notify.error('Failed to connect to Fastify API on port 4000. Is backend running?', 'API Offline');
+    } finally {
+      setLoading(false);
     }
+  };
 
+  useEffect(() => {
     if (adminUser) {
       loadData();
     }
   }, [adminUser]);
 
-  // Dynamically refresh applications list whenever admin switches to applications or dashboard tab
-  useEffect(() => {
-    if (adminUser && (activeTab === 'applications' || activeTab === 'dashboard')) {
-      fetchApplications().then((loaded) => {
-        setApps(loaded);
-      }).catch((err) => console.error('Failed to sync applications list:', err));
-    }
-  }, [activeTab, adminUser]);
-
-  // Dynamically refresh incharges and summary when active application changes
-  useEffect(() => {
-    if (!selectedApp?.id) return;
-    localStorage.setItem('pc_admin_active_tenant_id', selectedApp.id);
-    async function refreshActiveAppData() {
-      try {
-        const [loadedIncharges, loadedSummary] = await Promise.all([
-          fetchIncharges(selectedApp!.id),
-          fetchApplicationSummary(selectedApp!.id),
-        ]);
-        setIncharges(loadedIncharges);
-        setSummary(loadedSummary);
-      } catch (err) {
-        console.error('Failed to refresh active app data:', err);
-      }
-    }
-    refreshActiveAppData();
-  }, [selectedApp?.id]);
-
-  const handleLoginSuccess = (user: AdminUser) => {
-    setAdminUser(user);
-    setAdminSession(user);
-  };
-
-  const handleLogout = () => {
-    clearAdminToken();
-    setAdminUser(null);
-  };
-
   const handleSelectApp = (app: AppInstance | null) => {
     setSelectedApp(app);
-    if (app?.id) {
-      localStorage.setItem('pc_admin_active_tenant_id', app.id);
+    if (app) {
+      reloadConfig({
+        organisationId: (app as any).organisationId || (app.id && app.id.length === 36 ? app.id : undefined),
+        tenantCode: app.tenantCode || app.configKey,
+      });
     }
   };
 
@@ -155,252 +329,356 @@ export default function App() {
     handleSelectApp(created);
   };
 
-  const handleDeleteApp = async (id: string) => {
-    await deleteApplication(id);
+  const handleUpdateApp = async (id: string, formData: Partial<AppInstance>) => {
+    const updated = await updateApplication(id, formData);
     const refreshed = await fetchApplications();
     setApps(refreshed);
     if (selectedApp?.id === id) {
-      const nextApp = refreshed.find((a) => a.isDefault) || refreshed[0] || null;
-      handleSelectApp(nextApp);
+      const refreshedTarget = refreshed.find((a) => a.id === id) || updated;
+      handleSelectApp(refreshedTarget);
+    }
+  };
+
+  const handleDeleteApp = async (id: string) => {
+    await deleteApplication(id);
+    try {
+      const refreshed = await fetchApplications();
+      setApps(refreshed);
+      if (selectedApp?.id === id) {
+        const nextApp = refreshed.find((a) => a.isDefault) || refreshed[0] || null;
+        handleSelectApp(nextApp);
+      }
+    } catch (refreshErr) {
+      setApps((prev) => prev.filter((a) => a.id !== id));
+      throw refreshErr;
     }
   };
 
   const handleSetDefault = (id: string) => {
-    localStorage.setItem('pc_admin_default_tenant_id', id);
-    localStorage.setItem('pc_admin_active_tenant_id', id);
-    const updated = apps.map((a) => ({ ...a, isDefault: a.id === id }));
-    setApps(updated);
-    const target = updated.find((a) => a.id === id) || null;
-    setSelectedApp(target);
+    setApps(apps.map((a) => ({ ...a, isDefault: a.id === id })));
+    notify.success('Default political application updated.', 'Default Tenant');
   };
 
   const handleTransferIncharge = async (inchargeId: string, targetJurisdiction: string, targetLevel: string) => {
-    if (!selectedApp) return;
-    await transferIncharge(selectedApp.id, inchargeId, targetJurisdiction, targetLevel);
-    const refreshed = await fetchIncharges(selectedApp.id);
-    setIncharges(refreshed);
+    const appId = selectedApp?.id || 'default';
+    const res = await transferIncharge(appId, inchargeId, targetJurisdiction, targetLevel);
+    if (res?.success) {
+      const refreshed = await fetchIncharges(appId);
+      setIncharges(refreshed);
+    }
   };
 
-  const handleReplaceIncharge = async (inchargeId: string, replacementName: string, replacementMobile: string, handoverNote?: string) => {
-    if (!selectedApp) return;
-    await replaceIncharge(selectedApp.id, inchargeId, replacementName, replacementMobile, handoverNote);
-    const refreshed = await fetchIncharges(selectedApp.id);
-    setIncharges(refreshed);
+  const handleReplaceIncharge = async (inchargeId: string, newName: string, newPhone: string, note?: string) => {
+    const appId = selectedApp?.id || 'default';
+    const res = await replaceIncharge(appId, inchargeId, newName, newPhone, note);
+    if (res?.success) {
+      const refreshed = await fetchIncharges(appId);
+      setIncharges(refreshed);
+    }
   };
 
   const handleToggleInchargeStatus = async (inchargeId: string, status: string) => {
-    if (!selectedApp) return;
-    await updateInchargeStatus(selectedApp.id, inchargeId, status);
-    const refreshed = await fetchIncharges(selectedApp.id);
-    setIncharges(refreshed);
+    const appId = selectedApp?.id || 'default';
+    const res = await updateInchargeStatus(appId, inchargeId, status);
+    if (res?.success) {
+      const refreshed = await fetchIncharges(appId);
+      setIncharges(refreshed);
+    }
   };
 
   const handleResetInchargeCredentials = async (inchargeId: string) => {
-    if (!selectedApp) return;
-    await resetInchargeCredentials(selectedApp.id, inchargeId);
+    const appId = selectedApp?.id || 'default';
+    await resetInchargeCredentials(appId, inchargeId);
   };
 
   const handleApprove = async (id: string, reviewerNote?: string) => {
     await approveRequest(id, reviewerNote);
-    const refreshed = await fetchApprovals();
-    setApprovals(refreshed);
+    setApprovals(approvals.filter((a) => a.id !== id));
   };
 
   const handleReject = async (id: string, reason: string) => {
     await rejectRequest(id, reason);
-    const refreshed = await fetchApprovals();
-    setApprovals(refreshed);
+    setApprovals(approvals.filter((a) => a.id !== id));
   };
 
-  // If unauthenticated, show secure admin login
+  const handleLoginSuccess = (user: AdminUser) => {
+    setAdminUser(user);
+    setAdminSession(user);
+    notify.success(`Authenticated as ${user.name} (${user.role})`, 'Access Granted');
+    navigate('/admin/dashboard');
+  };
+
+  const handleLogout = () => {
+    clearAdminToken();
+    setAdminUser(null);
+    notify.info('Logged out of Platform Governance.', 'Session Ended');
+  };
+
   if (!adminUser) {
     return <AdminLogin onLoginSuccess={handleLoginSuccess} />;
   }
 
-  const pendingApprovalsCount = approvals.filter((a) => a.status === 'PENDING').length;
-
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex selection:bg-amber-400 selection:text-slate-950 font-sans">
-      {/* Fixed Sidebar */}
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row antialiased selection:bg-amber-400 selection:text-slate-950 font-sans">
+      {/* Platform Sidebar */}
       <AdminSidebar
-        activeTab={activeTab}
-        onSelectTab={setActiveTab}
+        activeTab={currentTab}
+        onSelectTab={(tab) => navigate(`/admin/${tab}`)}
         adminUser={adminUser}
         onLogout={handleLogout}
-        pendingApprovalsCount={pendingApprovalsCount}
+        pendingApprovalsCount={approvals.filter((a) => a.status === 'PENDING').length}
       />
 
-      {/* Main Administrative Canvas */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Telemetry Header Bar */}
-        <header className="h-16 px-6 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80 flex items-center justify-between sticky top-0 z-20">
+      {/* Main Administrative Viewport */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+        {/* Top Operational Header */}
+        <header className="sticky top-0 z-20 bg-slate-900/80 backdrop-blur-md border-b border-slate-800/80 px-6 py-3.5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-400">Active Tenant Scope:</span>
-              <span className="px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-800 text-xs font-black text-white flex items-center gap-1.5">
-                <span
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: selectedApp?.primaryColor || '#F59E0B' }}
-                />
-                {selectedApp?.name || 'All Applications'}
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-xs font-bold text-slate-200 tracking-wide uppercase">
+                Platform Telemetry Online
               </span>
             </div>
+            {selectedApp && (
+              <span className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-amber-400/10 text-amber-300 border border-amber-400/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                Selected: {selectedApp.name} ({selectedApp.partyCode})
+              </span>
+            )}
           </div>
 
-          <div className="flex items-center gap-4 text-xs font-medium">
+          <div className="flex items-center gap-3 text-xs">
             <div className="hidden sm:flex items-center gap-2 text-slate-400">
               <Server className="w-3.5 h-3.5 text-emerald-400" />
-              <span>PostgreSQL (Port 5432)</span>
+              <span>PostgreSQL Connected</span>
             </div>
 
             <a
-              href="http://localhost:3000"
+              href={getAppUrl()}
               target="_blank"
               rel="noopener noreferrer"
               className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold transition flex items-center gap-1.5 shadow-sm shadow-amber-400/20"
             >
-              <span>Party App (Port 3000)</span>
+              <span>Launch Party App</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
           </div>
         </header>
 
-        {/* Content Area */}
+        {/* Content Area with Declarative Routes */}
         <main className="flex-1 p-6 max-w-7xl w-full mx-auto">
-          {activeTab === 'dashboard' && (
-            <DashboardOverview
-              apps={apps}
-              incharges={incharges}
-              summary={summary}
-              selectedApp={selectedApp}
-              pendingApprovals={approvals}
-              onNavigateTab={setActiveTab}
-              onCreateNewApp={() => {
-                setActiveTab('applications');
-                setIsCreateAppModalOpen(true);
-              }}
-              onSelectApp={(app) => {
-                handleSelectApp(app);
-                setActiveTab('applications');
-              }}
-            />
-          )}
+          <Routes>
+            <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
+            <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
 
-          {activeTab === 'applications' && (
-            <ApplicationManagement
-              apps={apps}
-              selectedApp={selectedApp}
-              onSelectApp={handleSelectApp}
-              onCreateApp={handleCreateApp}
-              onDeleteApp={handleDeleteApp}
-              onSetDefault={handleSetDefault}
-              isCreateModalOpen={isCreateAppModalOpen}
-              onOpenCreateModal={() => setIsCreateAppModalOpen(true)}
-              onCloseCreateModal={() => setIsCreateAppModalOpen(false)}
+            <Route
+              path="/admin/dashboard"
+              element={
+                <DashboardOverview
+                  apps={apps}
+                  incharges={incharges}
+                  summary={summary}
+                  selectedApp={selectedApp}
+                  pendingApprovals={approvals}
+                  onNavigateTab={(tab) => navigate(`/admin/${tab}`)}
+                  onCreateNewApp={() => navigate('/admin/applications/new')}
+                  onSelectApp={(app) => {
+                    handleSelectApp(app);
+                    navigate('/admin/applications');
+                  }}
+                />
+              }
             />
-          )}
 
-          {activeTab === 'cms' && (
-            <div className="bg-slate-900/90 rounded-3xl overflow-hidden shadow-2xl border border-slate-800 text-slate-100">
-              <CmsStudio
-                isOpen={true}
-                mode="editor"
-                onClose={() => setActiveTab('dashboard')}
-                onAppBuilt={async (newAppData) => {
-                  const loaded = await fetchApplications();
-                  setApps(loaded);
-                  if (newAppData?.id) {
-                    const found = loaded.find((a) => a.id === newAppData.id || a.name === newAppData.appName);
-                    if (found) handleSelectApp(found);
+            <Route
+              path="/admin/applications"
+              element={
+                <ApplicationManagement
+                  apps={apps}
+                  selectedApp={selectedApp}
+                  onSelectApp={handleSelectApp}
+                  onCreateApp={handleCreateApp}
+                  onUpdateApp={handleUpdateApp}
+                  onDeleteApp={handleDeleteApp}
+                  onSetDefault={handleSetDefault}
+                  onOpenCreateModal={() => navigate('/admin/applications/new')}
+                  onOpenCmsStudio={(app) => {
+                    handleSelectApp(app);
+                    navigate(`/admin/cms/${app.id}`);
+                  }}
+                />
+              }
+            />
+
+            <Route
+              path="/admin/applications/new"
+              element={
+                <div className="bg-slate-900/90 rounded-3xl overflow-hidden shadow-2xl border border-slate-800 text-slate-100">
+                  <CmsStudio
+                    isOpen={true}
+                    mode="setup"
+                    onClose={() => navigate('/admin/applications')}
+                    onAppBuilt={async (newAppData) => {
+                      const loaded = await fetchApplications();
+                      setApps(loaded);
+                      if (newAppData?.id) {
+                        const found = loaded.find((a) => a.id === newAppData.id || a.name === newAppData.appName);
+                        if (found) handleSelectApp(found);
+                      }
+                      navigate('/admin/applications');
+                    }}
+                    onOpenRoleModules={async () => {
+                      const loaded = await fetchApplications();
+                      setApps(loaded);
+                      navigate('/admin/applications');
+                    }}
+                  />
+                </div>
+              }
+            />
+
+            <Route
+              path="/admin/applications/:id/edit"
+              element={<RouteAppEditor apps={apps} onAppSaved={loadData} />}
+            />
+
+            <Route
+              path="/admin/applications/:id"
+              element={
+                <ApplicationManagement
+                  apps={apps}
+                  selectedApp={selectedApp}
+                  onSelectApp={handleSelectApp}
+                  onCreateApp={handleCreateApp}
+                  onUpdateApp={handleUpdateApp}
+                  onDeleteApp={handleDeleteApp}
+                  onSetDefault={handleSetDefault}
+                  onOpenCreateModal={() => navigate('/admin/applications/new')}
+                  onOpenCmsStudio={(app) => {
+                    handleSelectApp(app);
+                    navigate(`/admin/cms/${app.id}`);
+                  }}
+                />
+              }
+            />
+
+            <Route
+              path="/admin/cms"
+              element={
+                <CmsBrandGateway
+                  apps={apps}
+                  selectedApp={selectedApp}
+                  onSelectApp={(app) => {
+                    handleSelectApp(app);
+                    navigate(`/admin/cms/${app.id}`);
+                  }}
+                  onProvisionNewParty={() => navigate('/admin/applications/new')}
+                />
+              }
+            />
+
+            <Route
+              path="/admin/cms/:applicationId"
+              element={<RouteCmsEditor apps={apps} selectedApp={selectedApp} onAppSaved={loadData} />}
+            />
+
+            <Route
+              path="/admin/data"
+              element={<DataIngestion currentApp={selectedApp} />}
+            />
+
+            <Route
+              path="/admin/data/:applicationId"
+              element={
+                <DataIngestion
+                  currentApp={
+                    apps.find((a) => a.id === location.pathname.split('/')[3]) || selectedApp
                   }
-                }}
-                onOpenRoleModules={async () => {
-                  const loaded = await fetchApplications();
-                  setApps(loaded);
-                  setActiveTab('applications');
-                }}
-              />
-            </div>
-          )}
-
-          {activeTab === 'data' && (
-            <DataIngestion currentApp={selectedApp} />
-          )}
-
-          {activeTab === 'incharges' && (
-            <InchargeManagement
-              incharges={incharges}
-              currentApp={selectedApp}
-              onTransfer={handleTransferIncharge}
-              onReplace={handleReplaceIncharge}
-              onToggleStatus={handleToggleInchargeStatus}
-              onResetCredentials={handleResetInchargeCredentials}
+                />
+              }
             />
-          )}
 
-          {activeTab === 'approvals' && (
-            <ApprovalEngine
-              approvals={approvals}
-              onApprove={handleApprove}
-              onReject={handleReject}
+            <Route
+              path="/admin/incharges"
+              element={
+                <InchargeManagement
+                  incharges={incharges}
+                  currentApp={selectedApp}
+                  onTransfer={handleTransferIncharge}
+                  onReplace={handleReplaceIncharge}
+                  onToggleStatus={handleToggleInchargeStatus}
+                  onResetCredentials={handleResetInchargeCredentials}
+                />
+              }
             />
-          )}
 
-          {activeTab === 'credentials' && (
-            <ApiCredentialsManager
-              currentApp={selectedApp}
-              apps={apps}
-              onSelectApp={handleSelectApp}
+            <Route
+              path="/admin/incharges/:applicationId"
+              element={
+                <InchargeManagement
+                  incharges={incharges}
+                  currentApp={
+                    apps.find((a) => a.id === location.pathname.split('/')[3]) || selectedApp
+                  }
+                  onTransfer={handleTransferIncharge}
+                  onReplace={handleReplaceIncharge}
+                  onToggleStatus={handleToggleInchargeStatus}
+                  onResetCredentials={handleResetInchargeCredentials}
+                />
+              }
             />
-          )}
 
-          {activeTab === 'settings' && (
-            <div className="p-8 rounded-3xl bg-slate-900 border border-slate-800 space-y-4">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Shield className="w-5 h-5 text-amber-400" />
-                <span>Platform Governance & Security Architecture</span>
-              </h2>
-              <p className="text-xs text-slate-400">
-                This CMS / Admin Panel operates from the shared PostgreSQL database via Fastify REST APIs (port 4000). The incharge-facing Party Application operates on port 3000.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-slate-800 text-xs">
-                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
-                  <div className="font-bold text-amber-400">CMS Admin Panel Port</div>
-                  <div className="text-slate-300 font-mono">http://localhost:3001</div>
-                </div>
-                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
-                  <div className="font-bold text-emerald-400">Party Application Port</div>
-                  <div className="text-slate-300 font-mono">http://localhost:3000</div>
-                </div>
-                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
-                  <div className="font-bold text-blue-400">Backend Fastify API</div>
-                  <div className="text-slate-300 font-mono">http://localhost:4000/api</div>
-                </div>
-                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
-                  <div className="font-bold text-purple-400">Shared Database</div>
-                  <div className="text-slate-300 font-mono">PostgreSQL (localhost:5432)</div>
-                </div>
-              </div>
-            </div>
-          )}
+            <Route
+              path="/admin/approvals"
+              element={
+                <ApprovalEngine
+                  approvals={approvals}
+                  onApprove={handleApprove}
+                  onReject={handleReject}
+                />
+              }
+            />
+
+            <Route
+              path="/admin/credentials"
+              element={
+                <ApiCredentialsManager
+                  currentApp={selectedApp}
+                  apps={apps}
+                  onSelectApp={handleSelectApp}
+                />
+              }
+            />
+
+            <Route
+              path="/admin/credentials/:applicationId"
+              element={
+                <ApiCredentialsManager
+                  currentApp={
+                    apps.find((a) => a.id === location.pathname.split('/')[3]) || selectedApp
+                  }
+                  apps={apps}
+                  onSelectApp={handleSelectApp}
+                />
+              }
+            />
+
+            <Route
+              path="/admin/settings"
+              element={
+                <AdminProfileSecurity
+                  adminUser={adminUser}
+                  onProfileUpdated={(updated) => setAdminUser(updated)}
+                />
+              }
+            />
+
+            {/* Real Catch-All 404 Route */}
+            <Route path="*" element={<AdminNotFound />} />
+          </Routes>
         </main>
       </div>
-
-      {isCreateAppModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
-          <CmsStudio
-            isOpen={true}
-            mode="setup"
-            onClose={() => setIsCreateAppModalOpen(false)}
-            onOpenRoleModules={async () => {
-              const loaded = await fetchApplications();
-              setApps(loaded);
-              setIsCreateAppModalOpen(false);
-              setActiveTab('applications');
-            }}
-          />
-        </div>
-      )}
     </div>
   );
 }

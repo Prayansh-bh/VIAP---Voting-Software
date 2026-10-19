@@ -45,6 +45,10 @@ export interface ApplicationTemplate {
 }
 
 export interface CmsConfig {
+  id?: string;
+  organisationId?: string;
+  configKey?: string;
+  tenantCode?: string;
   organisationName: string;
   stateName: string;
   defaultLanguage: string;
@@ -378,13 +382,82 @@ export function applyThemeVariables(primaryColor: string, secondaryColor?: strin
   root.style.setProperty('--party-glow', `${primaryColor}4d`);
 }
 
-export async function fetchCmsConfig(options?: { organisationId?: string; tenantCode?: string }): Promise<{ config: CmsConfig; parties: CmsParty[]; announcements: any[] }> {
+/**
+ * Resolves the canonical cache identity for CMS configuration.
+ * Prioritizes application identity (configKey or id) over organisationId
+ * to guarantee that multiple applications under the same organisation never collide.
+ */
+export function getCmsCacheKey(identifier?: {
+  id?: string;
+  configKey?: string;
+  applicationId?: string;
+  tenantCode?: string;
+  organisationId?: string;
+} | string | null): string {
+  if (!identifier) return 'kdp_cms_config_default';
+  if (typeof identifier === 'string') {
+    const clean = identifier.trim().toLowerCase();
+    return `kdp_cms_config_${clean || 'default'}`;
+  }
+  const appKey = (identifier.configKey && identifier.configKey !== 'default' ? identifier.configKey : '')
+    || identifier.id
+    || identifier.applicationId
+    || identifier.tenantCode;
+
+  if (appKey) {
+    return `kdp_cms_config_${appKey.toString().trim().toLowerCase()}`;
+  }
+
+  if (identifier.configKey === 'default') {
+    return 'kdp_cms_config_default';
+  }
+
+  return '';
+}
+
+export function getCustomPartiesCacheKey(identifier?: {
+  id?: string;
+  configKey?: string;
+  applicationId?: string;
+  tenantCode?: string;
+  organisationId?: string;
+} | string | null): string {
+  if (!identifier) return 'kdp_custom_parties_default';
+  if (typeof identifier === 'string') {
+    const clean = identifier.trim().toLowerCase();
+    return `kdp_custom_parties_${clean || 'default'}`;
+  }
+  const appKey = (identifier.configKey && identifier.configKey !== 'default' ? identifier.configKey : '')
+    || identifier.id
+    || identifier.applicationId
+    || identifier.tenantCode;
+
+  if (appKey) {
+    return `kdp_custom_parties_${appKey.toString().trim().toLowerCase()}`;
+  }
+
+  if (identifier.configKey === 'default') {
+    return 'kdp_custom_parties_default';
+  }
+
+  return '';
+}
+
+export async function fetchCmsConfig(options?: {
+  organisationId?: string;
+  tenantCode?: string;
+  applicationId?: string;
+  configKey?: string;
+}): Promise<{ config: CmsConfig; parties: CmsParty[]; announcements: any[] }> {
   try {
     const headers: Record<string, string> = {};
     if (options?.organisationId) headers['x-organisation-id'] = options.organisationId;
     if (options?.tenantCode) headers['x-tenant-code'] = options.tenantCode;
+    if (options?.applicationId) headers['x-application-id'] = options.applicationId;
 
     const queryParams = new URLSearchParams();
+    if (options?.applicationId) queryParams.set('applicationId', options.applicationId);
+    if (options?.configKey) queryParams.set('configKey', options.configKey);
     if (options?.tenantCode) queryParams.set('app', options.tenantCode);
     if (options?.organisationId) queryParams.set('orgId', options.organisationId);
 
@@ -398,6 +471,9 @@ export async function fetchCmsConfig(options?: { organisationId?: string; tenant
     const config: CmsConfig = {
       ...DEFAULT_CONFIG,
       ...rawConfig,
+      id: rawConfig.id || payload?.id,
+      organisationId: rawConfig.organisationId || payload?.organisationId,
+      configKey: rawConfig.configKey || payload?.configKey,
       organisationName: rawConfig.organisationName || DEFAULT_CONFIG.organisationName,
       headerTitle: rawConfig.headerTitle || rawConfig.organisationName || DEFAULT_CONFIG.headerTitle,
       stateName: rawConfig.stateName || DEFAULT_CONFIG.stateName,
@@ -447,7 +523,17 @@ export async function fetchCmsConfig(options?: { organisationId?: string; tenant
     applyThemeVariables(config.primaryColor, config.secondaryColor, config.accentColor);
     return { config, parties, announcements };
   } catch (err) {
-    console.warn('[CMS] Fallback to default local config:', err);
+    const isExplicitAppRequested = Boolean(
+      options?.applicationId ||
+      (options?.tenantCode && options.tenantCode.trim().toLowerCase() !== 'default') ||
+      (options?.configKey && options.configKey.trim().toLowerCase() !== 'default')
+    );
+
+    if (isExplicitAppRequested) {
+      throw err;
+    }
+
+    console.warn('[CMS] Fallback to default local config for generic unbranded flow:', err);
     applyThemeVariables(DEFAULT_CONFIG.primaryColor, DEFAULT_CONFIG.secondaryColor, DEFAULT_CONFIG.accentColor);
     return { config: DEFAULT_CONFIG, parties: [], announcements: [] };
   }
@@ -460,6 +546,10 @@ export async function saveCmsConfig(config: Partial<CmsConfig>, token?: string):
       method: 'PUT',
       headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
       body: JSON.stringify({
+        id: config.id,
+        applicationId: config.id,
+        configKey: config.configKey,
+        organisationId: config.organisationId,
         organisationName: config.organisationName,
         appName: config.organisationName,
         headerTitle: config.headerTitle || config.organisationName,

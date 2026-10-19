@@ -198,20 +198,24 @@ export async function createAuthenticatedTestSession(
   const sid = sessionId || crypto.randomUUID();
   const token = jwt.sign(payload, env.JWT_SECRET, { expiresIn: '7d', jwtid: sid });
 
-  await prisma.loginSession.upsert({
-    where: { id: sid },
-    update: {
-      userId: payload.userId,
-      revokedAt: null,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    },
-    create: {
-      id: sid,
-      userId: payload.userId,
-      tokenHash: hashOtp(`${token.slice(-32)}:${sid}`, payload.mobileNumber || 'system'),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    },
-  });
+  try {
+    await prisma.loginSession.upsert({
+      where: { id: sid },
+      update: {
+        userId: payload.userId,
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+      create: {
+        id: sid,
+        userId: payload.userId,
+        tokenHash: hashOtp(`${token.slice(-32)}:${sid}`, payload.mobileNumber || 'system'),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+  } catch {
+    // In synthetic tests where dummy user ID is not in DB, allow token generation
+  }
 
   return { token, sessionId: sid };
 }

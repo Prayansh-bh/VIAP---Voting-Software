@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Building,
   Crown,
@@ -16,15 +17,20 @@ import {
   Settings,
   Database,
   UserCheck,
+  Smartphone,
 } from 'lucide-react';
-import { RoleType } from '../types';
+import { RoleType, UserSession } from '../types';
 import { useCms } from '../context/CmsContext';
+import ChangeMobileModal from './ChangeMobileModal';
+import { getAdminUrl } from '../lib/env';
 
 interface RoleQuickSwitcherProps {
   currentRole?: RoleType;
   currentPath: string;
   onLogout: () => void;
   onSwitchRole?: (role: RoleType) => void;
+  session?: UserSession | null;
+  onMobileChanged?: (newMobile: string, user?: any) => void;
 }
 
 interface SwitcherItem {
@@ -42,8 +48,7 @@ interface SwitcherItem {
 
 const SWITCHER_ITEMS: SwitcherItem[] = [
   // System & Management
-  { role: 'ROLES', category: 'system', label: 'Role Command Selection', shortLabel: 'Role Center', subtitle: 'Universal Role Gateway', path: '/roles', icon: LayoutGrid, color: '#10b981' },
-  { role: 'ROLES', category: 'system', label: 'CMS & Platform Admin (Port 3001)', shortLabel: 'Admin Panel', subtitle: 'Dedicated CMS Console', path: 'http://localhost:3001', icon: Settings, color: '#f59e0b', isExternal: true },
+  { role: 'ROLES', category: 'system', label: 'CMS & Platform Admin (Port 3001)', shortLabel: 'Admin Panel', subtitle: 'Dedicated CMS Console', path: getAdminUrl(), icon: Settings, color: '#f59e0b', isExternal: true },
 
   // Apex Command
   { role: 'STATE_ADMIN', levelKey: 'STATE', category: 'apex', label: 'State Incharge (Apex)', shortLabel: 'State', subtitle: 'Statewide War Room', path: '/state', icon: Building, color: '#f59e0b' },
@@ -58,6 +63,23 @@ const SWITCHER_ITEMS: SwitcherItem[] = [
   { role: 'BOOTH_PRESIDENT', levelKey: 'BOOTH', category: 'field', label: 'Booth President', shortLabel: 'Booth', subtitle: 'Polling Station Defense', path: '/booth', icon: Vote, color: '#eab308' },
   { role: 'VOTER_100_INCHARGE', levelKey: 'VOTER_GROUP', category: 'field', label: '100-Voter Incharge', shortLabel: '100-Voter', subtitle: 'Micro-Cluster Outreach', path: '/100-voter', icon: Users, color: '#f97316' },
 ];
+
+const ROLE_RANK_WEIGHT: Record<string, number> = {
+  SUPER_ADMIN: 100,
+  HIGH_COMMAND: 90,
+  PARTY_ADMIN: 85,
+  STATE_ADMIN: 80,
+  ZONE_INCHARGE: 70,
+  PARLIAMENT_INCHARGE: 60,
+  CONSTITUENCY_INCHARGE: 50,
+  MANDAL_INCHARGE: 40,
+  VILLAGE_INCHARGE: 30,
+  BOOTH_PRESIDENT: 20,
+  POLLING_AGENT: 20,
+  VOTER_100_INCHARGE: 10,
+  VOLUNTEER: 5,
+  VIEWER: 1,
+};
 
 const roleLevelMap: Record<string, string> = {
   STATE_ADMIN: 'STATE',
@@ -75,9 +97,13 @@ export default function RoleQuickSwitcher({
   currentPath,
   onLogout,
   onSwitchRole,
+  session,
+  onMobileChanged,
 }: RoleQuickSwitcherProps) {
   const { config } = useCms();
+  const navigate = useNavigate();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isMobileModalOpen, setIsMobileModalOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click or ESC key
@@ -118,21 +144,43 @@ export default function RoleQuickSwitcher({
     return ['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
   }, [config.activeHierarchyLevels]);
 
+  const userRank = useMemo(() => {
+    return session?.role ? (ROLE_RANK_WEIGHT[session.role] || 1) : 1;
+  }, [session?.role]);
+
   const visibleItems = useMemo(() => {
     return SWITCHER_ITEMS.filter((item) => {
+      // If external Admin Panel, only show to SUPER_ADMIN or STATE_ADMIN
+      if (item.isExternal) {
+        return session?.role === 'SUPER_ADMIN' || session?.role === 'STATE_ADMIN';
+      }
+
+      // Prevent role escalation: hide tiers above user rank
+      if (session?.role !== 'SUPER_ADMIN') {
+        const itemRank = ROLE_RANK_WEIGHT[item.role] || 1;
+        if (itemRank > userRank) {
+          return false;
+        }
+      }
+
       const level = item.levelKey || roleLevelMap[item.role];
-      if (!level) return true; // System routes
+      if (!level) return true;
       return enabledLevels.includes(level);
     });
-  }, [enabledLevels]);
+  }, [enabledLevels, session?.role, userRank]);
 
   const handleSelect = (item: SwitcherItem) => {
     setIsDropdownOpen(false);
+    if (item.isExternal) {
+      window.location.href = getAdminUrl();
+      return;
+    }
     if (item.path) {
       if (item.role !== 'ROLES' && onSwitchRole) {
         onSwitchRole(item.role as RoleType);
+      } else {
+        navigate(item.path);
       }
-      window.location.hash = item.path;
     }
   };
 
@@ -140,7 +188,6 @@ export default function RoleQuickSwitcher({
     return (
       visibleItems.find((i) => {
         if (currentPath === i.path) return true;
-        if ((currentPath === '/app' || currentPath === '/roles') && (i.path === '/app' || i.path === '/roles')) return true;
         return i.role === currentRole;
       }) ||
       visibleItems[0] ||
@@ -207,25 +254,16 @@ export default function RoleQuickSwitcher({
 
           {/* Quick Direct Jump Pills (Gracefully hidden on small screens, NO scrollbar) */}
           <div className="hidden lg:flex items-center gap-1.5">
-            <button
-              onClick={() => { window.location.hash = '/roles'; }}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition border cursor-pointer ${currentPath === '/roles' || currentPath === '/app'
-                  ? 'bg-amber-400/20 text-amber-300 border-amber-400/40'
-                  : 'bg-slate-900/60 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800'
-                }`}
-            >
-              Role Gateway
-            </button>
             {currentPath !== '/platform-admin' ? (
               <button
-                onClick={() => { window.location.hash = '/platform-admin'; }}
+                onClick={() => { navigate('/platform-admin'); }}
                 className="px-2.5 py-1 rounded-lg text-[11px] font-semibold transition border cursor-pointer bg-slate-900/60 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800"
               >
                 Platform Admin
               </button>
             ) : (
               <button
-                onClick={() => { window.location.hash = '/assign-data'; }}
+                onClick={() => { navigate('/assign-data'); }}
                 className="px-2.5 py-1 rounded-lg text-[11px] font-semibold transition border cursor-pointer bg-slate-900/60 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800"
               >
                 Assign Data
@@ -372,6 +410,18 @@ export default function RoleQuickSwitcher({
             <span className="font-mono text-amber-400 font-bold">{enabledLevels.length} Tiers</span>
           </div>
 
+          {session?.mobileNumber && (
+            <button
+              onClick={() => setIsMobileModalOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-amber-500/15 text-slate-300 hover:text-amber-300 border border-slate-800 hover:border-amber-500/30 text-xs font-semibold transition-all cursor-pointer shadow-xs active:scale-98"
+              title="Change Registered Mobile Number"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="font-mono text-[11px] hidden sm:inline">+91 {session.mobileNumber}</span>
+              <span className="text-[10px] text-amber-400 font-bold ml-0.5 px-1.5 py-0.5 rounded bg-amber-400/10 border border-amber-400/20">Change</span>
+            </button>
+          )}
+
           <button
             onClick={onLogout}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-rose-500/15 text-slate-300 hover:text-rose-300 border border-slate-800 hover:border-rose-500/30 text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-98"
@@ -382,6 +432,16 @@ export default function RoleQuickSwitcher({
           </button>
         </div>
       </div>
+
+      <ChangeMobileModal
+        isOpen={isMobileModalOpen}
+        onClose={() => setIsMobileModalOpen(false)}
+        currentMobile={session?.mobileNumber || ''}
+        onMobileChanged={(newMobile, user) => {
+          onMobileChanged?.(newMobile, user);
+          setIsMobileModalOpen(false);
+        }}
+      />
     </header>
   );
 }

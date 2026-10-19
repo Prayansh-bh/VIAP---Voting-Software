@@ -22,6 +22,7 @@ export interface HierarchyTierConfig {
 
 export interface AppInstance {
   id: string;
+  organisationId?: string;
   name: string;
   party: string;
   partyCode: string;
@@ -40,6 +41,20 @@ export interface AppInstance {
   tenantCode?: string;
   configKey?: string;
   appKey?: string;
+  logoUrl?: string;
+  slogan?: string;
+  headerTitle?: string;
+  stateName?: string;
+  appScope?: string;
+  parliamentName?: string;
+  parliamentCode?: string;
+  politicalParties?: any[];
+  hierarchyLabels?: Record<string, string>;
+  featureToggles?: Record<string, boolean>;
+  dashboardConfig?: Record<string, any>;
+  analyticsConfig?: Record<string, any>;
+  aiEnabled?: boolean;
+  status?: string;
 }
 
 export interface InchargeRecord {

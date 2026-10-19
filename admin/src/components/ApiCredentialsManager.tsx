@@ -32,6 +32,7 @@ interface ApiCredentialsManagerProps {
 }
 
 const COMMON_KEY_TEMPLATES = [
+  { keyName: 'GEMINI_API_KEY', provider: 'Google Gemini AI (Google AI Studio)', serviceType: 'AI' },
   { keyName: 'WHATSAPP_API_KEY', provider: 'Meta WhatsApp Cloud', serviceType: 'MESSAGING' },
   { keyName: 'SMS_GATEWAY_TOKEN', provider: 'MSG91 / Twilio', serviceType: 'SMS' },
   { keyName: 'MAPBOX_ACCESS_TOKEN', provider: 'Mapbox GIS Engine', serviceType: 'MAPS' },
@@ -65,7 +66,7 @@ export default function ApiCredentialsManager({
   const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  const effectiveOrgId = currentApp?.id;
+  const effectiveOrgId = currentApp?.organisationId || currentApp?.id;
 
   const loadData = async () => {
     setLoading(true);

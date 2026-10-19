@@ -1,5 +1,6 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
 import App from './App.tsx';
 import { CmsProvider } from './context/CmsContext.tsx';
 import { NotificationProvider } from './context/NotificationContext.tsx';
@@ -11,7 +12,9 @@ createRoot(document.getElementById('root')!).render(
     <ErrorBoundary>
       <NotificationProvider>
         <CmsProvider>
-          <App />
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
         </CmsProvider>
       </NotificationProvider>
     </ErrorBoundary>

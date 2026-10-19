@@ -1,22 +1,23 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
+import { prisma } from '../../lib/prisma.js';
 import { errorResponse, successResponse } from '../../common/response.js';
 import { CredentialsService } from './credentials.service.js';
 
 export class CredentialsController {
-  private static getTargetOrgId(req: FastifyRequest): string | null {
+  private static async getTargetOrgId(req: FastifyRequest): Promise<string | null> {
     const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
     if (isSuperAdmin) {
-      const queryOrgId = (req.query as any)?.organisationId;
-      return queryOrgId || req.user?.organisationId || null;
+      const queryOrgId = (req.query as any)?.organisationId || (req.body as any)?.organisationId;
+      if (queryOrgId) return queryOrgId;
+      if (req.user?.organisationId) return req.user.organisationId;
+      const defaultOrg = await prisma.organisation.findFirst({ orderBy: { createdAt: 'asc' } });
+      return defaultOrg?.id || null;
     }
     return req.user?.organisationId || null;
   }
 
   static async listCredentials(req: FastifyRequest, reply: FastifyReply) {
-    const orgId = CredentialsController.getTargetOrgId(req);
-    if (!orgId) {
-      return reply.status(403).send(errorResponse('Tenant organization context required', 'FORBIDDEN_TENANT'));
-    }
+    const orgId = await CredentialsController.getTargetOrgId(req);
 
     try {
       const items = await CredentialsService.listCredentials(orgId);
@@ -28,7 +29,7 @@ export class CredentialsController {
   }
 
   static async setCredential(req: FastifyRequest, reply: FastifyReply) {
-    const orgId = CredentialsController.getTargetOrgId(req);
+    const orgId = await CredentialsController.getTargetOrgId(req);
     if (!orgId) {
       return reply.status(403).send(errorResponse('Tenant organization context required', 'FORBIDDEN_TENANT'));
     }
@@ -55,7 +56,7 @@ export class CredentialsController {
   }
 
   static async rotateCredential(req: FastifyRequest<{ Params: { keyName: string }; Body: { newSecretValue: string } }>, reply: FastifyReply) {
-    const orgId = CredentialsController.getTargetOrgId(req);
+    const orgId = await CredentialsController.getTargetOrgId(req);
     if (!orgId) {
       return reply.status(403).send(errorResponse('Tenant organization context required', 'FORBIDDEN_TENANT'));
     }
@@ -81,7 +82,7 @@ export class CredentialsController {
   }
 
   static async revealCredential(req: FastifyRequest<{ Params: { keyName: string } }>, reply: FastifyReply) {
-    const orgId = CredentialsController.getTargetOrgId(req);
+    const orgId = await CredentialsController.getTargetOrgId(req);
     if (!orgId) {
       return reply.status(403).send(errorResponse('Tenant organization context required', 'FORBIDDEN_TENANT'));
     }
@@ -101,7 +102,7 @@ export class CredentialsController {
   }
 
   static async deleteCredential(req: FastifyRequest<{ Params: { keyName: string } }>, reply: FastifyReply) {
-    const orgId = CredentialsController.getTargetOrgId(req);
+    const orgId = await CredentialsController.getTargetOrgId(req);
     if (!orgId) {
       return reply.status(403).send(errorResponse('Tenant organization context required', 'FORBIDDEN_TENANT'));
     }

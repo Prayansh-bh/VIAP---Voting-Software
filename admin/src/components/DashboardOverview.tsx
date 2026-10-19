@@ -1,3 +1,4 @@
+import { getAppUrl } from '../lib/env';
 import React from 'react';
 import {
   Users,
@@ -209,7 +210,7 @@ export default function DashboardOverview({
                     Edit Hierarchy
                   </button>
                   <a
-                    href="http://localhost:3000"
+                    href={getAppUrl()}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="p-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 transition"

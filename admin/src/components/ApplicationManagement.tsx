@@ -1,3 +1,4 @@
+import { getAppUrl } from '../lib/env';
 import React, { useState } from 'react';
 import {
   Layers,
@@ -13,6 +14,8 @@ import {
   Settings2,
   AlertCircle,
   Loader2,
+  Pencil,
+  Sparkles,
 } from 'lucide-react';
 import { AppInstance, HierarchyLevelKey, HierarchyTierConfig } from '../types';
 import Pagination from './Pagination';
@@ -23,11 +26,13 @@ interface ApplicationManagementProps {
   selectedApp: AppInstance | null;
   onSelectApp: (app: AppInstance) => void;
   onCreateApp: (app: Partial<AppInstance>) => Promise<void>;
+  onUpdateApp?: (id: string, app: Partial<AppInstance>) => Promise<void>;
   onDeleteApp: (id: string) => Promise<void> | void;
   onSetDefault: (id: string) => void;
   isCreateModalOpen?: boolean;
   onOpenCreateModal?: () => void;
   onCloseCreateModal?: () => void;
+  onOpenCmsStudio?: (app: AppInstance) => void;
 }
 
 const ALL_HIERARCHY_LEVELS: HierarchyTierConfig[] = [
@@ -47,20 +52,70 @@ export default function ApplicationManagement({
   selectedApp,
   onSelectApp,
   onCreateApp,
+  onUpdateApp,
   onDeleteApp,
   onSetDefault,
   isCreateModalOpen,
   onOpenCreateModal,
   onCloseCreateModal,
+  onOpenCmsStudio,
 }: ApplicationManagementProps) {
   const { notify, confirmDialog } = useNotification();
-  const [internalModalOpen, setInternalModalOpen] = useState(false);
-  const showModal = isCreateModalOpen !== undefined ? isCreateModalOpen : internalModalOpen;
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<'create' | 'edit'>('edit');
+  const [editingAppId, setEditingAppId] = useState<string | null>(null);
 
-  const setModalOpen = (val: boolean) => {
-    setInternalModalOpen(val);
-    if (val && onOpenCreateModal) onOpenCreateModal();
-    if (!val && onCloseCreateModal) onCloseCreateModal();
+  const handleOpenCreate = () => {
+    if (onOpenCreateModal) {
+      onOpenCreateModal();
+    } else {
+      setModalMode('create');
+      setEditingAppId(null);
+      setInitialLevels([]);
+      setNewTierIncharges({});
+      setFormData({
+        name: '',
+        party: '',
+        partyCode: '',
+        leaderName: '',
+        jurisdiction: '',
+        description: '',
+        candidateMobile: '',
+        primaryColor: '#F59E0B',
+        secondaryColor: '#DC2626',
+        accentColor: '#0F172A',
+        activeHierarchyLevels: ['VOTER_GROUP', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY'],
+      });
+      setEditModalOpen(true);
+    }
+  };
+
+  const [initialLevels, setInitialLevels] = useState<HierarchyLevelKey[]>([]);
+  const [newTierIncharges, setNewTierIncharges] = useState<Record<string, { name: string; mobileNumber: string }>>({});
+
+  const handleOpenEdit = (app: AppInstance, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setModalMode('edit');
+    setEditingAppId(app.id);
+    const curLevels = (app.activeHierarchyLevels && app.activeHierarchyLevels.length > 0)
+      ? (app.activeHierarchyLevels as HierarchyLevelKey[])
+      : ['VOTER_GROUP', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY'] as HierarchyLevelKey[];
+    setInitialLevels(curLevels);
+    setNewTierIncharges({});
+    setFormData({
+      name: app.name || '',
+      party: app.party || '',
+      partyCode: app.partyCode || '',
+      leaderName: app.leaderName || '',
+      jurisdiction: app.jurisdiction || '',
+      description: app.description || '',
+      candidateMobile: '',
+      primaryColor: app.primaryColor || '#F59E0B',
+      secondaryColor: app.secondaryColor || '#DC2626',
+      accentColor: app.accentColor || '#0F172A',
+      activeHierarchyLevels: curLevels,
+    });
+    setEditModalOpen(true);
   };
 
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
@@ -80,6 +135,7 @@ export default function ApplicationManagement({
     leaderName: '',
     jurisdiction: '',
     description: '',
+    candidateMobile: '',
     primaryColor: '#F59E0B',
     secondaryColor: '#DC2626',
     accentColor: '#0F172A',
@@ -100,6 +156,13 @@ export default function ApplicationManagement({
           activeHierarchyLevels: prev.activeHierarchyLevels.filter((k) => k !== lvlId),
         };
       } else {
+        const meta = ALL_HIERARCHY_LEVELS.find((l) => l.id === lvlId);
+        if (modalMode === 'edit' && !initialLevels.includes(lvlId)) {
+          setNewTierIncharges((prevInc) => ({
+            ...prevInc,
+            [lvlId]: prevInc[lvlId] || { name: `${meta?.label || lvlId} Incharge`, mobileNumber: '' },
+          }));
+        }
         return {
           ...prev,
           activeHierarchyLevels: [...prev.activeHierarchyLevels, lvlId],
@@ -108,21 +171,72 @@ export default function ApplicationManagement({
     });
   };
 
+  const newlyEnabledTiers = modalMode === 'edit'
+    ? formData.activeHierarchyLevels.filter((lvl) => !initialLevels.includes(lvl))
+    : [];
+
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.partyCode) {
       notify.warning('Application name and Party Code are required.', 'Missing Fields');
       return;
     }
+
+    if (modalMode === 'create' && formData.candidateMobile) {
+      const cleanNum = formData.candidateMobile.replace(/\D/g, '').slice(-10);
+      if (cleanNum.length < 10) {
+        notify.warning('Please enter a valid 10-digit primary mobile number for the candidate.', 'Invalid Mobile');
+        return;
+      }
+    }
+
+    if (modalMode === 'edit' && newlyEnabledTiers.length > 0) {
+      for (const tierKey of newlyEnabledTiers) {
+        const inc = newTierIncharges[tierKey];
+        const meta = ALL_HIERARCHY_LEVELS.find((l) => l.id === tierKey);
+        const cleanNum = (inc?.mobileNumber || '').replace(/\D/g, '').slice(-10);
+        if (!cleanNum || cleanNum.length < 10) {
+          notify.warning(
+            `Please enter a dedicated 10-digit mobile number for the newly introduced ${meta?.label || tierKey} tier.`,
+            'New Tier Mobile Required'
+          );
+          return;
+        }
+      }
+    }
+
     setSaving(true);
     try {
-      await onCreateApp(formData);
-      const appName = formData.name;
-      const partyCode = formData.partyCode;
-      setJustCreatedId(partyCode);
-      setModalOpen(false);
-      notify.success(`Party tenant "${appName}" (${partyCode}) has been successfully provisioned in PostgreSQL!`, 'Tenant Provisioned');
-      setSuccessBanner(`Party tenant "${appName}" (${partyCode}) has been successfully provisioned in PostgreSQL! Enabled tiers: ${formData.activeHierarchyLevels.join(' → ')}.`);
+      if (modalMode === 'edit' && editingAppId) {
+        const formattedNewIncharges = newlyEnabledTiers.map((tierKey) => {
+          const inc = newTierIncharges[tierKey];
+          const meta = ALL_HIERARCHY_LEVELS.find((l) => l.id === tierKey);
+          return {
+            tierLevel: tierKey,
+            name: (inc?.name || '').trim() || `${meta?.label || tierKey} Incharge`,
+            mobileNumber: (inc?.mobileNumber || '').replace(/\D/g, '').slice(-10),
+          };
+        });
+
+        if (onUpdateApp) {
+          await onUpdateApp(editingAppId, {
+            ...formData,
+            ...(formattedNewIncharges.length > 0 ? { newTierIncharges: formattedNewIncharges } : {}),
+          });
+        }
+        setEditModalOpen(false);
+        notify.success(`Party tenant "${formData.name}" has been successfully updated in PostgreSQL!`, 'Tenant Updated');
+        setSuccessBanner(`Party tenant "${formData.name}" (${formData.partyCode}) updated successfully in PostgreSQL! Enabled tiers: ${formData.activeHierarchyLevels.join(' → ')}.`);
+      } else {
+        await onCreateApp(formData);
+        const appName = formData.name;
+        const partyCode = formData.partyCode;
+        setJustCreatedId(partyCode);
+        setEditModalOpen(false);
+        notify.success(`Party tenant "${appName}" (${partyCode}) has been successfully provisioned in PostgreSQL!`, 'Tenant Provisioned');
+        setSuccessBanner(`Party tenant "${appName}" (${partyCode}) has been successfully provisioned in PostgreSQL! Enabled tiers: ${formData.activeHierarchyLevels.join(' → ')}.`);
+      }
+
       setFormData({
         name: '',
         party: '',
@@ -130,6 +244,7 @@ export default function ApplicationManagement({
         leaderName: '',
         jurisdiction: '',
         description: '',
+        candidateMobile: '',
         primaryColor: '#F59E0B',
         secondaryColor: '#DC2626',
         accentColor: '#0F172A',
@@ -137,7 +252,7 @@ export default function ApplicationManagement({
       });
       setTimeout(() => setSuccessBanner(null), 10000);
     } catch (err: any) {
-      notify.error(err.message || 'Failed to create application', 'Provisioning Failed');
+      notify.error(err.message || 'Failed to save application', modalMode === 'edit' ? 'Update Failed' : 'Provisioning Failed');
     } finally {
       setSaving(false);
     }
@@ -177,7 +292,7 @@ export default function ApplicationManagement({
         </div>
 
         <button
-          onClick={() => setModalOpen(true)}
+          onClick={handleOpenCreate}
           className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs shadow-lg shadow-amber-400/20 transition flex items-center gap-2 cursor-pointer self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
@@ -264,8 +379,27 @@ export default function ApplicationManagement({
                 </button>
 
                 <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onOpenCmsStudio) {
+                        onOpenCmsStudio(app);
+                      }
+                    }}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition cursor-pointer"
+                    title="Customize Visual Brand & Themes in CMS Studio"
+                  >
+                    <Palette className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={(e) => handleOpenEdit(app, e)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition cursor-pointer"
+                    title="Edit Party Details & Hierarchy Architecture"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
                   <a
-                    href={app.tenantCode || app.configKey ? `http://localhost:3000/?app=${encodeURIComponent(((app.tenantCode || app.configKey) || '').toLowerCase())}` : 'http://localhost:3000'}
+                    href={app.tenantCode || app.configKey ? `${getAppUrl()}/?app=${encodeURIComponent(((app.tenantCode || app.configKey) || '').toLowerCase())}` : getAppUrl()}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
@@ -330,28 +464,32 @@ export default function ApplicationManagement({
       />
 
       {/* Create New Party Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden my-8">
-            <div className="p-6 border-b border-slate-800 flex items-center justify-between">
+      {editModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-hidden">
+          <div className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] my-auto">
+            <div className="p-5 sm:p-6 border-b border-slate-800 flex items-center justify-between shrink-0 bg-slate-900">
               <div>
                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Layers className="w-5 h-5 text-amber-400" />
-                  <span>Provision New Political Party Application</span>
+                  <Layers className="w-5 h-5 text-amber-400 shrink-0" />
+                  <span>{modalMode === 'edit' ? 'Edit Party Application Architecture' : 'Provision New Political Party Application'}</span>
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Configure identity, brand palette, and select exactly which hierarchy tiers will exist in the tenant.
+                  {modalMode === 'edit'
+                    ? 'Update persisted tenant name, branding colors, leadership and enabled hierarchy tiers in PostgreSQL.'
+                    : 'Configure identity, brand palette, and select exactly which hierarchy tiers will exist in the tenant.'}
                 </p>
               </div>
               <button
-                onClick={() => setModalOpen(false)}
-                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-sm font-bold"
+                type="button"
+                onClick={() => setEditModalOpen(false)}
+                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-sm font-bold transition cursor-pointer shrink-0 ml-4"
               >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleFormSubmit} className="p-6 space-y-6">
+            <form onSubmit={handleFormSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="p-5 sm:p-6 space-y-6 overflow-y-auto flex-1">
               {/* App Info Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -409,7 +547,7 @@ export default function ApplicationManagement({
                   />
                 </div>
 
-                <div className="sm:col-span-2">
+                <div>
                   <label className="block text-xs font-bold text-slate-300 mb-1">
                     Jurisdiction / Scope
                   </label>
@@ -421,6 +559,27 @@ export default function ApplicationManagement({
                     className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:border-amber-400 outline-none"
                   />
                 </div>
+
+                {modalMode === 'create' && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1 flex items-center justify-between">
+                      <span>Candidate Login Mobile (+91) *</span>
+                      <span className="text-[10px] text-amber-400 font-mono">Dedicated Login ID</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 font-mono">+91</span>
+                      <input
+                        type="tel"
+                        maxLength={10}
+                        required
+                        placeholder="10-digit primary mobile"
+                        value={formData.candidateMobile}
+                        onChange={(e) => setFormData({ ...formData, candidateMobile: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                        className="w-full pl-11 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs font-mono font-bold focus:border-amber-400 outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Brand Palette */}
@@ -522,14 +681,92 @@ export default function ApplicationManagement({
                     );
                   })}
                 </div>
-              </div>
 
-              {/* Actions */}
-              <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">
+                {/* Dedicated Incharge Details for Newly Introduced Tiers */}
+                {modalMode === 'edit' && newlyEnabledTiers.length > 0 && (
+                  <div className="mt-4 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                      <div className="flex items-center gap-2 text-amber-300 font-bold text-xs">
+                        <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Newly Introduced Tiers — Dedicated Login Mobile ({newlyEnabledTiers.length})</span>
+                      </div>
+                      <span className="text-[10px] text-amber-400 font-mono">Mobile required for newly introduced tier</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      You selected new hierarchy tier(s) for this party. Please provide the incharge name and mobile number for each new tier.
+                    </p>
+                    <div className="space-y-3 pt-1">
+                      {newlyEnabledTiers.map((tierKey) => {
+                        const meta = ALL_HIERARCHY_LEVELS.find((l) => l.id === tierKey);
+                        const inc = newTierIncharges[tierKey] || { name: `${meta?.label || tierKey} Incharge`, mobileNumber: '' };
+                        return (
+                          <div key={tierKey} className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                {meta?.label || tierKey} Incharge Name *
+                              </label>
+                              <input
+                                type="text"
+                                required
+                                value={inc.name}
+                                onChange={(e) => setNewTierIncharges({
+                                  ...newTierIncharges,
+                                  [tierKey]: { ...inc, name: e.target.value },
+                                })}
+                                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white text-xs focus:border-amber-400 outline-none"
+                                placeholder={`e.g. ${meta?.label || tierKey} Incharge`}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Dedicated Login Mobile (+91) *
+                              </label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 font-mono">+91</span>
+                                <input
+                                  type="tel"
+                                  maxLength={10}
+                                  required
+                                  value={inc.mobileNumber}
+                                  onChange={(e) => setNewTierIncharges({
+                                    ...newTierIncharges,
+                                    [tierKey]: { ...inc, mobileNumber: e.target.value.replace(/\D/g, '').slice(0, 10) },
+                                  })}
+                                  className="w-full pl-11 pr-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white text-xs font-mono font-bold focus:border-amber-400 outline-none"
+                                  placeholder="10-digit mobile number"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Actions Footer - Pinned and always visible */}
+              <div className="p-4 sm:p-5 border-t border-slate-800 bg-slate-900 shrink-0 flex items-center justify-end gap-3 z-10">
+                {modalMode === 'edit' && editingAppId && onOpenCmsStudio && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const appToOpen = apps.find((a) => a.id === editingAppId);
+                      setEditModalOpen(false);
+                      if (appToOpen) onOpenCmsStudio(appToOpen);
+                    }}
+                    className="mr-auto px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+                    title="Customize visual logo, colors, slogans and manifesto"
+                  >
+                    <Palette className="w-3.5 h-3.5" />
+                    <span>Open Visual Brand Studio</span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl text-slate-400 hover:text-white text-xs font-bold transition"
+                  onClick={() => setEditModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl text-slate-400 hover:text-white text-xs font-bold transition cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -538,7 +775,9 @@ export default function ApplicationManagement({
                   disabled={saving}
                   className="px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs shadow-lg shadow-amber-400/20 transition disabled:opacity-50 cursor-pointer flex items-center gap-2"
                 >
-                  {saving ? 'Creating Application...' : 'Create & Provision Tenant'}
+                  {saving
+                    ? (modalMode === 'edit' ? 'Saving Changes...' : 'Creating Application...')
+                    : (modalMode === 'edit' ? 'Save Party Architecture' : 'Create & Provision Tenant')}
                 </button>
               </div>
             </form>

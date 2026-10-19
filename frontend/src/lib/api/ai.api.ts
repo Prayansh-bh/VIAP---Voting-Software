@@ -18,9 +18,33 @@ export async function fetchElectionProjections(constituencyId?: string): Promise
   return apiFetch<any[]>(endpoint);
 }
 
-export async function askAiStrategy(unitId: string, prompt: string): Promise<{ answer: string; provider: string; context: any }> {
+export async function askAiStrategy(
+  unitId?: string,
+  prompt: string = '',
+  language: string = 'en',
+): Promise<{ answer: string; provider: string; context: any }> {
   return apiFetch<{ answer: string; provider: string; context: any }>('/api/ai/query', {
     method: 'POST',
-    body: JSON.stringify({ unitId, prompt }),
+    body: JSON.stringify({ unitId: unitId || undefined, prompt, language }),
+  });
+}
+
+export async function generateStrategicReport(
+  unitId?: string,
+  language: string = 'en',
+): Promise<{
+  reportId: string;
+  unitId: string;
+  unitName?: string;
+  language: string;
+  generatedAt: string;
+  executiveSummary: string;
+  keyStrengths: string[];
+  vulnerabilities: string[];
+  actionPlan: string[];
+}> {
+  return apiFetch<any>('/api/ai/report', {
+    method: 'POST',
+    body: JSON.stringify({ unitId: unitId || undefined, language }),
   });
 }

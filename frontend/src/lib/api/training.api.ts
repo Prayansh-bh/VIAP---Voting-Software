@@ -18,6 +18,19 @@ export interface TrainingProgressItem {
   };
 }
 
+export interface TrainingAnalyticsData {
+  totalVideos: number;
+  totalCadreMembers: number;
+  totalAssignedTrainings: number;
+  totalWatched: number;
+  totalCompleted: number;
+  completionRate: number;
+}
+
+export async function fetchTrainingAnalytics(): Promise<TrainingAnalyticsData> {
+  return apiFetch<TrainingAnalyticsData>('/api/training/analytics');
+}
+
 export async function fetchTrainingVideos(_unitId?: string): Promise<TrainingVideo[]> {
   return apiFetch<TrainingVideo[]>('/api/training/videos');
 }

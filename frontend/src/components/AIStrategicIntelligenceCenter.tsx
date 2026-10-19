@@ -33,7 +33,8 @@ import {
 } from 'lucide-react';
 import { VoterPreference } from '../types';
 import { useNotification } from '../context/NotificationContext';
-import { fetchNewsArticles, fetchSocialTrends } from '../lib/api/ai.api';
+import { useCms } from '../context/CmsContext';
+import { fetchNewsArticles, fetchSocialTrends, askAiStrategy, generateStrategicReport } from '../lib/api/ai.api';
 
 export interface AIStrategicIntelligenceCenterProps {
   session?: any;
@@ -117,11 +118,16 @@ export default function AIStrategicIntelligenceCenter({
   tasksList = []
 }: AIStrategicIntelligenceCenterProps) {
   const { notify } = useNotification();
+  const { config } = useCms();
+  const [selectedLanguage, setSelectedLanguage] = useState<'en' | 'te'>('en');
+  const areaName = config.constituencies?.[0]?.name || config.parliamentName || config.organisationName || 'Constituency';
   const [activeSubTab, setActiveSubTab] = useState<SubTabType>('overview');
   const [isGenerating, setIsGenerating] = useState(false);
   const [lastAnalysisTime, setLastAnalysisTime] = useState<string>('2026-07-30 04:15');
   const [globalSearch, setGlobalSearch] = useState('');
   const [hasRunAnalysis, setHasRunAnalysis] = useState(true);
+  const [aiGeneratedReport, setAiGeneratedReport] = useState<any>(null);
+  const [isChatThinking, setIsChatThinking] = useState(false);
 
   // Live News and Social Trends from Backend DB
   const [liveNews, setLiveNews] = useState<Array<{
@@ -185,7 +191,7 @@ export default function AIStrategicIntelligenceCenter({
   const [chatMessages, setChatMessages] = useState<Array<{ sender: 'user' | 'ai'; text: string; citations?: string[]; timestamp: string }>>([
     {
       sender: 'ai',
-      text: 'Greetings. I am Kondapi AI. I have analyzed the local constituency database, ground field updates, and verified public sources. How can I assist you with strategic analysis today?',
+      text: `Greetings. I am ${areaName} AI. I have analyzed the local database, ground field updates, and verified operational records. How can I assist you with strategic analysis today?`,
       timestamp: '04:15'
     }
   ]);
@@ -200,15 +206,23 @@ export default function AIStrategicIntelligenceCenter({
   // Map layer toggle
   const [mapLayer, setMapLayer] = useState<'political' | 'survey' | 'cadre' | 'ground_issues'>('political');
 
-  // Trigger analysis generation effect
-  const handleGenerateIntelligence = () => {
+  // Trigger real AI analysis generation
+  const handleGenerateIntelligence = async () => {
     setIsGenerating(true);
-    setTimeout(() => {
-      setIsGenerating(false);
+    try {
+      const unitId = session?.unitId || session?.assignedConstituency || session?.assignedParliament || session?.assignedZone;
+      const lang = selectedLanguage === 'te' ? 'te' : 'en';
+      const rep = await generateStrategicReport(unitId, lang);
+      setAiGeneratedReport(rep);
+      notify.success('AI Strategic Intelligence Report compiled from live database.', 'AI Engine');
       setHasRunAnalysis(true);
       const now = new Date();
       setLastAnalysisTime(now.toISOString().replace('T', ' ').substring(0, 16));
-    }, 2000);
+    } catch (err: any) {
+      notify.warning(err?.message || 'Could not generate AI report. Check GEMINI_API_KEY in Platform Admin.', 'AI Warning');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   // --- 1. DATA VALIDATION ENGINE ---
@@ -352,55 +366,51 @@ export default function AIStrategicIntelligenceCenter({
     };
   }, [mandalsData, villagesData, constituencyStats]);
 
-  // --- 8. AI CHAT BOT RESPONSES ---
-  const handleChatSubmit = (e: React.FormEvent) => {
+  // --- 8. REAL AI CHAT BOT RESPONSES ---
+  const handleChatSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim()) return;
+    if (!chatInput.trim() || isChatThinking) return;
 
-    const userMsg = chatInput;
+    const userMsg = chatInput.trim();
     const now = new Date();
     const timeStr = now.toTimeString().substring(0, 5);
 
-    const updatedMessages = [
-      ...chatMessages,
+    setChatMessages(prev => [
+      ...prev,
       { sender: 'user' as const, text: userMsg, timestamp: timeStr }
-    ];
-    setChatMessages(updatedMessages);
+    ]);
     setChatInput('');
+    setIsChatThinking(true);
 
-    // Formulate intelligent AI answer based on genuine database state
-    setTimeout(() => {
-      let responseText = '';
-      let citations: string[] = [];
-      const lower = userMsg.toLowerCase();
-
-      if (lower.includes('summary') || lower.includes('today') || lower.includes('brief')) {
-        responseText = `Executive Briefing:\n- Total Enrolled Voters: ${constituencyStats.voters.toLocaleString()}\n- Mandals: ${mandalsData.length}\n- Polling Booths: ${constituencyStats.booths.toLocaleString()}\n- Ground Reports: ${groundReports.length} recorded in database\n- Live Lead: ${(constituencyStats.tdp - constituencyStats.ysrcp).toLocaleString()} voters.`;
-        citations = ['PostgreSQL Database', 'Ground Reports API'];
-      } else if (lower.includes('survey') || lower.includes('completion') || lower.includes('coverage')) {
-        responseText = `Current Survey status highlights:\n- Total Registered Voters: ${constituencyStats.voters.toLocaleString()}\n- Mandals Tracked: ${mandalsData.length}\n- Open Ground Reports: ${groundReports.filter(r => r.status === 'Pending').length}`;
-        citations = ['Constituency Database'];
-      } else if (lower.includes('cadre') || lower.includes('network') || lower.includes('unfilled')) {
-        responseText = `Cadre Network status:\n- Mandals Configured: ${mandalsData.length}\n- Booths: ${constituencyStats.booths.toLocaleString()}\n- Incharge assignments sourced directly from cadre registry.`;
-        citations = ['Cadre Registry'];
-      } else if (lower.includes('news') || lower.includes('article') || lower.includes('announcement')) {
-        responseText = `No external RSS/news agency feeds are currently integrated. Please consult official press statements.`;
-        citations = ['System Feeds'];
-      } else {
-        responseText = `Query logged for "${userMsg}". Current verified stats:\n- Total Registered Voters: ${constituencyStats.voters.toLocaleString()}\n- Current TDP Margin Lead: ${(constituencyStats.tdp - constituencyStats.ysrcp).toLocaleString()} voters\n- Flagged Records: ${flaggedVoters.length} active\n- Open Ground Complaints: ${groundReports.filter(r => r.status === 'Pending').length} pending cases.`;
-        citations = ['Constituency Database', 'Ground Reports Ledger'];
-      }
-
+    try {
+      const unitId = session?.unitId || session?.assignedConstituency || session?.assignedParliament || session?.assignedZone;
+      const lang = selectedLanguage === 'te' ? 'te' : 'en';
+      const res = await askAiStrategy(unitId, userMsg, lang);
       setChatMessages(prev => [
         ...prev,
         {
           sender: 'ai',
-          text: responseText,
-          citations,
-          timestamp: now.toTimeString().substring(0, 5)
+          text: res.answer,
+          citations: [
+            res.provider === 'gemini' ? 'Google Gemini AI' : 'Strategic Intelligence Engine',
+            'Verified Live Database',
+          ],
+          timestamp: new Date().toTimeString().substring(0, 5)
         }
       ]);
-    }, 1000);
+    } catch (err: any) {
+      setChatMessages(prev => [
+        ...prev,
+        {
+          sender: 'ai',
+          text: `Error connecting to AI Engine: ${err?.message || 'Request failed'}. Make sure GEMINI_API_KEY is configured under Platform Administration > API Keys & Secrets.`,
+          citations: ['AI Engine Error'],
+          timestamp: new Date().toTimeString().substring(0, 5)
+        }
+      ]);
+    } finally {
+      setIsChatThinking(false);
+    }
   };
 
   // Global search filtering across everything
@@ -464,7 +474,7 @@ export default function AIStrategicIntelligenceCenter({
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
           <input
             type="text"
-            placeholder="Search Kondapi Intelligence (e.g. Kalikivaya, water supply, road repairs, Tangutur, news...)"
+            placeholder={`Search ${areaName} Intelligence (e.g. voters, water supply, road repairs, mandals, news...)`}
             value={globalSearch}
             onChange={(e) => setGlobalSearch(e.target.value)}
             className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-10 py-3 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:bg-white transition-all"
@@ -492,7 +502,7 @@ export default function AIStrategicIntelligenceCenter({
              filteredDataSearchResults.reports.length === 0 &&
              filteredDataSearchResults.news.length === 0 &&
              filteredDataSearchResults.gov.length === 0 && (
-              <p className="text-slate-500 font-medium py-2">No matching records found across the Kondapi Assembly database.</p>
+              <p className="text-slate-500 font-medium py-2">No matching records found across the {areaName} database.</p>
             )}
 
             {filteredDataSearchResults.mandals.length > 0 && (
@@ -873,7 +883,7 @@ export default function AIStrategicIntelligenceCenter({
             <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-6 animate-fade-in">
               <div className="flex justify-between items-center border-b border-slate-100 pb-4">
                 <div>
-                  <h3 className="text-slate-950 text-sm font-black uppercase tracking-wider">Today's Kondapi Intelligence Brief</h3>
+                  <h3 className="text-slate-950 text-sm font-black uppercase tracking-wider">Today's {areaName} Intelligence Brief</h3>
                   <p className="text-[11px] text-slate-500 font-medium">Auto-generated dynamic executive report compiled from local database clusters and field updates.</p>
                 </div>
                 <div className="text-[10px] text-emerald-600 font-mono font-black bg-emerald-50 border border-emerald-200 px-3 py-1 rounded">
@@ -886,53 +896,29 @@ export default function AIStrategicIntelligenceCenter({
                 <div className="space-y-1 bg-slate-50 p-3.5 border border-slate-150 rounded-lg">
                   <div className="flex items-center gap-1.5 mb-1.5">
                     <span className="px-1.5 py-0.5 bg-yellow-400 text-slate-950 font-black rounded text-[9px] uppercase tracking-wide">1. Executive Summary</span>
-                    <span className="text-[9px] text-slate-400 uppercase font-bold">[AI INFERENCE]</span>
+                    <span className="text-[9px] text-slate-400 uppercase font-bold">[DATABASE INTELLIGENCE]</span>
                   </div>
                   <p>
-                    Kondapi constituency shows a consolidated **TDP leading bias of +11.2%** over YSRCP, driven by secure voter blocks in Tangutur, Kondapi, and Singarayakonda rural sectors. However, tight margin zones in **Jarugumalli (+0.5%)** and **Ponnaluru (-0.5%)** require immediate reinforcement of grassroot door-to-door activities to sway undecided neutral populations.
+                    {mandalsData.length > 0 && mandalsData.some(m => m.voters > 0) ? (
+                      `${areaName} operational ledger reflects ${mandalsData.length} monitored blocks with ${constituencyStats.voters.toLocaleString()} enrolled electors. Real-time survey results and ground report logs are synchronized directly with PostgreSQL.`
+                    ) : (
+                      `No electoral records or ground reports recorded in database yet for ${areaName}. Ingest official voter rolls in Platform Administration to activate real-time intelligence summaries.`
+                    )}
                   </p>
                 </div>
 
                 <div className="space-y-1 bg-slate-50 p-3.5 border border-slate-150 rounded-lg">
                   <div className="flex items-center gap-1.5 mb-1.5">
-                    <span className="px-1.5 py-0.5 bg-slate-900 text-white font-black rounded text-[9px] uppercase tracking-wide">2. Mandals Requiring Attention</span>
+                    <span className="px-1.5 py-0.5 bg-slate-900 text-white font-black rounded text-[9px] uppercase tracking-wide">2. Field Data Ledger Status</span>
                     <span className="text-[9px] text-slate-400 uppercase font-bold">[PROJECT DATA]</span>
                   </div>
                   <p>
-                    **Marripudi Mandal** remains a high priority watch area. Survey completion is lagging at **68.2%**, primarily because of 112 unfilled '100-Voter Incharge' cadre spots. Furthermore, agricultural distress logs indicate localized RBK fertilizer shortages.
+                    {mandalsData.length > 0 ? (
+                      `Total ${mandalsData.length} mandals mapped in database. Priority ground attention is allocated to units requiring survey completion or voter verification.`
+                    ) : (
+                      `Awaiting jurisdiction setup. Hierarchy units will appear here once configured in the database.`
+                    )}
                   </p>
-                </div>
-
-                <div className="space-y-1 bg-slate-50 p-3.5 border border-slate-150 rounded-lg">
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <span className="px-1.5 py-0.5 bg-slate-900 text-white font-black rounded text-[9px] uppercase tracking-wide">3. Important Village Developments</span>
-                    <span className="text-[9px] text-slate-400 uppercase font-bold">[GROUND REPORT]</span>
-                  </div>
-                  <p>
-                    **Kalikivaya village** (Singarayakonda) has dispatched 4 severe drinking water logs today. Cadre indicates localized discontent regarding public tanker distribution schedules. Direct coordination required with local supervisors.
-                  </p>
-                </div>
-
-                <div className="space-y-1 bg-slate-50 p-3.5 border border-slate-150 rounded-lg">
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <span className="px-1.5 py-0.5 bg-slate-900 text-white font-black rounded text-[9px] uppercase tracking-wide">4. Data Quality / Consistency Checks</span>
-                    <span className="text-[9px] text-red-600 uppercase font-black">[DATA QUALITY ALERT]</span>
-                  </div>
-                  <p className="text-red-950 font-bold">
-                    ⚠️ Critical preference transposition detected in **Chinna Venkanna Palem village** registry. Registered voters count is **1,200**, but sum of individual party preferences totals **12,000**. IT coordinator review is flagged as urgent.
-                  </p>
-                </div>
-
-                <div className="space-y-1 bg-slate-50 p-3.5 border border-slate-150 rounded-lg">
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <span className="px-1.5 py-0.5 bg-slate-900 text-white font-black rounded text-[9px] uppercase tracking-wide">5. Today's Operational Priorities</span>
-                    <span className="text-[9px] text-slate-400 uppercase font-bold">[AI INFERENCE]</span>
-                  </div>
-                  <ul className="list-disc pl-4 space-y-1 text-[11px]">
-                    <li>Deploy 3 backup water tankers to Kalikivaya block specifically targeting Booths 224 and 225.</li>
-                    <li>Instruct Marripudi Mandal Coordinator to appoint 15 local village volunteers for vacant voter groups.</li>
-                    <li>Update Chinna Venkanna Palem database entries.</li>
-                  </ul>
                 </div>
 
               </div>
@@ -947,7 +933,7 @@ export default function AIStrategicIntelligenceCenter({
               <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
                 <div>
                   <h3 className="text-slate-950 text-sm font-black uppercase tracking-wider">Mandal Intelligence Ledger</h3>
-                  <p className="text-xs text-slate-500 font-medium">Consolidated demographic status and operational attention indexes for all 6 Kondapi blocks.</p>
+                  <p className="text-xs text-slate-500 font-medium">Consolidated demographic status and operational attention indexes for all mapped {areaName} blocks.</p>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -964,42 +950,52 @@ export default function AIStrategicIntelligenceCenter({
                       </tr>
                     </thead>
                     <tbody>
-                      {mandalsData.map(m => {
-                        const coverage = m.name === 'Singarayakonda' ? '94.5%' : m.name === 'Kondapi' ? '92%' : m.name === 'Tangutur' ? '89%' : m.name === 'Jarugumalli' ? '81%' : m.name === 'Ponnaluru' ? '75%' : '68%';
-                        const attention = m.status === 'TRAILING' ? 'HIGH ATTENTION' : m.status === 'CLOSE CONTEST' ? 'ATTENTION' : m.name === 'Jarugumalli' ? 'WATCH' : 'NORMAL';
-                        const attentionBg = attention === 'HIGH ATTENTION' ? 'bg-red-100 text-red-950 border border-red-300' : attention === 'ATTENTION' ? 'bg-amber-100 text-amber-950 border border-amber-300' : attention === 'WATCH' ? 'bg-slate-100 text-slate-800 border border-slate-300' : 'bg-emerald-100 text-emerald-950 border border-emerald-300';
-                        return (
-                          <tr key={m.name} className="border-b border-slate-100 hover:bg-slate-50/50">
-                            <td className="py-3 font-black text-slate-900">{m.name}</td>
-                            <td className="py-3 text-right">{m.voters.toLocaleString()}</td>
-                            <td className="py-3 text-center">{m.villages} Vil / {m.booths} Bth</td>
-                            <td className="py-3 text-center">
-                              <div className="flex items-center justify-center gap-1.5">
-                                <span className="font-extrabold text-slate-900">{coverage}</span>
-                                <div className="w-12 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                  <div className="h-full bg-yellow-400" style={{ width: coverage }} />
+                      {mandalsData.length > 0 ? (
+                        mandalsData.map(m => {
+                          const surveyedVotes = (m.tdp || 0) + (m.ysrcp || 0) + (m.neutral || 0);
+                          const coveragePct = m.voters > 0 ? Math.min(100, Math.round((surveyedVotes / m.voters) * 100)) : 0;
+                          const coverage = `${coveragePct}%`;
+                          const attention = m.status === 'TRAILING' ? 'HIGH ATTENTION' : m.status === 'CLOSE CONTEST' ? 'ATTENTION' : 'NORMAL';
+                          const attentionBg = attention === 'HIGH ATTENTION' ? 'bg-red-100 text-red-950 border border-red-300' : attention === 'ATTENTION' ? 'bg-amber-100 text-amber-950 border border-amber-300' : 'bg-emerald-100 text-emerald-950 border border-emerald-300';
+                          return (
+                            <tr key={m.name} className="border-b border-slate-100 hover:bg-slate-50/50">
+                              <td className="py-3 font-black text-slate-900">{m.name}</td>
+                              <td className="py-3 text-right">{m.voters.toLocaleString()}</td>
+                              <td className="py-3 text-center">{m.villages} Vil / {m.booths} Bth</td>
+                              <td className="py-3 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <span className="font-extrabold text-slate-900">{coverage}</span>
+                                  <div className="w-12 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                    <div className="h-full bg-yellow-400" style={{ width: coverage }} />
+                                  </div>
                                 </div>
-                              </div>
-                            </td>
-                            <td className="py-3 text-center text-[11px] text-slate-500">
-                              {m.name === 'Singarayakonda' ? '96%' : m.name === 'Kondapi' ? '95%' : m.name === 'Tangutur' ? '91%' : '84%'} Coverage
-                            </td>
-                            <td className="py-3 text-center">
-                              <span className={`px-2 py-0.5 rounded text-[9px] font-black tracking-wider uppercase ${attentionBg}`}>
-                                {attention}
-                              </span>
-                            </td>
-                            <td className="py-3 text-right">
-                              <button
-                                onClick={() => setSelectedMandalReport(m.name)}
-                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded text-[9px] uppercase font-black text-slate-900 tracking-wider cursor-pointer"
-                              >
-                                View Report
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
+                              </td>
+                              <td className="py-3 text-center text-[11px] text-slate-500">
+                                {m.booths > 0 ? `${m.booths} Booths Mapped` : '0 Booths'}
+                              </td>
+                              <td className="py-3 text-center">
+                                <span className={`px-2 py-0.5 rounded text-[9px] font-black tracking-wider uppercase ${attentionBg}`}>
+                                  {attention}
+                                </span>
+                              </td>
+                              <td className="py-3 text-right">
+                                <button
+                                  onClick={() => setSelectedMandalReport(m.name)}
+                                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded text-[9px] uppercase font-black text-slate-900 tracking-wider cursor-pointer"
+                                >
+                                  View Report
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={7} className="py-8 text-center text-slate-400 font-medium">
+                            No mandal units configured in database yet.
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1016,7 +1012,7 @@ export default function AIStrategicIntelligenceCenter({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <h3 className="text-slate-950 text-sm font-black uppercase tracking-wider">Village Performance Index</h3>
-                    <p className="text-xs text-slate-500 font-medium">Strategic polling performance index rollups for all recorded Kondapi localities.</p>
+                    <p className="text-xs text-slate-500 font-medium">Strategic polling performance index rollups for all recorded {areaName} localities.</p>
                   </div>
                 </div>
 
@@ -1136,7 +1132,7 @@ export default function AIStrategicIntelligenceCenter({
               {/* TOP PUBLIC ISSUES TABLE */}
               <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
                 <div>
-                  <h3 className="text-slate-950 text-sm font-black uppercase tracking-wider">Top Public Issues in Kondapi</h3>
+                  <h3 className="text-slate-950 text-sm font-black uppercase tracking-wider">Top Public Issues in {areaName}</h3>
                   <p className="text-xs text-slate-500 font-medium">Ground indicators derived by AI Ground Report Analyzer compiling thousands of physical surveys.</p>
                 </div>
 
@@ -1237,8 +1233,8 @@ export default function AIStrategicIntelligenceCenter({
           {activeSubTab === 'news' && (
             <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4 animate-fade-in">
               <div>
-                <h3 className="text-slate-950 text-sm font-black uppercase tracking-wider">Kondapi News Intelligence</h3>
-                <p className="text-xs text-slate-500 font-medium">Permitted public news tracking relevant to Prakasam local administration and development project declarations.</p>
+                <h3 className="text-slate-950 text-sm font-black uppercase tracking-wider">{areaName} News Intelligence</h3>
+                <p className="text-xs text-slate-500 font-medium">Permitted public news tracking relevant to local administration and development project declarations.</p>
               </div>
 
               <div className="space-y-4 pt-2">
@@ -1300,7 +1296,7 @@ export default function AIStrategicIntelligenceCenter({
               </div>
 
               <div className="space-y-4">
-                <h4 className="text-slate-950 text-xs font-black uppercase tracking-wider">Trending in Kondapi (Public Pages & Groups)</h4>
+                <h4 className="text-slate-950 text-xs font-black uppercase tracking-wider">Trending in {areaName} (Public Pages & Groups)</h4>
                 
                 <div className="space-y-3">
                   {socialTrends.length === 0 ? (
@@ -1519,31 +1515,93 @@ export default function AIStrategicIntelligenceCenter({
                 </p>
 
                 <button
-                  onClick={() => notify.info('Compiling PDF Briefing Booklet... Standard print layout initialized.', 'Report Generator')}
-                  className="px-6 py-3 bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 mx-auto cursor-pointer shadow"
+                  onClick={handleGenerateIntelligence}
+                  disabled={isGenerating}
+                  className="px-6 py-3 bg-yellow-400 hover:bg-yellow-500 disabled:opacity-50 text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 mx-auto cursor-pointer shadow"
                 >
-                  <Printer className="w-4 h-4" /> Generate Full Constituency Intelligence Report
+                  {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  {isGenerating ? 'Compiling AI Strategic Report...' : 'Generate Full Constituency Intelligence Report'}
                 </button>
               </div>
 
-              {/* MOCK REPORT TEMPLATE SHOWN FOR VISUAL SATISFACTION */}
-              <div className="border border-slate-200 rounded-xl p-6 bg-slate-50 font-mono text-[10px] leading-relaxed text-slate-600 max-h-[300px] overflow-y-auto font-semibold">
-                <p className="text-slate-900 font-extrabold uppercase text-center mb-4 text-xs">
-                  KONDAPI ASSEMBLY CONSTITUENCY -- PRIVATE BRIEFING BOOK
-                  <br />
-                  COMPILED BY AI STRATEGIC INTELLIGENCE LAYER
-                </p>
-                <p>DATE OF EXPORT: {lastAnalysisTime}</p>
-                <p>STATUS: CONFIDENTIAL - NOT FOR EXTERNAL DISSEMINATION</p>
-                
-                <p className="font-extrabold text-slate-900 uppercase mt-4">SECTION 1: EXECUTIVE BRIEFING</p>
-                <p>Overall Support Ratio: TDP leads by +11.2% average. Tight margin villages are located principally in Ponnaluru and Jarugumalli mandals.</p>
-                
-                <p className="font-extrabold text-slate-900 uppercase mt-4">SECTION 2: DATA AUDITS</p>
-                <p>Verification engine flagged 1 critical allocation inconsistency in Chinna Venkanna Palem Village. Total voters reported: 1,200. Combined preference sum: 12,000.</p>
+              {/* STRATEGIC BRIEFING BOOKLET */}
+              <div className="border border-slate-200 rounded-xl p-6 bg-slate-50 font-mono text-[10px] leading-relaxed text-slate-600 max-h-[450px] overflow-y-auto font-semibold space-y-4">
+                <div className="text-center pb-2 border-b border-slate-200">
+                  <p className="text-slate-900 font-extrabold uppercase text-xs">
+                    {(config.organisationName || session?.jurisdictionName || 'CONSTITUENCY').toUpperCase()} -- STRATEGIC BRIEFING BOOK
+                  </p>
+                  <p className="text-[9px] text-slate-500 mt-0.5">COMPILED BY AI STRATEGIC INTELLIGENCE LAYER &bull; {lastAnalysisTime}</p>
+                  <p className="text-[9px] text-amber-700 font-bold">STATUS: CONFIDENTIAL - NOT FOR EXTERNAL DISSEMINATION</p>
+                </div>
 
-                <p className="font-extrabold text-slate-900 uppercase mt-4">SECTION 3: GROUND FIELD OUTREACH</p>
-                <p>Top public concern: Water supply (18 reports). Local action needed in Singarayakonda Ward 12.</p>
+                {aiGeneratedReport ? (
+                  <div className="space-y-4">
+                    <div>
+                      <p className="font-extrabold text-slate-900 uppercase">SECTION 1: AI EXECUTIVE SUMMARY</p>
+                      <p className="text-slate-700 mt-1">{aiGeneratedReport.executiveSummary}</p>
+                    </div>
+
+                    {Array.isArray(aiGeneratedReport.keyStrengths) && aiGeneratedReport.keyStrengths.length > 0 && (
+                      <div>
+                        <p className="font-extrabold text-emerald-700 uppercase">SECTION 2: KEY STRENGTHS & MOMENTUM</p>
+                        <ul className="list-disc pl-4 space-y-1 mt-1 text-slate-700">
+                          {aiGeneratedReport.keyStrengths.map((str: string, i: number) => (
+                            <li key={i}>{str}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {Array.isArray(aiGeneratedReport.vulnerabilities) && aiGeneratedReport.vulnerabilities.length > 0 && (
+                      <div>
+                        <p className="font-extrabold text-red-700 uppercase">SECTION 3: CRITICAL VULNERABILITIES & BOTTLENECK RISKS</p>
+                        <ul className="list-disc pl-4 space-y-1 mt-1 text-slate-700">
+                          {aiGeneratedReport.vulnerabilities.map((vul: string, i: number) => (
+                            <li key={i}>{vul}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {Array.isArray(aiGeneratedReport.actionPlan) && aiGeneratedReport.actionPlan.length > 0 && (
+                      <div>
+                        <p className="font-extrabold text-slate-900 uppercase">SECTION 4: RECOMMENDED GROUND ACTION PLAN</p>
+                        <ul className="list-decimal pl-4 space-y-1 mt-1 text-slate-700">
+                          {aiGeneratedReport.actionPlan.map((act: string, i: number) => (
+                            <li key={i}>{act}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <p className="font-extrabold text-slate-900 uppercase">SECTION 1: EXECUTIVE BRIEFING</p>
+                      <p className="mt-1">
+                        {constituencyStats.voters > 0
+                          ? `Overall Support Ratio: ${config.activePartyCode || 'Active Party'} leads with active polling mobilization. Total registered voter dataset: ${constituencyStats.voters.toLocaleString()} electors across ${mandalsData.length} operational blocks.`
+                          : 'Awaiting voter roll ingestion. Click "Generate Full Constituency Intelligence Report" above to compile dynamic strategic analysis.'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="font-extrabold text-slate-900 uppercase">SECTION 2: DATA AUDITS</p>
+                      <p className="mt-1">
+                        {flaggedVoters.length > 0
+                          ? `Verification engine flagged ${flaggedVoters.length} potential duplicate or anomaly records across database records.`
+                          : 'Verification engine reports 0 critical allocation inconsistencies across voter rolls.'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="font-extrabold text-slate-900 uppercase">SECTION 3: GROUND FIELD OUTREACH</p>
+                      <p className="mt-1">
+                        {groundReports.length > 0
+                          ? `Field intelligence ledger active: ${groundReports.length} reports logged across grassroots cadres.`
+                          : 'Ground outreach telemetry waiting for initial cadre deployment.'}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1554,14 +1612,14 @@ export default function AIStrategicIntelligenceCenter({
           {activeSubTab === 'ask_ai' && (
             <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 animate-fade-in flex flex-col min-h-[480px]">
               <div>
-                <h3 className="text-slate-950 text-sm font-black uppercase tracking-wider">Ask Kondapi AI Assistant</h3>
+                <h3 className="text-slate-950 text-sm font-black uppercase tracking-wider">Ask {areaName} AI Assistant</h3>
                 <p className="text-xs text-slate-500 font-medium">Real-time interaction with local database records. Answers are strictly calculated from verified tables.</p>
               </div>
 
               {/* SUGGESTED CHATBOT ACTIONS */}
               <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase">
                 {[
-                  'Give me today\'s Kondapi summary',
+                  `Give me today's ${areaName} summary`,
                   'Which Mandals need attention?',
                   'Find inconsistencies in project data',
                   'Summarize recent news announcements',
@@ -1595,10 +1653,37 @@ export default function AIStrategicIntelligenceCenter({
                           : 'bg-white border border-slate-200 text-slate-850 rounded-tl-none shadow-sm'
                       }`}
                     >
-                      {/* Markdown rendering simulation for visual bullet lists */}
-                      {msg.text.split('\n').map((line, lIdx) => (
-                        <p key={lIdx} className="mb-1">{line}</p>
-                      ))}
+                      {/* Clean structured rendering for markdown headers, bolding, and bullet lists */}
+                      {msg.text.split('\n').filter(Boolean).map((line, lIdx) => {
+                        const trimmed = line.trim();
+                        const isBullet = trimmed.startsWith('- ') || trimmed.startsWith('• ') || trimmed.startsWith('* ');
+                        const content = isBullet ? trimmed.replace(/^[-•*]\s*/, '') : trimmed;
+                        
+                        // Parse simple bold tags like **text** or ***text***
+                        const formattedParts = content.split(/(\*\*\*?[^*]+\*\*\*?)/g).map((part, pIdx) => {
+                          if (part.startsWith('**') || part.startsWith('***')) {
+                            const cleaned = part.replace(/^\*+|\*+$/g, '');
+                            return <strong key={pIdx} className="font-bold text-slate-900">{cleaned}</strong>;
+                          }
+                          return part;
+                        });
+
+                        if (isBullet) {
+                          return (
+                            <div key={lIdx} className="flex items-start gap-2 my-1 text-xs">
+                              <span className="text-yellow-500 font-bold mt-0.5">•</span>
+                              <div className="flex-1">{formattedParts}</div>
+                            </div>
+                          );
+                        }
+
+                        const isSectionHeader = /^[🎯⚡📊💡🚨]/.test(trimmed) || trimmed.endsWith(':');
+                        return (
+                          <p key={lIdx} className={`mb-1.5 text-xs ${isSectionHeader ? 'font-bold text-slate-900 mt-2' : ''}`}>
+                            {formattedParts}
+                          </p>
+                        );
+                      })}
                     </div>
 
                     {msg.citations && msg.citations.length > 0 && (
@@ -1611,22 +1696,33 @@ export default function AIStrategicIntelligenceCenter({
                     )}
                   </div>
                 ))}
+
+                {isChatThinking && (
+                  <div className="mr-auto items-start max-w-[85%] space-y-1">
+                    <div className="p-3.5 rounded-2xl bg-white border border-slate-200 text-slate-700 rounded-tl-none shadow-sm flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-yellow-500 animate-spin" />
+                      <span className="text-xs font-bold text-slate-600">AI Strategist is analyzing live voter data & ground reports...</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* INPUT BOX */}
               <form onSubmit={handleChatSubmit} className="flex gap-2">
                 <input
                   type="text"
-                  placeholder="Ask any question about voters, ground issues, news, or database checks..."
+                  placeholder="Ask any question about voters, ground issues, news, or strategic recommendations..."
                   value={chatInput}
+                  disabled={isChatThinking}
                   onChange={(e) => setChatInput(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 text-xs font-semibold text-slate-850 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:bg-white"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 text-xs font-semibold text-slate-850 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:bg-white disabled:opacity-50"
                 />
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-black rounded-xl uppercase tracking-wider text-xs flex items-center gap-1 cursor-pointer transition-transform shrink-0"
+                  disabled={isChatThinking || !chatInput.trim()}
+                  className="px-5 py-2.5 bg-yellow-400 hover:bg-yellow-500 disabled:opacity-50 text-slate-950 font-black rounded-xl uppercase tracking-wider text-xs flex items-center gap-1 cursor-pointer transition-transform shrink-0"
                 >
-                  <Send className="w-3.5 h-3.5" /> Send
+                  {isChatThinking ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send
                 </button>
               </form>
             </div>
@@ -1676,39 +1772,50 @@ export default function AIStrategicIntelligenceCenter({
               </div>
 
               {/* DEMOGRAPHIC ANALYSIS */}
-              <div className="space-y-2">
-                <h4 className="font-black text-slate-950 uppercase text-[10px]">Demographic & Preference Outlook</h4>
-                <div className="p-3.5 bg-slate-50 border border-slate-150 rounded-xl space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-bold">Survey Coverage:</span>
-                    <span className="text-slate-900 font-extrabold">
-                      {selectedMandalReport === 'Singarayakonda' ? '94.5%' : selectedMandalReport === 'Kondapi' ? '92%' : selectedMandalReport === 'Tangutur' ? '89%' : selectedMandalReport === 'Jarugumalli' ? '81%' : selectedMandalReport === 'Ponnaluru' ? '75%' : '68%'}
-                    </span>
-                  </div>
+              {(() => {
+                const selectedMandalObj = mandalsData.find(m => m.name === selectedMandalReport);
+                const surveyedVotes = (selectedMandalObj?.tdp || 0) + (selectedMandalObj?.ysrcp || 0) + (selectedMandalObj?.neutral || 0);
+                const coverage = selectedMandalObj && selectedMandalObj.voters > 0 
+                  ? `${Math.min(100, Math.round((surveyedVotes / selectedMandalObj.voters) * 100))}%` 
+                  : '0%';
+                const sentiment = selectedMandalObj 
+                  ? `${selectedMandalObj.leading || 'Neutral'} (${selectedMandalObj.status})` 
+                  : 'Awaiting Data Ingestion';
+                const cadreCoverage = selectedMandalObj && selectedMandalObj.booths > 0 
+                  ? `${selectedMandalObj.booths} Polling Booths Mapped` 
+                  : 'Awaiting Ingestion';
+                const directive = selectedMandalObj?.status === 'TRAILING'
+                  ? 'Deploy grassroots cadre outreach in trailing sectors to engage undecided voters.'
+                  : 'Continue systematic voter verification and door-to-door ground operations.';
 
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-bold">Aggregate Sentiment:</span>
-                    <span className="text-emerald-600 font-black">
-                      {selectedMandalReport === 'Marripudi' ? 'YSRCP Trailing Watch' : 'TDP Winning Holdings'}
-                    </span>
-                  </div>
+                return (
+                  <div className="space-y-2">
+                    <h4 className="font-black text-slate-950 uppercase text-[10px]">Demographic & Preference Outlook</h4>
+                    <div className="p-3.5 bg-slate-50 border border-slate-150 rounded-xl space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500 font-bold">Survey Coverage:</span>
+                        <span className="text-slate-900 font-extrabold">{coverage}</span>
+                      </div>
 
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-bold">Cadre Coverage:</span>
-                    <span className="text-slate-900 font-extrabold">
-                      {selectedMandalReport === 'Singarayakonda' ? '96%' : selectedMandalReport === 'Kondapi' ? '95%' : selectedMandalReport === 'Tangutur' ? '91%' : '84%'} active assigned
-                    </span>
-                  </div>
-                </div>
-              </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500 font-bold">Aggregate Sentiment:</span>
+                        <span className="text-emerald-600 font-black">{sentiment}</span>
+                      </div>
 
-              {/* ADVISORY DIRECTIVE */}
-              <div className="space-y-1 bg-yellow-50 text-yellow-900 border border-yellow-200 p-3.5 rounded-xl text-[11px] leading-relaxed">
-                <span className="font-extrabold uppercase block text-[9px] tracking-wide mb-0.5 text-yellow-800">Operational Incharge Directive</span>
-                {selectedMandalReport === 'Marripudi' 
-                  ? 'Appoint 15 local village coordinators in trailing Booth blocks to accelerate coverage before survey closure.'
-                  : 'Maintain current layout campaign templates. Assign backup water tankers to dry rural sections immediately.'}
-              </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500 font-bold">Cadre Coverage:</span>
+                        <span className="text-slate-900 font-extrabold">{cadreCoverage}</span>
+                      </div>
+                    </div>
+
+                    {/* ADVISORY DIRECTIVE */}
+                    <div className="space-y-1 bg-yellow-50 text-yellow-900 border border-yellow-200 p-3.5 rounded-xl text-[11px] leading-relaxed">
+                      <span className="font-extrabold uppercase block text-[9px] tracking-wide mb-0.5 text-yellow-800">Operational Incharge Directive</span>
+                      <p>{directive}</p>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="flex justify-end pt-3 border-t border-slate-100">

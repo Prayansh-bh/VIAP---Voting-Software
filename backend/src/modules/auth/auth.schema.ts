@@ -59,3 +59,40 @@ export type DeviceSessionDto = z.infer<typeof deviceSessionSchema>;
 export type RevokeDeviceDto = z.infer<typeof revokeDeviceSchema>;
 export type DemoLoginDto = z.infer<typeof demoLoginSchema>;
 
+export const updateProfileSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters').max(100).optional(),
+  email: z.string().email('Invalid email address format').max(150).optional(),
+}).strict();
+export type UpdateProfileDto = z.infer<typeof updateProfileSchema>;
+
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Current password is required'),
+    newPassword: z.string().min(8, 'New password must be at least 8 characters').max(100),
+    confirmPassword: z.string().min(8, 'Password confirmation is required'),
+  })
+  .strict()
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: 'New password and confirmation do not match',
+    path: ['confirmPassword'],
+  })
+  .refine((data) => data.newPassword !== data.currentPassword, {
+    message: 'New password cannot be the same as current password',
+    path: ['newPassword'],
+  });
+export type ChangePasswordDto = z.infer<typeof changePasswordSchema>;
+
+export const requestMobileChangeOtpSchema = z.object({
+  newMobileNumber: z.string().min(10, 'Mobile number must be at least 10 digits').max(15),
+  channel: z.enum(['SMS', 'WHATSAPP', 'sms', 'whatsapp']).optional().default('SMS'),
+}).strict();
+export type RequestMobileChangeOtpDto = z.infer<typeof requestMobileChangeOtpSchema>;
+
+export const verifyMobileChangeOtpSchema = z.object({
+  requestId: z.string().uuid('Valid OTP requestId is required'),
+  newMobileNumber: z.string().min(10, 'Mobile number must be at least 10 digits').max(15),
+  otpCode: z.string().length(6, 'OTP must be 6 digits'),
+}).strict();
+export type VerifyMobileChangeOtpDto = z.infer<typeof verifyMobileChangeOtpSchema>;
+
+

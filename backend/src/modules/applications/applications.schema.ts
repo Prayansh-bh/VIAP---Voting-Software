@@ -73,3 +73,51 @@ export const updateInchargeSchema = z.object({
   role: z.nativeEnum(RoleType).optional(),
   reason: z.string().optional(),
 });
+
+export const updateApplicationSchema = z.object({
+  name: z.string().min(2, 'Application name must be at least 2 characters').max(100).optional(),
+  party: z.string().min(2, 'Party name must be at least 2 characters').max(100).optional(),
+  partyCode: z.string().min(2, 'Party code must be at least 2 characters').max(15).optional(),
+  leaderName: z.string().max(100).optional(),
+  jurisdiction: z.string().max(200).optional(),
+  description: z.string().max(500).optional(),
+  slogan: z.string().max(500).optional(),
+  headerTitle: z.string().max(200).optional(),
+  primaryColor: z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Invalid primary color format').optional(),
+  secondaryColor: z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Invalid secondary color format').optional(),
+  accentColor: z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Invalid accent color format').optional(),
+  logoUrl: z.string().optional(),
+  activeHierarchyLevels: z.array(z.string()).min(1, 'At least one hierarchy tier must remain enabled').optional(),
+  hierarchyLevels: z.array(z.string()).min(1, 'At least one hierarchy level required').optional(),
+  stateName: z.string().optional(),
+  appScope: z.enum(['SINGLE_MLA', 'PARLIAMENT_MP', 'ZONE', 'STATE']).optional(),
+  parliamentName: z.string().optional(),
+  parliamentCode: z.string().optional(),
+  hierarchyLabels: z.record(z.string(), z.string()).optional(),
+  featureToggles: z.record(z.string(), z.boolean()).optional(),
+  dashboardConfig: z.record(z.string(), z.any()).optional(),
+  analyticsConfig: z.record(z.string(), z.any()).optional(),
+  aiEnabled: z.boolean().optional(),
+  politicalParties: z.array(z.object({
+    name: z.string().min(1),
+    code: z.string().min(1),
+    shortName: z.string().optional(),
+    primaryColor: z.string().optional(),
+    secondaryColor: z.string().optional().nullable(),
+    accentColor: z.string().optional().nullable(),
+    symbolName: z.string().optional().nullable(),
+    logoUrl: z.string().optional().nullable(),
+    isActive: z.boolean().optional(),
+    sortOrder: z.number().optional(),
+  })).optional(),
+  newTierIncharges: z.array(z.object({
+    tierLevel: z.string(),
+    role: z.string().optional(),
+    name: z.string().min(1, 'Incharge name is required'),
+    mobileNumber: z.string().min(10, 'Valid 10-digit mobile number is required'),
+    unitName: z.string().optional(),
+  })).optional(),
+}).strict();
+
+export type UpdateApplicationDto = z.infer<typeof updateApplicationSchema>;
+

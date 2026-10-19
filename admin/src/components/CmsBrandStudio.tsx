@@ -1,3 +1,4 @@
+import { getAppUrl, getApiUrl } from '../lib/env';
 import React, { useState, useEffect } from 'react';
 import {
   Palette,
@@ -55,7 +56,7 @@ export default function CmsBrandStudio({ currentApp, onRefreshApps }: CmsBrandSt
       setLoading(true);
       try {
         const token = getAdminToken();
-        const res = await fetch('http://localhost:4000/api/cms/config', {
+        const res = await fetch('${getApiUrl()}/cms/config', {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (res.ok) {
@@ -97,7 +98,7 @@ export default function CmsBrandStudio({ currentApp, onRefreshApps }: CmsBrandSt
 
     try {
       const token = getAdminToken();
-      const res = await fetch('http://localhost:4000/api/cms/config', {
+      const res = await fetch('${getApiUrl()}/cms/config', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -153,7 +154,7 @@ export default function CmsBrandStudio({ currentApp, onRefreshApps }: CmsBrandSt
 
         <div className="flex items-center gap-3">
           <a
-            href="http://localhost:3000"
+            href={getAppUrl()}
             target="_blank"
             rel="noopener noreferrer"
             className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs transition flex items-center gap-1.5"

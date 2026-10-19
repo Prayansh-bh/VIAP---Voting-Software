@@ -252,35 +252,55 @@ function StackedBarChartCard({ title, icon, totalVoters, data }: ChartCardProps)
   );
 }
 
+import { useLocation, useNavigate } from 'react-router-dom';
+
+type BoothTab = 'dashboard' | 'voters' | 'live-track' | 'fake-votes' | 'tasks' | 'caste' | 'teams' | 'videos';
+
+const BOOTH_TAB_TO_PATH: Record<BoothTab, string> = {
+  dashboard: '/booth',
+  voters: '/booth/voters',
+  'live-track': '/booth/live-track',
+  'fake-votes': '/booth/fake-votes',
+  tasks: '/booth/tasks',
+  caste: '/booth/caste',
+  teams: '/booth/cadre-network',
+  videos: '/booth/videos',
+};
+
+const BOOTH_PATH_TO_TAB: Record<string, BoothTab> = {
+  '': 'dashboard',
+  dashboard: 'dashboard',
+  voters: 'voters',
+  'live-track': 'live-track',
+  'fake-votes': 'fake-votes',
+  tasks: 'tasks',
+  caste: 'caste',
+  'cadre-network': 'teams',
+  teams: 'teams',
+  videos: 'videos',
+  training: 'videos',
+};
+
 export default function BoothInchargeDashboard({ session, onLogout }: BoothInchargeDashboardProps) {
   const { config } = useCms();
-  // Navigation active tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'voters' | 'live-track' | 'fake-votes' | 'tasks' | 'caste' | 'teams' | 'videos'>(() => {
-    const hash = window.location.hash;
-    if (hash === '#/booth/voters') return 'voters';
-    if (hash === '#/booth/live-track') return 'live-track';
-    if (hash === '#/booth/fake-votes') return 'fake-votes';
-    if (hash === '#/booth/tasks') return 'tasks';
-    if (hash === '#/booth/caste') return 'caste';
-    if (hash === '#/booth/cadre-network' || hash === '#/booth/teams') return 'teams';
-    if (hash === '#/booth/videos') return 'videos';
-    return 'dashboard';
-  });
+  const location = useLocation();
+  const navigate = useNavigate();
 
-  // Track hash update
+  const subPath = location.pathname.replace(/^\/booth\/?/, '').split('/')[0] || '';
+  const isKnownSubPath = subPath === '' || subPath in BOOTH_PATH_TO_TAB;
+  const activeTab: BoothTab = isKnownSubPath ? (BOOTH_PATH_TO_TAB[subPath] || 'dashboard') : 'dashboard';
+
+  // Unknown sub-routes safely return to base route
   useEffect(() => {
-    const pathMap = {
-      dashboard: '#/booth/dashboard',
-      voters: '#/booth/voters',
-      'live-track': '#/booth/live-track',
-      'fake-votes': '#/booth/fake-votes',
-      tasks: '#/booth/tasks',
-      caste: '#/booth/caste',
-      teams: '#/booth/cadre-network',
-      videos: '#/booth/videos'
-    };
-    window.location.hash = pathMap[activeTab];
-  }, [activeTab]);
+    if (!isKnownSubPath) {
+      navigate('/booth', { replace: true });
+    }
+  }, [isKnownSubPath, navigate]);
+
+  const setActiveTab = (tab: BoothTab) => {
+    navigate(BOOTH_TAB_TO_PATH[tab]);
+    setIsSidebarOpen(false);
+  };
 
   // Mobile sidebar open
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -383,6 +403,9 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
 
   // Forecast leading calculation
   const forecast = useMemo(() => {
+    if (voters.length === 0) {
+      return { status: "AWAITING DATA INGESTION", lead: 0 };
+    }
     const tdpVotes = (partyStats.TDP as number) + (partyStats.JSP as number) + (partyStats.BJP as number); // NDA alliance
     const ysrcpVotes = partyStats.YSRCP as number;
     
@@ -393,7 +416,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
     } else {
       return { status: "TOO CLOSE TO CALL", lead: 0 };
     }
-  }, [partyStats]);
+  }, [partyStats, voters.length]);
 
   // --------------------------------------------------------
   // SEARCH & FILTERS FOR TAB 2: VOTERS LIST
@@ -1064,7 +1087,9 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                   </span>
                   
                   <h2 className="text-3xl font-black tracking-tight" id="forecast-winner">
-                    {forecast.status === 'TOO CLOSE TO CALL' ? (
+                    {forecast.status === 'AWAITING DATA INGESTION' ? (
+                      <span className="text-slate-400">AWAITING DATA INGESTION</span>
+                    ) : forecast.status === 'TOO CLOSE TO CALL' ? (
                       <span className="text-orange-400">TOO CLOSE TO CALL</span>
                     ) : (
                       <>
@@ -1075,7 +1100,9 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                   </h2>
                   
                   <p className="text-lg font-bold text-gray-300">
-                    {forecast.status === 'TOO CLOSE TO CALL' ? (
+                    {forecast.status === 'AWAITING DATA INGESTION' ? (
+                      "No voters enrolled in this polling booth yet."
+                    ) : forecast.status === 'TOO CLOSE TO CALL' ? (
                       "Voter support is perfectly split."
                     ) : (
                       <>by <span className="text-yellow-400 text-xl font-extrabold">{forecast.lead}</span> Votes</>

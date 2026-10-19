@@ -81,13 +81,27 @@ export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}
 
   if (!res.ok) {
     let errMessage = `HTTP ${res.status}: ${res.statusText}`;
+    let errJson: any = null;
     try {
-      const errJson = await res.json();
-      errMessage = errJson.error?.message || errJson.message || errMessage;
+      errJson = await res.json();
+      errMessage = errJson?.error?.message || errJson?.message || errMessage;
     } catch {
       // ignore
     }
-    throw new Error(errMessage);
+    const err: any = new Error(errMessage);
+    err.status = res.status;
+    err.statusCode = res.status;
+    err.code = errJson?.error?.code || errJson?.code;
+    err.data = errJson?.data;
+    const retryHeader = res.headers.get('retry-after');
+    const headerRetry = retryHeader ? parseInt(retryHeader, 10) : NaN;
+    const bodyRetry = errJson?.data?.retryAfter ?? errJson?.retryAfter;
+    if (!isNaN(headerRetry) && headerRetry > 0) {
+      err.retryAfter = headerRetry;
+    } else if (typeof bodyRetry === 'number' && bodyRetry > 0) {
+      err.retryAfter = bodyRetry;
+    }
+    throw err;
   }
 
   const json = await res.json();

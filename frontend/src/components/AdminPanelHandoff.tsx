@@ -1,3 +1,4 @@
+import { getAdminUrl } from '../lib/env';
 import React from 'react';
 import { Shield, ExternalLink, ArrowRight, Server, Layers } from 'lucide-react';
 
@@ -6,7 +7,7 @@ interface AdminPanelHandoffProps {
 }
 
 export default function AdminPanelHandoff({ onReturnToPartyApp }: AdminPanelHandoffProps) {
-  const adminUrl = 'http://localhost:3001';
+  const adminUrl = getAdminUrl();
 
   return (
     <div className="w-full max-w-4xl mx-auto px-4 py-12 sm:py-16 animate-fade-in" id="admin-panel-handoff-root">
@@ -57,19 +58,19 @@ export default function AdminPanelHandoff({ onReturnToPartyApp }: AdminPanelHand
           <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Party Application</div>
             <div className="text-xs font-bold text-white mt-1">Field Incharge Operational Command</div>
-            <div className="text-[10px] font-mono text-emerald-400 mt-0.5">http://localhost:3000</div>
+            <div className="text-[10px] font-mono text-emerald-400 mt-0.5">{typeof window !== 'undefined' ? window.location.origin : 'App Client'}</div>
           </div>
 
           <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">CMS / Admin Panel</div>
             <div className="text-xs font-bold text-white mt-1">Super Admin & Tenant Governance</div>
-            <div className="text-[10px] font-mono text-amber-400 mt-0.5">http://localhost:3001</div>
+            <div className="text-[10px] font-mono text-amber-400 mt-0.5">{adminUrl}</div>
           </div>
 
           <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Shared Database</div>
             <div className="text-xs font-bold text-white mt-1">PostgreSQL Fastify API Backend</div>
-            <div className="text-[10px] font-mono text-cyan-400 mt-0.5">http://localhost:4000/api</div>
+            <div className="text-[10px] font-mono text-cyan-400 mt-0.5">{import.meta.env?.VITE_API_BASE_URL || 'Configured API'}</div>
           </div>
         </div>
       </div>

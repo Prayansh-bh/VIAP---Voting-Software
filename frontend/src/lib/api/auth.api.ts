@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import { getOrCreateDeviceId, setDeviceToken, clearDeviceToken } from '../authStorage';
+import { getOrCreateDeviceId, setDeviceToken, clearDeviceToken, setAuthToken } from '../authStorage';
 
 export async function requestOtpApi(
   mobileNumber: string,
@@ -98,6 +98,9 @@ export async function loginAsDemoRoleApi(
   mobileNumber?: string,
   name?: string
 ): Promise<{ token: string; refreshToken?: string; deviceId: string; deviceToken: string; user: any }> {
+  if (import.meta.env.PROD) {
+    throw new Error('Demo authentication is strictly disabled in production environments.');
+  }
   const resolvedDeviceId = deviceId || getOrCreateDeviceId();
   return apiFetch<{ token: string; refreshToken?: string; deviceId: string; deviceToken: string; user: any }>(
     '/api/auth/demo-login',
@@ -250,5 +253,32 @@ export async function verifyRegistrationOtp(
     method: 'POST',
     body: JSON.stringify({ requestId, otpCode }),
   });
+}
+
+export async function requestMobileChangeOtpApi(
+  newMobileNumber: string,
+  channel: 'SMS' | 'WHATSAPP' = 'SMS'
+): Promise<{ requestId: string; expiresAt?: string; cooldownSeconds?: number; message?: string }> {
+  return apiFetch('/api/auth/mobile-change/request-otp', {
+    method: 'POST',
+    body: JSON.stringify({ newMobileNumber, channel }),
+  });
+}
+
+export async function verifyMobileChangeOtpApi(
+  requestId: string,
+  newMobileNumber: string,
+  otpCode: string
+): Promise<{ token: string; refreshToken?: string; user: any; message: string }> {
+  const data = await apiFetch<any>('/api/auth/mobile-change/verify', {
+    method: 'POST',
+    body: JSON.stringify({ requestId, newMobileNumber, otpCode }),
+  });
+
+  if (data?.token) {
+    setAuthToken(data.token);
+  }
+
+  return data;
 }
 

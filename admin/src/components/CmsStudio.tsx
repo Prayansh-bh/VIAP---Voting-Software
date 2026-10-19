@@ -1,3 +1,5 @@
+import CreatedCredentialsModal from './CreatedCredentialsModal';
+import { getAppUrl } from '../lib/env';
 import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import {
@@ -42,7 +44,8 @@ import {
 import { useCms } from '../context/CmsContext';
 import { useNotification } from '../context/NotificationContext';
 import { AppScope, CmsParty, ConstituencyItem } from '../lib/cms';
-import { requestRegistrationOtp, verifyRegistrationOtp } from '../lib/api';
+import { requestRegistrationOtp, verifyRegistrationOtp, updateApplication } from '../lib/api';
+import { AppInstance } from '../types';
 
 interface CmsStudioProps {
   isOpen: boolean;
@@ -50,6 +53,8 @@ interface CmsStudioProps {
   onOpenRoleModules?: () => void;
   onAppBuilt?: (app: any) => Promise<void> | void;
   mode?: 'setup' | 'editor';
+  currentApp?: AppInstance | null;
+  targetAppId?: string;
 }
 
 interface HierarchyTierDefinition {
@@ -198,8 +203,16 @@ const PRESET_THEMES = [
   },
 ];
 
-export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBuilt, mode = 'setup' }: CmsStudioProps) {
-  const { config, parties: existingParties, buildApplication, updateParties } = useCms();
+export default function CmsStudio({
+  isOpen,
+  onClose,
+  onOpenRoleModules,
+  onAppBuilt,
+  mode = 'setup',
+  currentApp,
+  targetAppId,
+}: CmsStudioProps) {
+  const { config, parties: existingParties, buildApplication, updateParties, updateConfig } = useCms();
   const { notify } = useNotification();
 
   // In Admin Panel, CmsStudio remains accessible at all times without forced redirection
@@ -336,7 +349,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
       STATE: { name: 'State Incharge', mobileNumber: '', unitName: 'State Headquarters' },
       ZONE: { name: 'Zone Coordinator', mobileNumber: '', unitName: 'Regional Zone HQ' },
       PARLIAMENT: { name: 'Parliament Incharge', mobileNumber: '', unitName: 'Parliament Unit' },
-      CONSTITUENCY: { name: defaultName || 'Dr. Dola Sree Bala Veeranjaneya Swamy', mobileNumber: defaultMobile || '9848812345', unitName: config.constituencies?.[0]?.name || 'Kondapi (SC)' },
+      CONSTITUENCY: { name: defaultName || '', mobileNumber: defaultMobile || '', unitName: config.constituencies?.[0]?.name || 'Assembly Constituency' },
       MANDAL: { name: 'Mandal President', mobileNumber: '', unitName: 'Mandal Unit' },
       VILLAGE: { name: 'Village Incharge', mobileNumber: '', unitName: 'Village Unit' },
       BOOTH: { name: 'Booth President', mobileNumber: '', unitName: 'Booth Station' },
@@ -700,6 +713,196 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
     setPrimaryColor(preset.primary);
     setSecondaryColor(preset.secondary);
     setAccentColor(preset.accent);
+  };
+
+  // Synchronize tier incharges state whenever loaded from server CMS config
+  useEffect(() => {
+    if (config.tierIncharges && Array.isArray(config.tierIncharges) && config.tierIncharges.length > 0) {
+      setTierInchargesState((prev) => {
+        const next = { ...prev };
+        config.tierIncharges!.forEach((inc: any) => {
+          const k = (inc.tierLevel || inc.tier || '').toUpperCase();
+          if (k && next[k]) {
+            next[k] = {
+              name: inc.name || next[k].name,
+              mobileNumber: inc.mobileNumber || next[k].mobileNumber,
+              unitName: inc.unitName || next[k].unitName,
+            };
+          } else if (k) {
+            next[k] = {
+              name: inc.name || '',
+              mobileNumber: inc.mobileNumber || '',
+              unitName: inc.unitName || '',
+            };
+          }
+        });
+        return next;
+      });
+    }
+  }, [config.tierIncharges]);
+
+  // Synchronize form values in editor mode from currentApp or config
+  useEffect(() => {
+    if (mode === 'editor') {
+      if (currentApp) {
+        if (currentApp.name) setTitle(currentApp.name);
+        if (currentApp.slogan || currentApp.description) setTagline(currentApp.slogan || currentApp.description || '');
+        if (currentApp.logoUrl) setLogoUrl(currentApp.logoUrl);
+        if (currentApp.primaryColor) setPrimaryColor(currentApp.primaryColor);
+        if (currentApp.secondaryColor) setSecondaryColor(currentApp.secondaryColor);
+        if (currentApp.accentColor) setAccentColor(currentApp.accentColor);
+        if (currentApp.leaderName) setCandidateName(currentApp.leaderName);
+        if ((currentApp as any).stateName) setStateName((currentApp as any).stateName);
+        if ((currentApp as any).appScope) setAppScope((currentApp as any).appScope);
+        if ((currentApp as any).parliamentName) setParliamentName((currentApp as any).parliamentName);
+        if (currentApp.activeHierarchyLevels && currentApp.activeHierarchyLevels.length > 0) {
+          setSelectedHierarchyLevels(currentApp.activeHierarchyLevels);
+        }
+      } else if (config) {
+        if (config.organisationName) setTitle(config.organisationName);
+        if (config.slogan) setTagline(config.slogan);
+        if (config.logoUrl) setLogoUrl(config.logoUrl);
+        if (config.primaryColor) setPrimaryColor(config.primaryColor);
+        if (config.secondaryColor) setSecondaryColor(config.secondaryColor);
+        if (config.accentColor) setAccentColor(config.accentColor);
+        if (config.stateName) setStateName(config.stateName);
+        if (config.appScope) setAppScope(config.appScope);
+        if (config.parliamentName) setParliamentName(config.parliamentName);
+        if (config.activeHierarchyLevels && config.activeHierarchyLevels.length > 0) {
+          setSelectedHierarchyLevels(config.activeHierarchyLevels);
+        }
+      }
+    }
+  }, [mode, currentApp, config]);
+
+  // EDIT MODE: Update existing party & CMS metadata without re-provisioning or requiring mobile numbers
+  const handleSaveExistingParty = async () => {
+    if (!title.trim()) {
+      notify.warning('Please enter an application title.', 'Title Required');
+      return;
+    }
+
+    if (selectedHierarchyLevels.length === 0) {
+      notify.warning('Please select at least one hierarchy level.', 'Hierarchy Tier Required');
+      return;
+    }
+
+    const resolvedTargetId =
+      targetAppId ||
+      currentApp?.id ||
+      config.id ||
+      (config as any).organisationId ||
+      'default';
+
+    setIsBuilding(true);
+
+    try {
+      const activePartyCode = currentApp?.partyCode || config.activePartyCode || partyList[0]?.code || 'APP';
+
+      const updatePayload: any = {
+        name: title.trim(),
+        headerTitle: title.trim(),
+        slogan: tagline.trim(),
+        description: tagline.trim(),
+        logoUrl: logoUrl.trim(),
+        primaryColor,
+        secondaryColor,
+        accentColor,
+        party: title.trim(),
+        partyCode: activePartyCode,
+        leaderName: candidateName.trim(),
+        stateName,
+        appScope,
+        parliamentName: appScope === 'PARLIAMENT_MP' ? parliamentName.trim() : undefined,
+        activeHierarchyLevels: selectedHierarchyLevels,
+        hierarchyLabels: config.hierarchyLabels,
+        featureToggles: config.featureToggles,
+        dashboardConfig: config.dashboardConfig,
+        analyticsConfig: config.analyticsConfig,
+        aiEnabled: config.aiEnabled ?? true,
+        politicalParties: (partyList || []).map((p, idx) => ({
+          name: p.name || 'Party',
+          code: p.code || `P${idx + 1}`,
+          shortName: p.shortName || p.code || undefined,
+          primaryColor: p.primaryColor || '#eab308',
+          secondaryColor: p.secondaryColor || undefined,
+          accentColor: p.accentColor || undefined,
+          symbolName: p.symbolName || undefined,
+          logoUrl: p.logoUrl || undefined,
+          isActive: p.isActive !== false,
+          sortOrder: p.sortOrder !== undefined && p.sortOrder !== null ? p.sortOrder : idx + 1,
+        })),
+      };
+
+      const initialActiveLevels = currentApp?.activeHierarchyLevels || config.activeHierarchyLevels || [];
+      const newlyAddedTiers = selectedHierarchyLevels.filter((lvl) => !initialActiveLevels.includes(lvl));
+
+      if (newlyAddedTiers.length > 0) {
+        const formattedNewIncharges = newlyAddedTiers
+          .map((tierKey) => {
+            const val = tierInchargesState[tierKey];
+            const meta = TIER_TO_ROLE_DEFAULT[tierKey];
+            const cleanNum = (val?.mobileNumber || '').replace(/\D/g, '').slice(-10);
+            return {
+              tierLevel: tierKey,
+              role: meta?.role,
+              name: (val?.name || '').trim() || meta?.defaultName || `${tierKey} Incharge`,
+              mobileNumber: cleanNum,
+              unitName: (val?.unitName || '').trim() || meta?.defaultUnit || tierKey,
+            };
+          })
+          .filter((inc) => inc.mobileNumber.length >= 10);
+
+        if (formattedNewIncharges.length > 0) {
+          updatePayload.newTierIncharges = formattedNewIncharges;
+        }
+      }
+
+      const updatedApp = await updateApplication(resolvedTargetId, updatePayload);
+
+      await updateConfig({
+        organisationName: title.trim(),
+        headerTitle: title.trim(),
+        slogan: tagline.trim(),
+        logoUrl: logoUrl.trim(),
+        primaryColor,
+        secondaryColor,
+        accentColor,
+        stateName,
+        appScope,
+        parliamentName: appScope === 'PARLIAMENT_MP' ? parliamentName.trim() : undefined,
+        activeHierarchyLevels: selectedHierarchyLevels,
+      });
+      updateParties(partyList);
+
+      try {
+        localStorage.setItem(`kdp_custom_parties_${resolvedTargetId}`, JSON.stringify(partyList));
+      } catch {}
+
+      setBuildSuccess(true);
+      notify.success('Party branding and CMS settings updated successfully!', 'Saved');
+
+      if (onAppBuilt) {
+        try {
+          await onAppBuilt(updatedApp);
+        } catch (e) {
+          console.error('[CmsStudio] onAppBuilt callback error:', e);
+        }
+      }
+
+      setTimeout(() => {
+        setBuildSuccess(false);
+        if (onClose) onClose();
+      }, 1200);
+    } catch (err: any) {
+      console.error('[CmsStudio] Failed to update party / CMS:', err);
+      notify.error(
+        err.message || 'Failed to update application. Please check backend validation and try again.',
+        'Update Failed'
+      );
+    } finally {
+      setIsBuilding(false);
+    }
   };
 
   // SUBMIT / BUILD APPLICATION HANDLER
@@ -1500,17 +1703,26 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
                   </div>
                 </div>
                 <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 font-bold px-2.5 py-1 rounded-full shrink-0">
-                  {selectedHierarchyLevels.length} Unique Numbers Required
+                  {mode === 'editor' ? 'Existing Incharge Numbers Preserved' : `${selectedHierarchyLevels.length} Unique Numbers Required`}
                 </span>
               </div>
 
               {/* Informative Guidance Banner */}
-              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-center gap-2.5">
-                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>
-                  <strong>Swiggy-Style Direct Login:</strong> You selected <strong>{selectedHierarchyLevels.length} tiers</strong> in Section 1. Enter all {selectedHierarchyLevels.length} unique phone numbers below. When an incharge enters their phone number in the portal, the system automatically recognizes their party, tier, and role without requiring manual selection.
-                </span>
-              </div>
+              {mode === 'editor' ? (
+                <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>
+                    <strong>Edit Mode:</strong> Existing incharge phone numbers and assignments are safely preserved. Modifying numbers is optional and will not recreate or overwrite existing incharge user accounts.
+                  </span>
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-center gap-2.5">
+                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    <strong>Swiggy-Style Direct Login:</strong> You selected <strong>{selectedHierarchyLevels.length} tiers</strong> in Section 1. Enter all {selectedHierarchyLevels.length} unique phone numbers below. When an incharge enters their phone number in the portal, the system automatically recognizes their party, tier, and role without requiring manual selection.
+                  </span>
+                </div>
+              )}
 
               {/* Dynamic N Tier Cards */}
               <div className="space-y-3">
@@ -1518,6 +1730,9 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
                   const meta = TIER_TO_ROLE_DEFAULT[tierKey] || { role: 'CONSTITUENCY_INCHARGE', roleName: tierKey, defaultName: 'Incharge', defaultUnit: tierKey };
                   const currentVal = tierInchargesState[tierKey] || { name: meta.defaultName, mobileNumber: '', unitName: meta.defaultUnit };
                   const isPrimary = idx === 0;
+                  const initialLevels = currentApp?.activeHierarchyLevels || config.activeHierarchyLevels || [];
+                  const isPreConfigured = mode === 'editor' && initialLevels.includes(tierKey);
+                  const isNewlyAddedTier = mode === 'editor' && !initialLevels.includes(tierKey);
 
                   return (
                     <div
@@ -1525,6 +1740,8 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
                       className={`p-3.5 rounded-2xl border transition-all space-y-3 ${
                         isPrimary
                           ? 'bg-slate-900/90 border-amber-400/40 shadow-sm'
+                          : isNewlyAddedTier
+                          ? 'bg-amber-500/5 border-amber-500/30'
                           : 'bg-slate-900/60 border-slate-800'
                       }`}
                     >
@@ -1539,6 +1756,16 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
                               Primary Command / Candidate
                             </span>
                           )}
+                          {isNewlyAddedTier && (
+                            <span className="text-[9px] uppercase font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                              ✨ Newly Introduced Tier
+                            </span>
+                          )}
+                          {isPreConfigured && (
+                            <span className="text-[9px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              Active Affiliated Incharge
+                            </span>
+                          )}
                         </div>
                         <span className="text-[10px] font-mono text-slate-400 font-bold">{meta.role}</span>
                       </div>
@@ -1546,7 +1773,7 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="space-y-1">
                           <label className="text-[11px] font-bold text-slate-300">
-                            {isPrimary ? 'Key Leader / Candidate Name *' : `${meta.roleName} Name *`}
+                            {isPrimary ? 'Key Leader / Candidate Name *' : `${meta.roleName} Name ${isPreConfigured ? '' : '*'}`}
                           </label>
                           <input
                             type="text"
@@ -1568,8 +1795,10 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
 
                         <div className="space-y-1">
                           <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
-                            <span>Dedicated Login Mobile (+91) *</span>
-                            <span className="text-[9px] text-amber-400 font-mono font-bold">Tier {idx + 1} Login ID</span>
+                            <span>{isPreConfigured ? 'Dedicated Login Mobile (+91)' : 'Dedicated Login Mobile (+91) *'}</span>
+                            <span className="text-[9px] text-amber-400 font-mono font-bold">
+                              {isPreConfigured ? 'Existing Number' : `Tier ${idx + 1} Login ID`}
+                            </span>
                           </label>
                           <div className="relative">
                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 font-mono">
@@ -1591,7 +1820,13 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
                                   setRegOtpSent(false);
                                 }
                               }}
-                              placeholder={isPrimary ? '9848012345' : `10-digit mobile for ${tierKey}`}
+                              placeholder={
+                                isPreConfigured
+                                  ? (currentVal.mobileNumber || 'Pre-registered incharge active')
+                                  : isPrimary
+                                  ? '9848012345'
+                                  : `10-digit mobile for ${tierKey}`
+                              }
                               className="w-full pl-11 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white placeholder-slate-600 focus:border-amber-400 focus:outline-none"
                             />
                           </div>
@@ -1619,124 +1854,134 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
                 })}
               </div>
 
-              {/* Passcode & Live OTP Verification */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                {/* Initial Passcode Box */}
-                <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <KeyRound className="w-4 h-4 text-amber-400" />
-                    <span className="text-xs font-bold text-white">Initial Incharge Passcode / Password *</span>
-                  </div>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={candidatePassword}
-                      onChange={(e) => setCandidatePassword(e.target.value)}
-                      placeholder="Set Initial Passcode (e.g. Kondapi@2026)"
-                      className="w-full pl-3 pr-10 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
-                    >
-                      {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-slate-400">
-                    Applied as initial master credential across all provisioned tier accounts.
-                  </p>
-                </div>
-
-                {/* WhatsApp / SMS OTP Live Verification */}
-                <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
-                  <div className="flex items-center justify-between">
+              {/* Passcode & Live OTP Verification - Only required when provisioning a new tenant */}
+              {mode !== 'editor' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                  {/* Initial Passcode Box */}
+                  <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-2">
                     <div className="flex items-center gap-2">
-                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                      <span className="text-xs font-bold text-white">
-                        Live Mobile Verification (WhatsApp / SMS)
-                      </span>
+                      <KeyRound className="w-4 h-4 text-amber-400" />
+                      <span className="text-xs font-bold text-white">Initial Incharge Passcode / Password *</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setRegOtpChannel('WHATSAPP')}
-                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 ${
-                          regOtpChannel === 'WHATSAPP'
-                            ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-black'
-                            : 'text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        <span>💬 WhatsApp OTP</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setRegOtpChannel('SMS')}
-                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 ${
-                          regOtpChannel === 'SMS'
-                            ? 'bg-amber-500/20 border border-amber-500/40 text-amber-300 font-black'
-                            : 'text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        <span>📱 SMS OTP</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {regIsVerified ? (
-                    <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>Primary mobile number verified via {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'}!</span>
-                    </div>
-                  ) : regOtpSent ? (
-                    <div className="flex flex-col sm:flex-row items-center gap-2">
+                    <div className="relative">
                       <input
-                        type="text"
-                        maxLength={6}
-                        value={regOtpCode}
-                        onChange={(e) => setRegOtpCode(e.target.value.replace(/\D/g, ''))}
-                        placeholder="Enter 6-digit OTP"
-                        className="w-full sm:w-44 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono font-bold text-white text-center tracking-widest focus:border-emerald-400 focus:outline-none"
+                        type={showPassword ? 'text' : 'password'}
+                        value={candidatePassword}
+                        onChange={(e) => setCandidatePassword(e.target.value)}
+                        placeholder="Set Initial Passcode (e.g. Kondapi@2026)"
+                        className="w-full pl-3 pr-10 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
                       />
                       <button
                         type="button"
-                        onClick={handleVerifyRegOtp}
-                        disabled={isVerifyingRegOtp || regOtpCode.length < 6}
-                        className="w-full sm:w-auto px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 text-xs font-black rounded-xl cursor-pointer"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
                       >
-                        {isVerifyingRegOtp ? 'Verifying...' : 'Verify OTP'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSendRegOtp()}
-                        disabled={isSendingRegOtp}
-                        className="text-[11px] text-slate-400 hover:text-white underline cursor-pointer"
-                      >
-                        Resend Code
+                        {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                       </button>
                     </div>
-                  ) : (
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <p className="text-[11px] text-slate-400">
-                        Verify primary incharge phone (+91 {primaryMobile || '...'}) receives live {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} OTP before building:
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => handleSendRegOtp()}
-                        disabled={isSendingRegOtp || (primaryMobile || candidateMobile).replace(/\D/g, '').length < 10}
-                        className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 hover:text-white text-xs font-bold rounded-xl border border-slate-700 cursor-pointer flex items-center gap-1.5 self-start sm:self-auto"
-                      >
-                        {isSendingRegOtp ? (
-                          <LoaderCircle className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Send className="w-3 h-3 text-amber-400" />
-                        )}
-                        <span>Send {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} OTP</span>
-                      </button>
+                    <p className="text-[10px] text-slate-400">
+                      Applied as initial master credential across all provisioned tier accounts.
+                    </p>
+                  </div>
+
+                  {/* WhatsApp / SMS OTP Live Verification */}
+                  <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                        <span className="text-xs font-bold text-white">
+                          Live Mobile Verification (WhatsApp / SMS)
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setRegOtpChannel('WHATSAPP')}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 ${
+                            regOtpChannel === 'WHATSAPP'
+                              ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-black'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <span>💬 WhatsApp OTP</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRegOtpChannel('SMS')}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 ${
+                            regOtpChannel === 'SMS'
+                              ? 'bg-amber-500/20 border border-amber-500/40 text-amber-300 font-black'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <span>📱 SMS OTP</span>
+                        </button>
+                      </div>
                     </div>
-                  )}
+
+                    {regIsVerified ? (
+                      <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Primary mobile number verified via {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'}!</span>
+                      </div>
+                    ) : regOtpSent ? (
+                      <div className="flex flex-col sm:flex-row items-center gap-2">
+                        <input
+                          type="text"
+                          maxLength={6}
+                          value={regOtpCode}
+                          onChange={(e) => setRegOtpCode(e.target.value.replace(/\D/g, ''))}
+                          placeholder="Enter 6-digit OTP"
+                          className="w-full sm:w-44 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono font-bold text-white text-center tracking-widest focus:border-emerald-400 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleVerifyRegOtp}
+                          disabled={isVerifyingRegOtp || regOtpCode.length < 6}
+                          className="w-full sm:w-auto px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 text-xs font-black rounded-xl cursor-pointer"
+                        >
+                          {isVerifyingRegOtp ? 'Verifying...' : 'Verify OTP'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSendRegOtp()}
+                          disabled={isSendingRegOtp}
+                          className="text-[11px] text-slate-400 hover:text-white underline cursor-pointer"
+                        >
+                          Resend Code
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <p className="text-[11px] text-slate-400">
+                          Verify primary incharge phone (+91 {primaryMobile || '...'}) receives live {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} OTP before building:
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => handleSendRegOtp()}
+                          disabled={isSendingRegOtp || (primaryMobile || candidateMobile).replace(/\D/g, '').length < 10}
+                          className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 hover:text-white text-xs font-bold rounded-xl border border-slate-700 cursor-pointer flex items-center gap-1.5 self-start sm:self-auto"
+                        >
+                          {isSendingRegOtp ? (
+                            <LoaderCircle className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Send className="w-3 h-3 text-amber-400" />
+                          )}
+                          <span>Send {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} OTP</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Incharge credentials and role-based assignments are active in PostgreSQL.</span>
+                  </div>
+                  <span className="text-emerald-400 font-mono text-[10px] font-bold">● Active Production Security</span>
+                </div>
+              )}
             </div>
 
             {/* A. SINGLE MLA SCOPE */}
@@ -2199,23 +2444,23 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
             <button
               type="button"
               disabled={isBuilding}
-              onClick={handleSubmitBuildApplication}
+              onClick={mode === 'editor' ? handleSaveExistingParty : handleSubmitBuildApplication}
               className="w-full py-4 px-6 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-2xl font-black text-base shadow-lg shadow-amber-400/20 hover:shadow-xl transition-all flex items-center justify-center gap-3 cursor-pointer active:scale-98 disabled:opacity-60"
             >
               {isBuilding ? (
                 <>
                   <RefreshCw className="w-5 h-5 animate-spin text-slate-950" />
-                  <span>Generating Application & Provisioning Entities...</span>
+                  <span>{mode === 'editor' ? 'Saving Party & CMS Updates...' : 'Generating Application & Provisioning Entities...'}</span>
                 </>
               ) : buildSuccess ? (
                 <>
                   <Check className="w-5 h-5 text-slate-950" />
-                  <span>Application Built! Opening Role-Based Modules...</span>
+                  <span>{mode === 'editor' ? 'Changes Saved Successfully!' : 'Application Built! Opening Role-Based Modules...'}</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-5 h-5 fill-slate-950" />
-                  <span>Submit / Build Application</span>
+                  <span>{mode === 'editor' ? 'Save Changes / Update Party' : 'Submit / Build Application'}</span>
                   <ArrowRight className="w-5 h-5" />
                 </>
               )}
@@ -2383,11 +2628,11 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
             <button
               type="button"
               disabled={isBuilding}
-              onClick={handleSubmitBuildApplication}
+              onClick={mode === 'editor' ? handleSaveExistingParty : handleSubmitBuildApplication}
               className="w-full py-2.5 px-3 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-60 shadow-lg shadow-amber-400/20"
             >
               <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
-              <span>Submit / Build Application</span>
+              <span>{mode === 'editor' ? 'Save Changes' : 'Submit / Build Application'}</span>
             </button>
           </div>
         </div>
@@ -2397,158 +2642,21 @@ export default function CmsStudio({ isOpen, onClose, onOpenRoleModules, onAppBui
       {/* POST-CREATION TENANT CREDENTIALS RECEIPT MODAL */}
       {/* ============================================================== */}
       {createdCredentialsModal && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 sm:p-8 space-y-6 shadow-2xl text-slate-100">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center font-black">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-white">Application Tenant Provisioned!</h3>
-                  <p className="text-xs text-slate-400 font-medium">Real PostgreSQL database entities registered</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setCreatedCredentialsModal(null);
-                  if (onOpenRoleModules) onOpenRoleModules();
-                  else if (mode === 'setup') window.location.hash = '/app';
-                  else onClose();
-                }}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-                <div className="text-[10px] font-black uppercase tracking-wider text-slate-500">
-                  Provisioned Application & Tenant
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-white">{createdCredentialsModal.appName}</span>
-                  <span className="font-mono text-xs font-black px-2 py-0.5 rounded bg-amber-400/10 text-amber-300 border border-amber-400/20">
-                    {createdCredentialsModal.tenantCode}
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
-                <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center justify-between">
-                  <span>Candidate Login Credentials</span>
-                  <span className="text-emerald-400 font-bold">● Active & Ready</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
-                    <div className="text-[10px] text-slate-400 font-medium">Mobile Number (ID)</div>
-                    <div className="font-mono text-xs font-black text-white mt-0.5">
-                      +91 {createdCredentialsModal.mobileNumber}
-                    </div>
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
-                    <div className="text-[10px] text-slate-400 font-medium">Assigned Role</div>
-                    <div className="font-mono text-[11px] font-black text-amber-300 mt-0.5">
-                      {createdCredentialsModal.role}
-                    </div>
-                  </div>
-                </div>
-
-                {createdCredentialsModal.password && (
-                  <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
-                    <div>
-                      <div className="text-[10px] text-slate-400 font-medium">Initial Passcode / Password</div>
-                      <div className="font-mono text-xs font-black text-amber-400 mt-0.5">
-                        {createdCredentialsModal.password}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(`Mobile: ${createdCredentialsModal.mobileNumber}\nPassword: ${createdCredentialsModal.password}`);
-                        notify.success('Credentials copied to clipboard!', 'Copied');
-                      }}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer flex items-center gap-1 text-[11px] font-bold"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>Copy</span>
-                    </button>
-                  </div>
-                )}
-
-                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
-                  <div>
-                    <div className="text-[10px] text-slate-400 font-medium">Authentication Channels</div>
-                    <div className="font-mono text-xs font-black text-emerald-400 mt-0.5">
-                      WhatsApp OTP • SMS OTP • Passcode Login
-                    </div>
-                  </div>
-                  <div className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
-                    ● Active in DB
-                  </div>
-                </div>
-
-                <div className="text-[11px] text-slate-400 flex items-center gap-2 pt-1">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>Candidate logs in directly on Port 3000 using their verified mobile number.</span>
-                </div>
-              </div>
-
-              {createdCredentialsModal.tierIncharges && createdCredentialsModal.tierIncharges.length > 0 && (
-                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5">
-                  <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center justify-between">
-                    <span>Provisioned Hierarchy-Tier Incharges</span>
-                    <span className="text-amber-400 font-bold">{createdCredentialsModal.tierIncharges.length} Tiers</span>
-                  </div>
-                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                    {createdCredentialsModal.tierIncharges.map((ti: any, idx: number) => (
-                      <div key={idx} className="p-2 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs">
-                        <div>
-                          <div className="font-bold text-white flex items-center gap-1.5">
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-400/20 text-amber-300 font-black">{ti.tierLevel}</span>
-                            <span>{ti.name}</span>
-                          </div>
-                          <div className="text-[10px] text-slate-400">{ti.role} • {ti.unitName || ti.tierLevel}</div>
-                        </div>
-                        <div className="font-mono font-bold text-emerald-400 text-xs">
-                          +91 {ti.mobileNumber}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-3 pt-2">
-              <a
-                href={`http://localhost:3000/?app=${encodeURIComponent((createdCredentialsModal.tenantCode || '').toLowerCase())}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 py-3 px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs text-center flex items-center justify-center gap-2 shadow-lg shadow-amber-400/20 cursor-pointer"
-              >
-                <span>Launch Party App (Port 3000)</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-              <button
-                type="button"
-                onClick={() => {
-                  setCreatedCredentialsModal(null);
-                  if (onOpenRoleModules) onOpenRoleModules();
-                  else if (mode === 'setup') window.location.hash = '/app';
-                  else onClose();
-                }}
-                className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs cursor-pointer border border-slate-700"
-              >
-                <span>Continue to Role Modules</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        <CreatedCredentialsModal
+          credentials={createdCredentialsModal}
+          onClose={() => {
+            setCreatedCredentialsModal(null);
+            if (onOpenRoleModules) onOpenRoleModules();
+            else if (mode === 'setup') window.location.hash = '/app';
+            else onClose();
+          }}
+          onContinue={() => {
+            setCreatedCredentialsModal(null);
+            if (onOpenRoleModules) onOpenRoleModules();
+            else if (mode === 'setup') window.location.hash = '/app';
+            else onClose();
+          }}
+        />
       )}
     </div>
   );

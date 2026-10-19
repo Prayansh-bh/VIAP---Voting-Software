@@ -8,6 +8,10 @@ import { PrismaClient, RoleType, Gender, VoterStatus, SurveyStatus, VoterLocatio
 const prisma = new PrismaClient();
 
 async function main() {
+  if (process.env.NODE_ENV === 'production' && !process.env.ALLOW_PROD_SEED) {
+    console.error('⛔ ABORTED: prisma seed cannot be executed in production environment without explicit ALLOW_PROD_SEED=1');
+    process.exit(1);
+  }
   console.log('🚀 Starting Telangana Congress Connect full data seed...\n');
 
   // ─── 1. ORGANISATION ──────────────────────────────────────────────────────

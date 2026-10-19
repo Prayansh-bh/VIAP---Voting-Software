@@ -19,6 +19,8 @@ import {
   fetchConstituenciesApi,
   APPLICATION_TEMPLATES,
   ApplicationTemplate,
+  getCmsCacheKey,
+  getCustomPartiesCacheKey,
 } from '../lib/cms';
 
 interface CmsContextValue {
@@ -36,7 +38,7 @@ interface CmsContextValue {
   updateParties: (nextParties: CmsParty[]) => void;
   updateFeatureToggles: (toggles: Partial<CmsConfig['featureToggles']>) => Promise<void>;
   updateHierarchyLabels: (labels: Record<string, string>) => Promise<void>;
-  reloadConfig: () => Promise<void>;
+  reloadConfig: (options?: { organisationId?: string; tenantCode?: string; applicationId?: string; configKey?: string }) => Promise<void>;
   t: (hierarchyLevel: string, fallback?: string) => string;
   isFeatureEnabled: (feature: keyof CmsConfig['featureToggles']) => boolean;
 }
@@ -64,7 +66,19 @@ const CmsContext = createContext<CmsContextValue>({
 export function CmsProvider({ children }: { children: React.ReactNode }) {
   const [config, setConfig] = useState<CmsConfig>(() => {
     if (typeof window === 'undefined') return DEFAULT_CONFIG;
-    const saved = localStorage.getItem('kdp_cms_config');
+    let saved = null;
+    try {
+      const urlParams = new URLSearchParams(window.location.search || window.location.hash.split('?')[1] || '');
+      const tenant = urlParams.get('app') || urlParams.get('tenant') || urlParams.get('applicationId');
+      if (tenant && tenant.toLowerCase() !== 'default') {
+        const cacheKey = getCmsCacheKey(tenant);
+        if (cacheKey) {
+          saved = localStorage.getItem(cacheKey);
+        }
+      } else if (!tenant) {
+        saved = localStorage.getItem('kdp_cms_config_default');
+      }
+    } catch {}
     if (saved) {
       try {
         const parsed = JSON.parse(saved) as CmsConfig;
@@ -92,9 +106,9 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
   const [constituencies, setConstituencies] = useState<ConstituencyItem[]>(config.constituencies || DEFAULT_CONFIG.constituencies);
   const [isReady, setIsReady] = useState(false);
 
-  const loadData = async () => {
+  const loadData = async (options?: { organisationId?: string; tenantCode?: string; applicationId?: string; configKey?: string }) => {
     try {
-      const data = await fetchCmsConfig();
+      const data = await fetchCmsConfig(options);
       const constList = await fetchConstituenciesApi();
 
       const mergedLabels = {
@@ -105,23 +119,32 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
         mergedLabels.VOTER_GROUP = '100 Voters Incharge';
       }
 
-      setConfig({
+      const nextConfig = {
         ...DEFAULT_CONFIG,
         ...(data?.config || {}),
         hierarchyLabels: mergedLabels,
         constituencies: constList.length > 0 ? constList : (data?.config?.constituencies || DEFAULT_CONFIG.constituencies),
-      });
+      };
+
+      setConfig(nextConfig);
 
       const rawParties = Array.isArray(data?.parties) ? data.parties : [];
       const cleanParties = rawParties.filter(
         (p: any) => !p.code?.startsWith('TEST_') && p.name !== 'Democratic Progressive Front'
       );
       setParties(cleanParties);
-      if (cleanParties.length > 0) {
-        localStorage.setItem('kdp_custom_parties', JSON.stringify(cleanParties));
-      } else {
-        localStorage.removeItem('kdp_custom_parties');
-      }
+
+      // Application-scoped caching to prevent configuration collisions
+      const cacheKey = getCmsCacheKey(nextConfig);
+      const customPartiesKey = getCustomPartiesCacheKey(nextConfig);
+      try {
+        if (cacheKey) {
+          localStorage.setItem(cacheKey, JSON.stringify(nextConfig));
+        }
+        if (customPartiesKey && cleanParties.length > 0) {
+          localStorage.setItem(customPartiesKey, JSON.stringify(cleanParties));
+        }
+      } catch {}
 
       setAnnouncements(Array.isArray(data?.announcements) ? data.announcements : []);
       if (constList.length > 0) {
@@ -142,7 +165,12 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
     if (typeof document !== 'undefined') {
       document.title = config.organisationName || 'Political Connect Platform';
       applyThemeVariables(config.primaryColor, config.secondaryColor, config.accentColor);
-      localStorage.setItem('kdp_cms_config', JSON.stringify(config));
+      const cacheKey = getCmsCacheKey(config);
+      try {
+        if (cacheKey) {
+          localStorage.setItem(cacheKey, JSON.stringify(config));
+        }
+      } catch {}
     }
   }, [config]);
 
@@ -265,8 +293,8 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
     await saveCmsConfig(merged);
   };
 
-  const reloadConfig = async () => {
-    await loadData();
+  const reloadConfig = async (options?: { organisationId?: string; tenantCode?: string }) => {
+    await loadData(options);
   };
 
   const t = (hierarchyLevel: string, fallback?: string): string => {

@@ -1,5 +1,5 @@
 import { AppInstance, InchargeRecord, ApprovalRecord, AdminUser, ApplicationSummary } from '../types';
-import { getAdminToken, setAdminToken, clearAdminToken, setAdminSession } from './auth';
+import { getAdminToken, setAdminToken, clearAdminToken, setAdminSession, getAdminSession } from './auth';
 
 const getApiBase = () => {
   const envUrl = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || '').trim();
@@ -117,6 +117,51 @@ export async function authenticateAdminCredentials(mobileNumber: string, passcod
   return adminUser;
 }
 
+// ── Admin Profile & Credential Management ──
+export async function fetchAdminProfile(): Promise<any> {
+  return request('/auth/me');
+}
+
+export async function updateAdminProfile(data: { name?: string; email?: string }): Promise<any> {
+  const updatedUser: any = await request('/auth/profile', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+
+  const currentSession = getAdminSession();
+  if (currentSession) {
+    const updatedSession: AdminUser = {
+      ...currentSession,
+      name: updatedUser.name || currentSession.name,
+      email: updatedUser.email || currentSession.email,
+    };
+    setAdminSession(updatedSession);
+  }
+
+  return updatedUser;
+}
+
+export async function changeAdminPassword(data: {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}): Promise<{ success: boolean; message: string }> {
+  const res: any = await request('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+
+  if (res?.token) {
+    setAdminToken(res.token);
+    const currentSession = getAdminSession();
+    if (currentSession) {
+      setAdminSession({ ...currentSession, token: res.token });
+    }
+  }
+
+  return res;
+}
+
 // ── Candidate Registration OTP Verification (WhatsApp / SMS) ──
 export async function requestRegistrationOtp(
   mobileNumber: string,
@@ -138,6 +183,34 @@ export async function verifyRegistrationOtp(
   });
 }
 
+// ── Mobile Number Change OTP Verification ──
+export async function requestMobileChangeOtp(
+  newMobileNumber: string,
+  channel: 'SMS' | 'WHATSAPP' = 'SMS'
+): Promise<{ requestId: string; expiresAt?: string; cooldownSeconds?: number; message?: string }> {
+  return request('/auth/mobile-change/request-otp', {
+    method: 'POST',
+    body: JSON.stringify({ newMobileNumber, channel }),
+  });
+}
+
+export async function verifyMobileChangeOtp(
+  requestId: string,
+  newMobileNumber: string,
+  otpCode: string
+): Promise<{ token: string; refreshToken?: string; user: any; message: string }> {
+  const data = await request<any>('/auth/mobile-change/verify', {
+    method: 'POST',
+    body: JSON.stringify({ requestId, newMobileNumber, otpCode }),
+  });
+
+  if (data?.token) {
+    setAdminToken(data.token);
+  }
+
+  return data;
+}
+
 // ── Applications (Multi-Party Engine) ──
 export async function fetchApplications(): Promise<AppInstance[]> {
   try {
@@ -146,6 +219,7 @@ export async function fetchApplications(): Promise<AppInstance[]> {
     if (res.length > 0) {
       return res.map((c: any) => ({
         id: c.id,
+        organisationId: c.organisationId,
         name: c.appName || c.organisationName || 'Party Connect',
         party: c.parties?.[0]?.name || c.organisationName || c.appName || 'Party Alliance',
         partyCode: c.activePartyCode || c.parties?.[0]?.code || 'APP',
@@ -203,6 +277,8 @@ export async function createApplication(formData: any): Promise<AppInstance> {
     appScope: 'SINGLE_MLA',
     stateName: formData.stateName || 'Andhra Pradesh',
     candidateName: formData.leaderName || 'Party Candidate',
+    candidateMobile: formData.candidateMobile || undefined,
+    tierIncharges: formData.tierIncharges || undefined,
     activeHierarchyLevels: levels,
     politicalParties: [
       {
@@ -251,6 +327,58 @@ export async function createApplication(formData: any): Promise<AppInstance> {
   };
 }
 
+export async function updateApplication(id: string, formData: Partial<AppInstance> & Record<string, any>): Promise<AppInstance> {
+  const backendPayload: any = {};
+  if (formData.name) backendPayload.name = formData.name;
+  if (formData.party) backendPayload.party = formData.party;
+  if (formData.partyCode) backendPayload.partyCode = formData.partyCode;
+  if (formData.leaderName) backendPayload.leaderName = formData.leaderName;
+  if (formData.jurisdiction) backendPayload.jurisdiction = formData.jurisdiction;
+  if (formData.description) backendPayload.description = formData.description;
+  if (formData.primaryColor) backendPayload.primaryColor = formData.primaryColor;
+  if (formData.secondaryColor) backendPayload.secondaryColor = formData.secondaryColor;
+  if (formData.accentColor) backendPayload.accentColor = formData.accentColor;
+  if (formData.activeHierarchyLevels) backendPayload.activeHierarchyLevels = formData.activeHierarchyLevels;
+  if (formData.logoUrl) backendPayload.logoUrl = formData.logoUrl;
+  if (formData.slogan) backendPayload.slogan = formData.slogan;
+  if (formData.headerTitle) backendPayload.headerTitle = formData.headerTitle;
+  if (formData.stateName) backendPayload.stateName = formData.stateName;
+  if (formData.appScope) backendPayload.appScope = formData.appScope;
+  if (formData.parliamentName) backendPayload.parliamentName = formData.parliamentName;
+  if (formData.parliamentCode) backendPayload.parliamentCode = formData.parliamentCode;
+  if (formData.politicalParties) backendPayload.politicalParties = formData.politicalParties;
+  if (formData.hierarchyLabels) backendPayload.hierarchyLabels = formData.hierarchyLabels;
+  if (formData.featureToggles) backendPayload.featureToggles = formData.featureToggles;
+  if (formData.dashboardConfig) backendPayload.dashboardConfig = formData.dashboardConfig;
+  if (formData.analyticsConfig) backendPayload.analyticsConfig = formData.analyticsConfig;
+  if (formData.aiEnabled !== undefined) backendPayload.aiEnabled = formData.aiEnabled;
+  if (formData.newTierIncharges) backendPayload.newTierIncharges = formData.newTierIncharges;
+
+  const res: any = await request(`/applications/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(backendPayload),
+  });
+
+  return {
+    id: res?.id || id,
+    name: res?.organisationName || formData.name || '',
+    party: formData.party || res?.organisationName || '',
+    partyCode: res?.activePartyCode || formData.partyCode || 'APP',
+    leaderName: res?.candidateName || formData.leaderName || '',
+    jurisdiction: formData.jurisdiction || '',
+    description: res?.slogan || formData.description || '',
+    primaryColor: res?.primaryColor || formData.primaryColor || '#F59E0B',
+    secondaryColor: res?.secondaryColor || formData.secondaryColor || '#DC2626',
+    accentColor: res?.accentColor || formData.accentColor || '#0F172A',
+    totalVoters: typeof formData.totalVoters === 'number' ? formData.totalVoters : 0,
+    turnoutPercent: typeof formData.turnoutPercent === 'number' ? formData.turnoutPercent : 0,
+    isActive: true,
+    isDefault: res?.configKey === 'default' || formData.isDefault || false,
+    createdAt: res?.createdAt ? new Date(res.createdAt).toLocaleDateString('en-IN') : 'Active',
+    activeHierarchyLevels: res?.activeHierarchyLevels || formData.activeHierarchyLevels,
+  };
+}
+
 export async function deleteApplication(id: string): Promise<boolean> {
   await request(`/applications/${id}`, { method: 'DELETE' });
   return true;
@@ -265,14 +393,14 @@ export async function fetchIncharges(appId?: string): Promise<InchargeRecord[]> 
       return res.map((i) => ({
         id: i.id,
         name: i.name || i.userName || 'Party Cadre',
-        phone: i.phone || i.mobileNumber || '9876543210',
+        phone: i.phone || i.mobileNumber || '',
         role: i.role || 'INCHARGE',
         level: i.level || i.jurisdictionType || 'BOOTH',
-        jurisdiction: i.jurisdiction || i.jurisdictionName || i.unitName || 'Sector 1',
+        jurisdiction: i.jurisdiction || i.jurisdictionName || i.unitName || '',
         status: i.status || (i.accountStatus === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE'),
         assignedVoters: typeof i.assignedVoters === 'number' ? i.assignedVoters : 0,
         coverageRate: typeof i.coverageRate === 'number' ? i.coverageRate : 0,
-        appointedAt: i.appointedAt || (i.assignedAt ? new Date(i.assignedAt).toLocaleDateString('en-IN') : 'Active'),
+        appointedAt: i.appointedAt || (i.assignedAt ? new Date(i.assignedAt).toLocaleDateString('en-IN') : ''),
       }));
     }
   } catch (err) {
@@ -342,16 +470,19 @@ export async function rejectRequest(id: string, reason: string): Promise<any> {
 }
 
 // ── Data Ingestion & Live Voters ──
-export async function fetchVotersList(params?: { limit?: number; page?: number; search?: string }): Promise<{ items: any[]; total: number }> {
+export async function fetchVotersList(params?: { appId?: string; limit?: number; page?: number; search?: string }): Promise<{ items: any[]; total: number }> {
   try {
     const q = new URLSearchParams();
     if (params?.limit) q.set('limit', String(params.limit));
     if (params?.page) q.set('page', String(params.page));
     if (params?.search) q.set('search', params.search);
 
-    const res: any = await request(`/voters?${q.toString()}`);
+    const endpoint = params?.appId 
+      ? `/applications/${params.appId}/voters?${q.toString()}` 
+      : `/voters?${q.toString()}`;
+    const res: any = await request(endpoint);
     const items = Array.isArray(res?.data) ? res.data : (Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []));
-    const total = res?.meta?.total ?? items.length;
+    const total = res?.meta?.total ?? res?.total ?? items.length;
     return { items, total };
   } catch (err) {
     console.warn('Backend /voters fetch note:', err);

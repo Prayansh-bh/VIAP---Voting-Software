@@ -8,7 +8,19 @@ import { prisma } from '../../lib/prisma.js';
 import { AuthenticatedUserPayload } from '../../common/types.js';
 import { logAudit } from '../../middleware/audit.js';
 import { SmsProviderFactory } from '../../lib/sms/factory.js';
-import { RequestOtpDto, RegisterOtpDto, VerifyRegisterOtpDto, VerifyOtpDto, DeviceSessionDto, RevokeDeviceDto, DemoLoginDto } from './auth.schema.js';
+import {
+  RequestOtpDto,
+  RegisterOtpDto,
+  VerifyRegisterOtpDto,
+  VerifyOtpDto,
+  DeviceSessionDto,
+  RevokeDeviceDto,
+  DemoLoginDto,
+  UpdateProfileDto,
+  ChangePasswordDto,
+  RequestMobileChangeOtpDto,
+  VerifyMobileChangeOtpDto,
+} from './auth.schema.js';
 import { OtpService } from './services/otp.service.js';
 import { TokenService } from './services/token.service.js';
 import { HierarchyAssignmentService } from './services/hierarchy-assignment.service.js';
@@ -107,16 +119,8 @@ export class AuthService {
     const requestedLevel = dto.role ? roleToLevelMap[dto.role] : null;
     const isTierRestricted = Boolean(requestedLevel && !activeLevels.includes(requestedLevel));
 
-    if (isTierRestricted && user) {
-      if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
-        const error: any = new Error(
-          `Hierarchy tier '${requestedLevel}' (${dto.role}) is restricted for this party application. Only enabled tiers (${activeLevels.join(', ')}) can be accessed.`
-        );
-        error.statusCode = 403;
-        error.code = 'HIERARCHY_TIER_RESTRICTED';
-        throw error;
-      }
-    }
+    // If the tier is restricted, isTierRestricted will cause isEligible = false below,
+    // thereby returning the uniform anti-enumeration response without leaking account existence.
 
     // Record request timestamp uniformly for all valid requests to prevent side-channel account enumeration
     OtpService.recordRequest(cleanMobile);
@@ -958,31 +962,26 @@ export class AuthService {
       throw error;
     }
 
-    // Standard bootstrap and configured passcodes
-    const allowedAdminPasscodes = [
-      'Organiser@2026!',
-      'Kondapi@2026',
-      'Demo@123456',
-      'Admin@2026!',
-    ];
+    // Authoritative credential verification: Compare raw passcode against persisted bcrypt passwordHash
+    let isHashMatch = user.passwordHash ? await bcrypt.compare(rawPass, user.passwordHash) : false;
 
-    const isDirectMatch = allowedAdminPasscodes.includes(rawPass);
-    const isHashMatch = user.passwordHash ? await bcrypt.compare(rawPass, user.passwordHash) : false;
+    // Secure one-time bootstrap fallback for newly provisioned admin accounts lacking a passwordHash
+    if (!user.passwordHash && !isHashMatch) {
+      if (process.env.ADMIN_BOOTSTRAP_PASSCODE && rawPass === process.env.ADMIN_BOOTSTRAP_PASSCODE) {
+        isHashMatch = true;
+        const initialHash = await bcrypt.hash(rawPass, 10);
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { passwordHash: initialHash },
+        });
+      }
+    }
 
-    if (!isDirectMatch && !isHashMatch) {
+    if (!isHashMatch) {
       const error: any = new Error('Invalid mobile number or security passcode.');
       error.statusCode = 401;
       error.code = 'INVALID_CREDENTIALS';
       throw error;
-    }
-
-    // Ensure user has valid bcrypt hash for future direct comparisons
-    if (!user.passwordHash || isDirectMatch) {
-      const updatedHash = await bcrypt.hash(rawPass, 10);
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { passwordHash: updatedHash },
-      });
     }
 
     const payload: AuthenticatedUserPayload = {
@@ -1485,6 +1484,349 @@ export class AuthService {
       cadre: user.cadreProfile,
       hierarchyAssignment: HierarchyAssignmentService.formatHierarchyAssignment(primaryAssignment),
       hierarchyAssignments: user.hierarchyAssignments,
+    };
+  }
+
+  /**
+   * Update profile fields (name, email) for authenticated user.
+   */
+  static async updateUserProfile(
+    userId: string,
+    dto: UpdateProfileDto,
+    reqInfo?: { ip?: string; userAgent?: string }
+  ) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      const error: any = new Error('User account not found.');
+      error.statusCode = 404;
+      error.code = 'USER_NOT_FOUND';
+      throw error;
+    }
+
+    if (dto.email && dto.email.trim().toLowerCase() !== user.email?.toLowerCase()) {
+      const normalizedEmail = dto.email.trim().toLowerCase();
+      const conflict = await prisma.user.findFirst({
+        where: { email: { equals: normalizedEmail, mode: 'insensitive' }, id: { not: userId } },
+      });
+      if (conflict) {
+        const error: any = new Error('Email address is already in use by another account.');
+        error.statusCode = 409;
+        error.code = 'EMAIL_CONFLICT';
+        throw error;
+      }
+    }
+
+    const data: any = {};
+    if (dto.name !== undefined) data.name = dto.name.trim();
+    if (dto.email !== undefined) data.email = dto.email ? dto.email.trim().toLowerCase() : null;
+
+    if (Object.keys(data).length > 0) {
+      await prisma.user.update({
+        where: { id: userId },
+        data,
+      });
+
+      await logAudit({
+        action: AuditAction.UPDATE,
+        entityType: 'User',
+        entityId: userId,
+        userId,
+        ipAddress: reqInfo?.ip,
+        userAgent: reqInfo?.userAgent,
+        changes: data,
+        metadata: { event: 'PROFILE_UPDATED' },
+      });
+    }
+
+    return this.getMe(userId);
+  }
+
+  /**
+   * Change user password/passcode securely, verifying current credential with bcrypt.
+   * Revokes existing sessions and issues a rotated fresh session token.
+   */
+  static async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+    reqInfo?: { ip?: string; userAgent?: string }
+  ) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      const error: any = new Error('User account not found.');
+      error.statusCode = 404;
+      error.code = 'USER_NOT_FOUND';
+      throw error;
+    }
+
+    if (!user.passwordHash) {
+      const error: any = new Error('No password currently configured for this account. Please contact system support.');
+      error.statusCode = 400;
+      error.code = 'NO_PASSWORD_CONFIGURED';
+      throw error;
+    }
+
+    const isMatch = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!isMatch) {
+      const error: any = new Error('Current password/passcode is incorrect.');
+      error.statusCode = 401;
+      error.code = 'INVALID_CREDENTIALS';
+      throw error;
+    }
+
+    const newHash = await bcrypt.hash(dto.newPassword, 10);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: newHash },
+    });
+
+    await logAudit({
+      action: AuditAction.UPDATE,
+      entityType: 'User',
+      entityId: user.id,
+      userId: user.id,
+      ipAddress: reqInfo?.ip,
+      userAgent: reqInfo?.userAgent,
+      metadata: { event: 'PASSWORD_CHANGED' },
+    });
+
+    // Revoke previous sessions
+    await TokenService.revokeSessions(user.id);
+
+    // Rotate and issue fresh credentials for current session
+    const payload: AuthenticatedUserPayload = {
+      userId: user.id,
+      userCode: user.userCode,
+      mobileNumber: user.mobileNumber,
+      role: user.role,
+      organisationId: user.organisationId,
+      unitId: user.unitId,
+    };
+
+    const { token, refreshToken, sessionId } = TokenService.generateTokens(payload);
+    await TokenService.recordLoginSession(user.id, user.mobileNumber, token, sessionId, reqInfo);
+
+    return {
+      success: true,
+      token,
+      refreshToken,
+      message: 'Password changed successfully. Active sessions rotated.',
+    };
+  }
+
+  /**
+   * Phase A: Request mobile number change OTP to proposed NEW number.
+   */
+  static async requestMobileChangeOtp(
+    userId: string,
+    dto: RequestMobileChangeOtpDto,
+    reqInfo?: { ip?: string; userAgent?: string }
+  ) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      const error: any = new Error('User account not found.');
+      error.statusCode = 404;
+      error.code = 'USER_NOT_FOUND';
+      throw error;
+    }
+
+    const cleanNewMobile = dto.newMobileNumber.replace(/\D/g, '').slice(-10);
+    if (cleanNewMobile.length !== 10) {
+      const error: any = new Error('Valid 10-digit mobile number is required.');
+      error.statusCode = 400;
+      error.code = 'VALIDATION_ERROR';
+      throw error;
+    }
+
+    if (cleanNewMobile === user.mobileNumber) {
+      const error: any = new Error('The proposed mobile number is identical to your current registered number.');
+      error.statusCode = 400;
+      error.code = 'SAME_MOBILE_NUMBER';
+      throw error;
+    }
+
+    // Check database uniqueness
+    const conflict = await prisma.user.findFirst({
+      where: { mobileNumber: cleanNewMobile, id: { not: userId } },
+    });
+    if (conflict) {
+      const error: any = new Error('The proposed mobile number is already registered to another account.');
+      error.statusCode = 409;
+      error.code = 'MOBILE_ALREADY_REGISTERED';
+      throw error;
+    }
+
+    await OtpService.enforceCooldown(cleanNewMobile);
+    await OtpService.enforceWindowRateLimit(cleanNewMobile);
+    OtpService.recordRequest(cleanNewMobile);
+
+    const { record, rawOtp } = await OtpService.generateAndSaveOtp(
+      cleanNewMobile,
+      user.role,
+      user.id
+    );
+
+    const channel = (dto.channel || 'SMS').toUpperCase();
+    const provider = SmsProviderFactory.getProvider(channel);
+
+    OtpService.printTerminalOtp({
+      mobileNumber: cleanNewMobile,
+      rawOtp,
+      role: user.role,
+      userName: user.name,
+      purpose: 'Tenant Mobile Number Change Verification',
+      channel,
+    });
+
+    let dispatchResult;
+    try {
+      dispatchResult = await provider.sendOtp(cleanNewMobile, rawOtp, {
+        senderId: env.SMS_SENDER_ID,
+        templateId: env.MSG91_TEMPLATE_ID,
+      });
+    } catch (err: any) {
+      dispatchResult = { success: false, error: err?.message };
+    }
+
+    if (!dispatchResult.success) {
+      const demoNumbers = [
+        '9848012345', '9848088888', '9848088887', '9848099998', '9848099999',
+        '9848077777', '9848010001', '9848010002', '9848010003', '9848010004',
+        '9848010005', '9998887777', '9736654406'
+      ];
+      if (demoNumbers.includes(cleanNewMobile) || env.NODE_ENV !== 'production') {
+        console.warn(`[Mobile Change OTP] Gateway failure bypassed in dev mode for ${cleanNewMobile}. OTP: ${rawOtp}`);
+        return {
+          requestId: record.id,
+          expiresAt: record.expiresAt,
+          cooldownSeconds: Math.ceil(env.OTP_RESEND_COOLDOWN_MS / 1000),
+          provider: `${provider.name} (Dev Mode)`,
+          message: 'Verification code dispatched to your new mobile number.',
+        };
+      }
+
+      await prisma.oTPVerification.delete({ where: { id: record.id } }).catch(() => {});
+      OtpService.clearCooldown(cleanNewMobile);
+
+      const error: any = new Error('Failed to dispatch OTP to proposed mobile number.');
+      error.statusCode = 502;
+      throw error;
+    }
+
+    return {
+      requestId: record.id,
+      expiresAt: record.expiresAt,
+      cooldownSeconds: Math.ceil(env.OTP_RESEND_COOLDOWN_MS / 1000),
+      provider: provider.name,
+      message: 'Verification code dispatched to your new mobile number.',
+    };
+  }
+
+  /**
+   * Phase B: Verify OTP and atomically update registered mobile number.
+   */
+  static async verifyMobileChangeOtp(
+    userId: string,
+    dto: VerifyMobileChangeOtpDto,
+    reqInfo?: { ip?: string; userAgent?: string }
+  ) {
+    const cleanNewMobile = dto.newMobileNumber.replace(/\D/g, '').slice(-10);
+    const record = await prisma.oTPVerification.findUnique({
+      where: { id: dto.requestId },
+    });
+
+    if (!record || record.userId !== userId || record.mobileNumber !== cleanNewMobile) {
+      const error: any = new Error('Invalid or mismatched mobile change request.');
+      error.statusCode = 400;
+      error.code = 'INVALID_OTP_REQUEST';
+      throw error;
+    }
+
+    await OtpService.validateOtpAttempt(record, dto.otpCode, reqInfo);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const conflict = await tx.user.findFirst({
+        where: { mobileNumber: cleanNewMobile, id: { not: userId } },
+      });
+      if (conflict) {
+        throw new Error('This mobile number is already registered to another user.');
+      }
+
+      const currentUser = await tx.user.findUnique({ where: { id: userId } });
+      if (!currentUser) throw new Error('User not found.');
+
+      const updatedUser = await tx.user.update({
+        where: { id: userId },
+        data: { mobileNumber: cleanNewMobile },
+        include: {
+          organisation: true,
+          roleRef: true,
+          cadreProfile: true,
+          hierarchyAssignments: { where: { isActive: true } },
+          unit: true,
+        },
+      });
+
+      // Revoke all active login sessions and authorized devices for security
+      await tx.loginSession.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await tx.userDevice.updateMany({
+        where: { userId, isAuthorized: true },
+        data: { isAuthorized: false, revokedAt: new Date(), revokedReason: 'MOBILE_NUMBER_CHANGED' },
+      });
+
+      // Mark OTP record verified
+      await tx.oTPVerification.update({
+        where: { id: record.id },
+        data: { verifiedAt: new Date() },
+      });
+
+      // Immutable audit log
+      await tx.auditLog.create({
+        data: {
+          action: AuditAction.UPDATE,
+          entityType: 'User',
+          entityId: userId,
+          userId,
+          metadata: {
+            event: 'MOBILE_NUMBER_CHANGED',
+            previousSuffix: currentUser.mobileNumber.slice(-4),
+            newSuffix: cleanNewMobile.slice(-4),
+          },
+          ipAddress: reqInfo?.ip,
+          userAgent: reqInfo?.userAgent,
+        },
+      });
+
+      return updatedUser;
+    });
+
+    // Rotate credentials
+    const payload: AuthenticatedUserPayload = {
+      userId: updated.id,
+      userCode: updated.userCode,
+      mobileNumber: updated.mobileNumber,
+      role: updated.role,
+      organisationId: updated.organisationId,
+      unitId: updated.unitId,
+    };
+    const { token, refreshToken, sessionId } = TokenService.generateTokens(payload);
+    await TokenService.recordLoginSession(updated.id, updated.mobileNumber, token, sessionId, reqInfo);
+
+    return {
+      token,
+      refreshToken,
+      user: {
+        id: updated.id,
+        userCode: updated.userCode,
+        name: updated.name,
+        mobileNumber: updated.mobileNumber,
+        email: updated.email,
+        role: updated.role,
+        organisation: updated.organisation,
+      },
+      message: 'Mobile number updated successfully.',
     };
   }
 }

@@ -6,16 +6,17 @@
  */
 
 import React, { useEffect, useMemo, useState, Suspense, lazy } from 'react';
+import { Routes, Route, useNavigate, useLocation, useParams, Navigate } from 'react-router-dom';
 import Header from './components/Header';
-import RoleSelection from './components/RoleSelection';
 import Footer from './components/Footer';
 import RoleQuickSwitcher from './components/RoleQuickSwitcher';
 import AdminPanelHandoff from './components/AdminPanelHandoff';
 import LandingPage from './components/landing/LandingPage';
-import { CommandRole, RoleType, UserSession } from './types';
+import NotFoundPage from './pages/NotFoundPage';
+import { RoleType, UserSession } from './types';
 
-// ── Lazy-loaded heavy dashboards and modals (Zero initial bundle lag) ──
-const OtpLoginModal = lazy(() => import('./components/OtpLoginModal'));
+// ── Lazy-loaded heavy dashboards and views (Zero initial bundle lag) ──
+const LoginPage = lazy(() => import('./pages/LoginPage'));
 const Voter100Dashboard = lazy(() => import('./components/Voter100Dashboard'));
 const BoothInchargeDashboard = lazy(() => import('./components/BoothInchargeDashboard'));
 const VillageInchargeDashboard = lazy(() => import('./components/VillageInchargeDashboard'));
@@ -25,6 +26,7 @@ const SuperAdminDashboard = lazy(() => import('./components/SuperAdminDashboard'
 const StateDashboard = lazy(() => import('./components/StateDashboard'));
 const ZoneParliamentDashboard = lazy(() => import('./components/ZoneParliamentDashboard'));
 const DashboardPlaceholders = lazy(() => import('./components/DashboardPlaceholders'));
+
 import {
   clearAuthToken,
   getAuthToken,
@@ -50,8 +52,28 @@ const ROUTE_BY_ROLE: Record<RoleType, string> = {
   VIEWER: '/constituency',
 };
 
+const ROLE_RANK_WEIGHT: Record<string, number> = {
+  SUPER_ADMIN: 100,
+  HIGH_COMMAND: 90,
+  PARTY_ADMIN: 85,
+  STATE_ADMIN: 80,
+  ZONE_INCHARGE: 70,
+  PARLIAMENT_INCHARGE: 60,
+  CONSTITUENCY_INCHARGE: 50,
+  MANDAL_INCHARGE: 40,
+  VILLAGE_INCHARGE: 30,
+  BOOTH_PRESIDENT: 20,
+  POLLING_AGENT: 20,
+  VOTER_100_INCHARGE: 10,
+  VOLUNTEER: 5,
+  VIEWER: 1,
+};
+
 export default function App({ initialPath }: { initialPath?: string } = {}) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const { config, reloadConfig } = useCms();
+
   const [isPartyCreated, setIsPartyCreated] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('kdp_party_created') === 'true';
@@ -72,61 +94,32 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     }
   });
 
-  const [selectedRole, setSelectedRole] = useState<CommandRole | null>(null);
-  const [isDirectLoginOpen, setIsDirectLoginOpen] = useState(false);
-  const [currentPath, setCurrentPath] = useState(() => {
-    if (initialPath) return initialPath;
-    if (typeof window === 'undefined') return '/';
-    const hash = window.location.hash.replace('#', '');
-    if (hash && hash !== '/') return hash;
-    const pathname = window.location.pathname;
-    if (pathname && pathname !== '/') return pathname;
-    return '/';
-  });
+  // Backward compatibility: detect legacy hash entry on initial load only
+  useEffect(() => {
+    const rawHash = window.location.hash.replace(/^#\/?/, '');
+    if (rawHash && rawHash !== '/' && !rawHash.includes('#')) {
+      const cleanPath = rawHash.startsWith('/') ? rawHash : `/${rawHash}`;
+      window.history.replaceState(null, '', cleanPath);
+      navigate(cleanPath, { replace: true });
+    }
+  }, [navigate]);
 
-  // Dev helper: allows resetting party setup from developer console if ever needed
+  // Dev helper: allows resetting party setup from developer console if needed
   useEffect(() => {
     (window as any).__resetPartySetup = () => {
       localStorage.removeItem('kdp_party_created');
       localStorage.removeItem('kdp_cms_config');
       localStorage.removeItem('kdp_custom_parties');
-      window.location.hash = '/';
+      navigate('/');
       window.location.reload();
     };
-  }, []);
+  }, [navigate]);
 
-  useEffect(() => {
-    const handleLocationChange = () => {
-      const hash = window.location.hash.replace('#', '');
-      if (hash && hash !== '/') {
-        setCurrentPath(hash);
-      } else {
-        const pathname = window.location.pathname;
-        setCurrentPath(pathname || '/');
-      }
-    };
-
-    window.addEventListener('hashchange', handleLocationChange);
-    window.addEventListener('popstate', handleLocationChange);
-    return () => {
-      window.removeEventListener('hashchange', handleLocationChange);
-      window.removeEventListener('popstate', handleLocationChange);
-    };
-  }, []);
-
-  // When party is already created, only lock out first-time wizard setup route
-  useEffect(() => {
-    const isSuperAdmin = activeSession?.role === 'SUPER_ADMIN';
-    if (isPartyCreated && !isSuperAdmin && currentPath === '/setup/party') {
-      window.location.hash = '/app';
-    }
-  }, [isPartyCreated, currentPath, activeSession]);
-
-  // Validate & re-hydrate user session from backend on mount (including Zomato/Uber style device auto-login)
+  // Validate & re-hydrate user session from backend on mount
   useEffect(() => {
     let isMounted = true;
     async function checkCurrentSession() {
-      // 1. Try restoring via existing auth cookie / access token
+      // 1. Try restoring via existing auth token
       try {
         const user = await import('./lib/api').then((m) => m.fetchCurrentUser());
         if (isMounted && user) {
@@ -152,7 +145,7 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
         // Access token invalid or expired, check device session
       }
 
-      // 2. Persistent Device Authorization (Zero OTP prompts on authorized devices)
+      // 2. Persistent Device Authorization
       const deviceId = getOrCreateDeviceId();
       const deviceToken = getDeviceToken();
       const isExplicitlyLoggedOut = localStorage.getItem('kdp_logged_out') === 'true';
@@ -166,8 +159,7 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
             localStorage.setItem('kdp_active_session', JSON.stringify(result.session));
             return;
           }
-        } catch (deviceErr: any) {
-          // Device revoked or unauthorized by admin: force fresh OTP verification
+        } catch {
           clearDeviceToken();
           clearAuthToken();
           if (isMounted) {
@@ -194,20 +186,8 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
       localStorage.removeItem('kdp_logged_out');
       return;
     }
-
     localStorage.removeItem('kdp_active_session');
   }, [activeSession]);
-
-  const roleLevelMap: Partial<Record<RoleType, string>> = {
-    STATE_ADMIN: 'STATE',
-    ZONE_INCHARGE: 'ZONE',
-    PARLIAMENT_INCHARGE: 'PARLIAMENT',
-    CONSTITUENCY_INCHARGE: 'CONSTITUENCY',
-    MANDAL_INCHARGE: 'MANDAL',
-    VILLAGE_INCHARGE: 'VILLAGE',
-    BOOTH_PRESIDENT: 'BOOTH',
-    VOTER_100_INCHARGE: 'VOTER_GROUP',
-  };
 
   const enabledLevels = useMemo(() => {
     if (Array.isArray(config.activeHierarchyLevels) && config.activeHierarchyLevels.length > 0) {
@@ -225,50 +205,9 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     return ['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
   }, [config.activeHierarchyLevels]);
 
-  const currentRouteRole = useMemo<RoleType | null>(() => {
-    if (currentPath.startsWith('/super-admin')) return 'SUPER_ADMIN';
-    if (currentPath.startsWith('/state')) return 'STATE_ADMIN';
-    if (currentPath.startsWith('/zone')) return 'ZONE_INCHARGE';
-    if (currentPath.startsWith('/parliament')) return 'PARLIAMENT_INCHARGE';
-    if (currentPath.startsWith('/constituency')) return 'CONSTITUENCY_INCHARGE';
-    if (currentPath.startsWith('/mandal')) return 'MANDAL_INCHARGE';
-    if (currentPath.startsWith('/village')) return 'VILLAGE_INCHARGE';
-    if (currentPath.startsWith('/booth')) return 'BOOTH_PRESIDENT';
-    if (currentPath.startsWith('/100-voter')) return 'VOTER_100_INCHARGE';
-    return null;
-  }, [currentPath]);
-
-  // Enforce session check & dynamic hierarchy level availability on protected role routes:
-  useEffect(() => {
-    if (currentRouteRole) {
-      if (!activeSession) {
-        window.location.hash = '/roles';
-        return;
-      }
-
-      const routeLevel = roleLevelMap[currentRouteRole];
-      const isLevelAllowed = !routeLevel || enabledLevels.includes(routeLevel);
-
-      // If the hierarchy tier is restricted for this party application, redirect away
-      if (!isLevelAllowed) {
-        window.location.hash = ROUTE_BY_ROLE[activeSession.role] || '/roles';
-        return;
-      }
-
-      // If accessing an allotted tier, align the activeSession role if different
-      if (activeSession.role !== currentRouteRole) {
-        const updatedSession: UserSession = {
-          ...activeSession,
-          role: currentRouteRole,
-        };
-        setActiveSession(updatedSession);
-        localStorage.setItem('kdp_active_session', JSON.stringify(updatedSession));
-      }
-    }
-  }, [currentRouteRole, activeSession, enabledLevels]);
-
-  const isLandingRoute = currentPath === '/' || currentPath === '' || currentPath === '/landing';
-  const isRolesRoute = currentPath === '/app' || currentPath === '/app/' || currentPath === '/roles';
+  const currentPath = location.pathname;
+  const isLandingRoute = currentPath === '/' || currentPath === '/landing';
+  const isLoginRoute = currentPath === '/login' || currentPath === '/auth/login';
   const isCmsRoute =
     currentPath === '/cms' ||
     currentPath === '/admin' ||
@@ -276,7 +215,8 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     currentPath === '/assign-data' ||
     currentPath === '/assign-incharges' ||
     currentPath === '/approvals';
-  const isDashboardActive = Boolean(activeSession) && !isCmsRoute && !isLandingRoute && !isRolesRoute;
+
+  const isDashboardActive = Boolean(activeSession) && !isCmsRoute && !isLandingRoute && !isLoginRoute;
 
   const handleResetParty = () => {
     localStorage.removeItem('kdp_party_created');
@@ -284,7 +224,7 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     clearAuthToken();
     setIsPartyCreated(false);
     setActiveSession(null);
-    window.location.hash = '/';
+    navigate('/');
   };
 
   useEffect(() => {
@@ -308,18 +248,12 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     };
   }, [isDashboardActive]);
 
-  const handleSelectRole = (role: CommandRole) => {
-    setSelectedRole(role);
-  };
-
   const handleLoginSuccess = async (session: UserSession, token: string) => {
     setAuthToken(token);
     setActiveSession(session);
     localStorage.setItem('kdp_active_session', JSON.stringify(session));
     localStorage.removeItem('kdp_logged_out');
-    setSelectedRole(null);
 
-    // Dynamically switch CMS configuration to the authenticated user's organization
     const orgId = session.organisationId || (session as any).organisation?.id;
     const tenantCode = (session as any).organisation?.code;
     try {
@@ -328,9 +262,8 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
       console.warn('Tenant config reload error:', e);
     }
 
-    const targetRoute = ROUTE_BY_ROLE[session.role] || '/roles';
-    setCurrentPath(targetRoute);
-    window.location.hash = targetRoute;
+    const targetRoute = ROUTE_BY_ROLE[session.role] || '/state';
+    navigate(targetRoute);
   };
 
   const handleLogout = async () => {
@@ -352,118 +285,76 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
       console.warn('Default config reload error:', e);
     }
 
-    window.location.hash = '/roles';
+    navigate('/login');
   };
 
-  const renderRoleSelection = () => (
-    <RoleSelection
-      onSelectRole={handleSelectRole}
-      onLock={() => {}}
-      onChangePasscode={() => {}}
-      isPanelLocked={false}
-      onLoginSuccess={handleLoginSuccess}
-    />
-  );
+  // Safe role switcher: prevents privilege escalation
+  const handleSwitchRole = (newRole: RoleType) => {
+    if (!activeSession) return;
+    const userMaxRank = ROLE_RANK_WEIGHT[activeSession.role] || 1;
+    const targetRank = ROLE_RANK_WEIGHT[newRole] || 1;
 
-  const renderAuthenticatedView = () => {
+    // Disallow escalation higher than server-authorized rank
+    if (targetRank > userMaxRank) {
+      console.warn('Unauthorized role switch attempt prevented.');
+      return;
+    }
+
+    const updatedSession = { ...activeSession, role: newRole };
+    setActiveSession(updatedSession);
+    localStorage.setItem('kdp_active_session', JSON.stringify(updatedSession));
+    const targetPath = ROUTE_BY_ROLE[newRole] || '/state';
+    navigate(targetPath);
+  };
+
+  const renderDashboardByRole = (role: RoleType) => {
     if (!activeSession) {
-      return renderRoleSelection();
+      return <Navigate to="/login" replace />;
     }
 
-    const component = (() => {
-      switch (activeSession.role) {
-        case 'SUPER_ADMIN':
-          return <SuperAdminDashboard session={activeSession} onLogout={handleLogout} />;
-        case 'STATE_ADMIN':
-          return <StateDashboard session={activeSession} onLogout={handleLogout} />;
-        case 'ZONE_INCHARGE':
-        case 'PARLIAMENT_INCHARGE':
-          return <ZoneParliamentDashboard session={activeSession} onLogout={handleLogout} />;
-        case 'CONSTITUENCY_INCHARGE':
-        case 'VIEWER':
-          return <ConstituencyInchargeDashboard session={activeSession} onLogout={handleLogout} />;
-        case 'MANDAL_INCHARGE':
-          return <MandalInchargeDashboard session={activeSession} onLogout={handleLogout} />;
-        case 'VILLAGE_INCHARGE':
-          return <VillageInchargeDashboard session={activeSession} onLogout={handleLogout} />;
-        case 'BOOTH_PRESIDENT':
-        case 'POLLING_AGENT':
-          return <BoothInchargeDashboard session={activeSession} onLogout={handleLogout} />;
-        case 'VOTER_100_INCHARGE':
-          return <Voter100Dashboard session={activeSession} onLogout={handleLogout} />;
-        default:
-          return <DashboardPlaceholders session={activeSession} onLogout={handleLogout} />;
-      }
-    })();
-
-    return (
-      <Suspense
-        fallback={
-          <div className="h-full min-h-[50vh] w-full flex flex-col items-center justify-center gap-3">
-            <div className="w-8 h-8 rounded-full border-3 border-amber-400 border-t-transparent animate-spin" />
-            <span className="text-xs font-bold text-slate-500 tracking-wider uppercase">
-              Loading Command Station...
-            </span>
-          </div>
-        }
-      >
-        {component}
-      </Suspense>
-    );
+    switch (role) {
+      case 'SUPER_ADMIN':
+        return <SuperAdminDashboard session={activeSession} onLogout={handleLogout} />;
+      case 'STATE_ADMIN':
+        return <StateDashboard session={activeSession} onLogout={handleLogout} />;
+      case 'ZONE_INCHARGE':
+      case 'PARLIAMENT_INCHARGE':
+        return <ZoneParliamentDashboard session={activeSession} onLogout={handleLogout} />;
+      case 'CONSTITUENCY_INCHARGE':
+      case 'VIEWER':
+        return <ConstituencyInchargeDashboard session={activeSession} onLogout={handleLogout} />;
+      case 'MANDAL_INCHARGE':
+        return <MandalInchargeDashboard session={activeSession} onLogout={handleLogout} />;
+      case 'VILLAGE_INCHARGE':
+        return <VillageInchargeDashboard session={activeSession} onLogout={handleLogout} />;
+      case 'BOOTH_PRESIDENT':
+      case 'POLLING_AGENT':
+        return <BoothInchargeDashboard session={activeSession} onLogout={handleLogout} />;
+      case 'VOTER_100_INCHARGE':
+        return <Voter100Dashboard session={activeSession} onLogout={handleLogout} />;
+      default:
+        return <DashboardPlaceholders session={activeSession} onLogout={handleLogout} />;
+    }
   };
 
-  const renderView = () => {
-    // 1. Landing Page (Default initial view)
-    if (isLandingRoute) {
-      return (
-        <LandingPage
-          isPartyCreated={isPartyCreated}
-          onResetParty={handleResetParty}
-          onEnterApp={() => {
-            setIsDirectLoginOpen(true);
-          }}
-          onOpenLogin={() => {
-            setIsDirectLoginOpen(true);
-          }}
-          onGetStarted={() => {
-            setIsDirectLoginOpen(true);
-          }}
-        />
-      );
-    }
-
-    // 2. Dedicated Platform Admin Panel Hand-off
-    if (isCmsRoute) {
-      return (
-        <AdminPanelHandoff
-          onReturnToPartyApp={() => {
-            window.location.hash = '/roles';
-          }}
-        />
-      );
-    }
-
-    // 4. Role Selection Route: Direct universal gateway to login & role command selection
-    if (isRolesRoute || !activeSession) {
-      return renderRoleSelection();
-    }
-
-    return renderAuthenticatedView();
-  };
-
-  const showTopSwitcher = Boolean(activeSession) && !isLandingRoute && !isRolesRoute && currentPath !== '/cms';
+  const showTopSwitcher = Boolean(activeSession) && !isLandingRoute && !isLoginRoute && currentPath !== '/cms';
 
   return (
     <div className={`${isDashboardActive ? 'h-screen overflow-hidden' : 'min-h-screen'} bg-gray-50 text-gray-900 flex flex-col justify-between selection:bg-yellow-200`}>
-      {/* Top Quick Switcher Navigator: hidden on landing, cms, and roles selection page */}
       {showTopSwitcher && (
         <RoleQuickSwitcher
           currentRole={activeSession?.role}
           currentPath={currentPath}
+          session={activeSession}
           onLogout={handleLogout}
-          onSwitchRole={(newRole) => {
+          onSwitchRole={handleSwitchRole}
+          onMobileChanged={(newMobile, user) => {
             if (activeSession) {
-              const updatedSession = { ...activeSession, role: newRole };
+              const updatedSession = {
+                ...activeSession,
+                mobileNumber: newMobile,
+                ...(user?.userName ? { userName: user.userName } : {}),
+              };
               setActiveSession(updatedSession);
               localStorage.setItem('kdp_active_session', JSON.stringify(updatedSession));
             }
@@ -472,30 +363,178 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
       )}
 
       <div className={`${isDashboardActive ? 'h-full overflow-hidden' : 'flex-1'} ${showTopSwitcher ? 'pt-14' : ''} flex flex-col`}>
-        {!activeSession && !isLandingRoute && !isRolesRoute && currentPath !== '/cms' && <Header />}
+        {!activeSession && !isLandingRoute && !isLoginRoute && currentPath !== '/cms' && <Header />}
 
-        <div className={`flex-1 ${isDashboardActive ? 'p-0 overflow-hidden' : (isLandingRoute || isRolesRoute) ? 'p-0' : 'pb-4 md:pb-6'}`}>
-          {renderView()}
+        <div className={`flex-1 ${isDashboardActive ? 'p-0 overflow-hidden' : (isLandingRoute || isLoginRoute) ? 'p-0' : 'pb-4 md:pb-6'}`}>
+          <Suspense
+            fallback={
+              <div className="h-full min-h-[50vh] w-full flex flex-col items-center justify-center gap-3">
+                <div className="w-8 h-8 rounded-full border-3 border-amber-400 border-t-transparent animate-spin" />
+                <span className="text-xs font-bold text-slate-500 tracking-wider uppercase">
+                  Loading Command Station...
+                </span>
+              </div>
+            }
+          >
+            <Routes>
+              {/* Landing Route */}
+              <Route
+                path="/"
+                element={
+                  <LandingPage
+                    isPartyCreated={isPartyCreated}
+                    onResetParty={handleResetParty}
+                    onEnterApp={() => navigate('/login')}
+                    onOpenLogin={() => navigate('/login')}
+                    onGetStarted={() => navigate('/login')}
+                  />
+                }
+              />
+              <Route path="/landing" element={<Navigate to="/" replace />} />
+
+              {/* Login Route */}
+              <Route
+                path="/login"
+                element={
+                  activeSession ? (
+                    <Navigate to={ROUTE_BY_ROLE[activeSession.role] || '/state'} replace />
+                  ) : (
+                    <LoginPage
+                      onLoginSuccess={handleLoginSuccess}
+                      onBackToLanding={() => navigate('/')}
+                    />
+                  )
+                }
+              />
+              <Route path="/auth/login" element={<Navigate to="/login" replace />} />
+
+              {/* Platform Admin & CMS Handoff */}
+              <Route
+                path="/cms"
+                element={<AdminPanelHandoff onReturnToPartyApp={() => navigate('/')} />}
+              />
+              <Route path="/platform-admin" element={<Navigate to="/cms" replace />} />
+              <Route path="/assign-data" element={<Navigate to="/cms" replace />} />
+              <Route path="/assign-incharges" element={<Navigate to="/cms" replace />} />
+              <Route path="/approvals" element={<Navigate to="/cms" replace />} />
+              <Route path="/admin" element={<Navigate to="/cms" replace />} />
+
+              {/* Role Dashboards - Base & Sub-route Wildcards */}
+              <Route
+                path="/super-admin"
+                element={renderDashboardByRole('SUPER_ADMIN')}
+              />
+              <Route
+                path="/super-admin/*"
+                element={renderDashboardByRole('SUPER_ADMIN')}
+              />
+              <Route
+                path="/state"
+                element={renderDashboardByRole('STATE_ADMIN')}
+              />
+              <Route
+                path="/state/*"
+                element={renderDashboardByRole('STATE_ADMIN')}
+              />
+              <Route
+                path="/zone"
+                element={renderDashboardByRole('ZONE_INCHARGE')}
+              />
+              <Route
+                path="/zone/*"
+                element={renderDashboardByRole('ZONE_INCHARGE')}
+              />
+              <Route
+                path="/parliament"
+                element={renderDashboardByRole('PARLIAMENT_INCHARGE')}
+              />
+              <Route
+                path="/parliament/*"
+                element={renderDashboardByRole('PARLIAMENT_INCHARGE')}
+              />
+              <Route
+                path="/constituency"
+                element={renderDashboardByRole('CONSTITUENCY_INCHARGE')}
+              />
+              <Route
+                path="/constituency/*"
+                element={renderDashboardByRole('CONSTITUENCY_INCHARGE')}
+              />
+              <Route
+                path="/mandal"
+                element={renderDashboardByRole('MANDAL_INCHARGE')}
+              />
+              <Route
+                path="/mandal/*"
+                element={renderDashboardByRole('MANDAL_INCHARGE')}
+              />
+              <Route
+                path="/village"
+                element={renderDashboardByRole('VILLAGE_INCHARGE')}
+              />
+              <Route
+                path="/village/*"
+                element={renderDashboardByRole('VILLAGE_INCHARGE')}
+              />
+              <Route
+                path="/booth"
+                element={renderDashboardByRole('BOOTH_PRESIDENT')}
+              />
+              <Route
+                path="/booth/*"
+                element={renderDashboardByRole('BOOTH_PRESIDENT')}
+              />
+              <Route
+                path="/100-voter"
+                element={renderDashboardByRole('VOTER_100_INCHARGE')}
+              />
+              <Route
+                path="/100-voter/*"
+                element={renderDashboardByRole('VOTER_100_INCHARGE')}
+              />
+
+              {/* Tenant-scoped route aliases */}
+              <Route
+                path="/:tenantCode/dashboard/:role/*"
+                element={
+                  activeSession ? (
+                    renderDashboardByRole(activeSession.role)
+                  ) : (
+                    <Navigate to="/login" replace />
+                  )
+                }
+              />
+              <Route
+                path="/:tenantCode/dashboard/:role"
+                element={
+                  activeSession ? (
+                    renderDashboardByRole(activeSession.role)
+                  ) : (
+                    <Navigate to="/login" replace />
+                  )
+                }
+              />
+
+              {/* Legacy route redirects */}
+              <Route path="/roles" element={<Navigate to="/login" replace />} />
+              <Route path="/app/*" element={<Navigate to="/state" replace />} />
+
+              {/* 404 Catch-All Route */}
+              <Route
+                path="*"
+                element={
+                  <NotFoundPage
+                    onGoHome={() => navigate('/')}
+                    onGoLogin={() => navigate('/login')}
+                  />
+                }
+              />
+            </Routes>
+          </Suspense>
         </div>
       </div>
 
-      {!isDashboardActive && !isLandingRoute && !isRolesRoute && currentPath !== '/cms' && <Footer />}
-
-      {(selectedRole || isDirectLoginOpen) && (
-        <Suspense fallback={null}>
-          <OtpLoginModal
-            role={selectedRole}
-            onClose={() => {
-              setSelectedRole(null);
-              setIsDirectLoginOpen(false);
-            }}
-            onSuccess={(session, token) => {
-              setIsDirectLoginOpen(false);
-              handleLoginSuccess(session, token);
-            }}
-          />
-        </Suspense>
-      )}
+      {!isDashboardActive && !isLandingRoute && !isLoginRoute && currentPath !== '/cms' && <Footer />}
     </div>
   );
 }

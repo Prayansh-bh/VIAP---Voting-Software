@@ -1,8 +1,43 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { errorResponse, successResponse } from '../../common/response.js';
 import { ApplicationsService } from './applications.service.js';
+import { UpdateApplicationDto } from './applications.schema.js';
+import { provisionApplication } from '../cms/cms.service.js';
 
 export class ApplicationsController {
+  static async createApplication(req: FastifyRequest, reply: FastifyReply) {
+    try {
+      const body = req.body as any;
+      const result = await provisionApplication(body, req.user);
+      return reply.status(201).send(
+        successResponse(
+          result,
+          'Application built and provisioned successfully! Ready for Data & Incharge Assignment.',
+        ),
+      );
+    } catch (err: any) {
+      if (
+        err.code === 'P2002' ||
+        err.code === '23505' ||
+        err.code === 'TENANT_ALREADY_EXISTS' ||
+        err.statusCode === 409 ||
+        err.message?.includes('Organisation_lower_name_key') ||
+        err.message?.includes('Unique constraint failed')
+      ) {
+        return reply.status(409).send(
+          errorResponse(
+            err.message || 'Tenant code or organization conflict during provisioning.',
+            'TENANT_ALREADY_EXISTS',
+          ),
+        );
+      }
+      if (err.statusCode === 400 || err.code === 'INVALID_ROLE' || err.code === 'INVALID_INCHARGE_NAME' || err.code === 'INVALID_PHONE_NUMBER' || err.code === 'DUPLICATE_PHONE_NUMBER') {
+        return reply.status(400).send(errorResponse(err.message, err.code || 'BAD_REQUEST'));
+      }
+      return reply.status(500).send(errorResponse(err.message || 'Failed to provision application', 'INTERNAL_ERROR'));
+    }
+  }
+
   static async getApplications(req: FastifyRequest, reply: FastifyReply) {
     const user = req.user;
     const isSuperAdmin = user?.role === 'SUPER_ADMIN';
@@ -274,13 +309,37 @@ export class ApplicationsController {
   static async deleteApplication(req: FastifyRequest, reply: FastifyReply) {
     const { id } = req.params as { id: string };
     try {
-      const data = await ApplicationsService.deleteApplication(id);
+      const data = await ApplicationsService.deleteApplication(id, req.user);
       return reply.send(successResponse(data, 'Application and all associated tenant hierarchy and parties permanently deleted'));
     } catch (err: any) {
       if (err.message && err.message.includes('not found')) {
-        return reply.status(404).send(errorResponse('NOT_FOUND', err.message));
+        return reply.status(404).send(errorResponse(err.message, 'NOT_FOUND'));
       }
-      return reply.status(500).send(errorResponse('INTERNAL_ERROR', err.message || 'Failed to delete application'));
+      return reply.status(500).send(errorResponse(err.message || 'Failed to delete application', 'INTERNAL_ERROR'));
+    }
+  }
+
+  static async updateApplication(req: FastifyRequest, reply: FastifyReply) {
+    const { id } = req.params as { id: string };
+    const body = req.body as UpdateApplicationDto;
+    try {
+      const data = await ApplicationsService.updateApplication(id, body, req.user);
+      return reply.send(successResponse(data, 'Party application updated successfully'));
+    } catch (err: any) {
+      if (err.message && err.message.includes('not found')) {
+        return reply.status(404).send(errorResponse(err.message, 'NOT_FOUND'));
+      }
+      if (err.message && err.message.includes('Forbidden')) {
+        return reply.status(403).send(errorResponse(err.message, 'FORBIDDEN'));
+      }
+      if (
+        (err.message && err.message.includes('already in use')) ||
+        err.code === 'P2002' ||
+        err.code === '23505'
+      ) {
+        return reply.status(409).send(errorResponse(err.message || 'Duplicate unique constraint conflict', 'CONFLICT'));
+      }
+      return reply.status(500).send(errorResponse(err.message || 'Failed to update application', 'INTERNAL_ERROR'));
     }
   }
 }

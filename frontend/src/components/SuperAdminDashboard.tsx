@@ -1,3 +1,4 @@
+import { getAdminUrl } from '../lib/env';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -38,13 +39,55 @@ interface SuperAdminDashboardProps {
   onLogout: () => void;
 }
 
+import { useLocation, useNavigate } from 'react-router-dom';
+
+type SuperAdminTab = 'overview' | 'orgs' | 'parties' | 'ai' | 'storage' | 'audit' | 'health';
+
+const SUPER_ADMIN_TAB_TO_PATH: Record<SuperAdminTab, string> = {
+  overview: '/super-admin',
+  orgs: '/super-admin/orgs',
+  parties: '/super-admin/parties',
+  ai: '/super-admin/ai',
+  storage: '/super-admin/storage',
+  audit: '/super-admin/audit',
+  health: '/super-admin/health',
+};
+
+const SUPER_ADMIN_PATH_TO_TAB: Record<string, SuperAdminTab> = {
+  '': 'overview',
+  overview: 'overview',
+  orgs: 'orgs',
+  organisations: 'orgs',
+  parties: 'parties',
+  ai: 'ai',
+  storage: 'storage',
+  audit: 'audit',
+  health: 'health',
+};
+
 export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDashboardProps) {
   const { config, parties } = useCms();
-  const [activeTab, setActiveTab] = useState<'overview' | 'orgs' | 'parties' | 'ai' | 'storage' | 'audit' | 'health'>('overview');
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const subPath = location.pathname.replace(/^\/super-admin\/?/, '').split('/')[0] || '';
+  const isKnownSubPath = subPath === '' || subPath in SUPER_ADMIN_PATH_TO_TAB;
+  const activeTab: SuperAdminTab = isKnownSubPath ? (SUPER_ADMIN_PATH_TO_TAB[subPath] || 'overview') : 'overview';
+
+  // Unknown sub-routes safely return to base route
+  useEffect(() => {
+    if (!isKnownSubPath) {
+      navigate('/super-admin', { replace: true });
+    }
+  }, [isKnownSubPath, navigate]);
+
+  const setActiveTab = (tab: SuperAdminTab) => {
+    navigate(SUPER_ADMIN_TAB_TO_PATH[tab]);
+  };
   const [loading, setLoading] = useState(false);
 
   const handleOpenAdminConsole = () => {
-    window.open('http://localhost:3001', '_blank');
+    window.open(getAdminUrl(), '_blank');
   };
   
   // Data states
@@ -220,13 +263,13 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
                   <span className="text-xs font-bold uppercase tracking-wider">Live Data: Connected</span>
                 </div>
                 <button
-                  onClick={() => (window.location.hash = '/assign-data')}
+                  onClick={() => navigate('/assign-data')}
                   className="flex items-center gap-1.5 px-3.5 py-2 bg-amber-400 hover:bg-amber-500 text-slate-950 rounded-xl text-xs font-black shadow-sm transition cursor-pointer"
                 >
                   Assign Data
                 </button>
                 <button
-                  onClick={() => (window.location.hash = '/assign-incharges')}
+                  onClick={() => navigate('/assign-incharges')}
                   className="flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
                 >
                   Assign Incharges

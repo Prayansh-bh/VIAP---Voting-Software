@@ -562,7 +562,28 @@ export function assertUnitAccess(req: FastifyRequest, reply: FastifyReply, targe
   if (req.hierarchyScope.isGlobalScope) return true;
   if (!targetUnitId) return true;
 
-  if (!req.hierarchyScope.accessibleUnitIds.has(targetUnitId)) {
+  const inScope =
+    req.hierarchyScope.accessibleUnitIds.has(targetUnitId) ||
+    req.hierarchyScope.accessibleStateIds.has(targetUnitId) ||
+    req.hierarchyScope.accessibleZoneIds.has(targetUnitId) ||
+    req.hierarchyScope.accessibleParliamentIds.has(targetUnitId) ||
+    req.hierarchyScope.accessibleConstituencyIds.has(targetUnitId) ||
+    req.hierarchyScope.accessibleMandalIds.has(targetUnitId) ||
+    req.hierarchyScope.accessibleVillageIds.has(targetUnitId) ||
+    req.hierarchyScope.accessibleBoothIds.has(targetUnitId) ||
+    req.hierarchyScope.accessibleVoterGroupIds.has(targetUnitId);
+
+  if (!inScope) {
+    if (
+      req.hierarchyScope.role === 'SUPER_ADMIN' ||
+      req.hierarchyScope.role === 'STATE_ADMIN' ||
+      req.hierarchyScope.role === 'HIGH_COMMAND' ||
+      req.hierarchyScope.role === 'PARTY_ADMIN' ||
+      req.hierarchyScope.role === 'PARLIAMENT_INCHARGE' ||
+      req.hierarchyScope.role === 'ZONE_INCHARGE'
+    ) {
+      return true;
+    }
     reply.status(403).send(errorResponse(`Access denied: Geographical node ${targetUnitId} is outside your authorized hierarchy scope.`, 'FORBIDDEN_SCOPE'));
     return false;
   }

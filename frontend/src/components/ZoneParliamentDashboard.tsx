@@ -28,9 +28,9 @@ import {
   CheckSquare,
   Award
 } from 'lucide-react';
-import { UserSession } from '../types';
+import { UserSession, TrainingVideo } from '../types';
 import { useCms } from '../context/CmsContext';
-import { fetchHierarchySummaryByUser, fetchStateAnalytics } from '../lib/api';
+import { fetchHierarchySummaryByUser, fetchStateAnalytics, fetchTrainingAnalytics, fetchTrainingVideos, TrainingAnalyticsData } from '../lib/api';
 import AIStrategicIntelligenceCenter from './AIStrategicIntelligenceCenter';
 
 interface ZoneParliamentDashboardProps {
@@ -58,85 +58,120 @@ type ParliamentTabType =
   | 'strategic_intelligence'
   | 'training_analytics';
 
-// Zonal Parliaments dataset
-const ZONAL_PARLIAMENTS_DATA = [
-  { id: 1, name: 'Mahabubnagar', candidate: 'Challa Vamshi Chand Reddy', margin: '+9.4%', incVotes: 512000, brsVotes: 418000, bjpVotes: 234000, voters: 1590000, status: 'WINNING' as const, assemblies: 7, incharge: 'V. Damodar Reddy', phone: '+91 98480 20011' },
-  { id: 2, name: 'Nagarkurnool (SC)', candidate: 'Mallu Ravi', margin: '+12.7%', incVotes: 538000, brsVotes: 392000, bjpVotes: 184000, voters: 1530000, status: 'WINNING' as const, assemblies: 7, incharge: 'D. Rajesh', phone: '+91 98480 20012' },
-  { id: 3, name: 'Chevella', candidate: 'G. Ranjith Reddy', margin: '+8.1%', incVotes: 615000, brsVotes: 512000, bjpVotes: 442000, voters: 2540000, status: 'WINNING' as const, assemblies: 7, incharge: 'K. Pratap', phone: '+91 98480 20010' }
-];
+// Database-backed datasets
+const HIGH_COMMAND_TASKS_DATA: any[] = [];
+const FAKE_VOTES_LIST: any[] = [];
 
-// 21 Assembly Segments in South Zone
-const ZONAL_ASSEMBLIES_DATA = [
-  { id: 1, name: 'Kodangal', parliament: 'Mahabubnagar', incharge: 'A. Revanth Reddy', voters: 236500, incVotes: 108400, brsVotes: 76200, bjpVotes: 21400, mimVotes: 1100, status: 'WINNING' as const, margin: '32,200', phone: '+91 98480 40001' },
-  { id: 2, name: 'Narayanpet', parliament: 'Mahabubnagar', incharge: 'Chittem Parnika Reddy', voters: 228100, incVotes: 94200, brsVotes: 68100, bjpVotes: 31200, mimVotes: 900, status: 'WINNING' as const, margin: '26,100', phone: '+91 98480 40002' },
-  { id: 3, name: 'Mahabubnagar', parliament: 'Mahabubnagar', incharge: 'Yennam Srinivas Reddy', voters: 254200, incVotes: 101200, brsVotes: 78400, bjpVotes: 38200, mimVotes: 1400, status: 'WINNING' as const, margin: '22,800', phone: '+91 98480 40003' },
-  { id: 4, name: 'Jadcherla', parliament: 'Mahabubnagar', incharge: 'J. Anirudh Reddy', voters: 221900, incVotes: 96400, brsVotes: 69200, bjpVotes: 24100, mimVotes: 800, status: 'WINNING' as const, margin: '27,200', phone: '+91 98480 40004' },
-  { id: 5, name: 'Devarakadra', parliament: 'Mahabubnagar', incharge: 'G. Madhusudhan Reddy', voters: 238400, incVotes: 98100, brsVotes: 74200, bjpVotes: 28400, mimVotes: 900, status: 'WINNING' as const, margin: '23,900', phone: '+91 98480 40005' },
-  { id: 6, name: 'Makthal', parliament: 'Mahabubnagar', incharge: 'Vakiti Srihari', voters: 229600, incVotes: 92400, brsVotes: 72100, bjpVotes: 31200, mimVotes: 800, status: 'WINNING' as const, margin: '20,300', phone: '+91 98480 40006' },
-  { id: 7, name: 'Shadnagar', parliament: 'Mahabubnagar', incharge: 'K. Shankaraiah', voters: 247100, incVotes: 104200, brsVotes: 79100, bjpVotes: 28400, mimVotes: 1200, status: 'WINNING' as const, margin: '25,100', phone: '+91 98480 40007' },
-  { id: 8, name: 'Nagarkurnool', parliament: 'Nagarkurnool', incharge: 'Dr. Kuchkulla Rajesh Reddy', voters: 224800, incVotes: 96400, brsVotes: 68100, bjpVotes: 22100, mimVotes: 800, status: 'WINNING' as const, margin: '28,300', phone: '+91 98480 40008' },
-  { id: 9, name: 'Achampet (SC)', parliament: 'Nagarkurnool', incharge: 'Chikkudu Vamshi Krishna', voters: 228900, incVotes: 102400, brsVotes: 64100, bjpVotes: 21200, mimVotes: 600, status: 'WINNING' as const, margin: '38,300', phone: '+91 98480 40009' },
-  { id: 10, name: 'Kalwakurthy', parliament: 'Nagarkurnool', incharge: 'Kasireddy Narayan Reddy', voters: 235400, incVotes: 94100, brsVotes: 74200, bjpVotes: 31200, mimVotes: 900, status: 'WINNING' as const, margin: '19,900', phone: '+91 98480 40010' },
-  { id: 11, name: 'Kollapur', parliament: 'Nagarkurnool', incharge: 'Jupally Krishna Rao', voters: 227500, incVotes: 101400, brsVotes: 71200, bjpVotes: 18400, mimVotes: 700, status: 'WINNING' as const, margin: '30,200', phone: '+91 98480 40011' },
-  { id: 12, name: 'Wanaparthy', parliament: 'Nagarkurnool', incharge: 'Thudi Megha Reddy', voters: 248900, incVotes: 106400, brsVotes: 79100, bjpVotes: 26400, mimVotes: 1100, status: 'WINNING' as const, margin: '27,300', phone: '+91 98480 40012' },
-  { id: 13, name: 'Gadwal', parliament: 'Nagarkurnool', incharge: 'Bandla Krishna Mohan Reddy', voters: 251200, incVotes: 99400, brsVotes: 82100, bjpVotes: 28400, mimVotes: 1200, status: 'WINNING' as const, margin: '17,300', phone: '+91 98480 40013' },
-  { id: 14, name: 'Alampur (SC)', parliament: 'Nagarkurnool', incharge: 'S. A. Sampath Kumar', voters: 229100, incVotes: 98400, brsVotes: 74100, bjpVotes: 22100, mimVotes: 800, status: 'WINNING' as const, margin: '24,300', phone: '+91 98480 40014' },
-  { id: 15, name: 'Chevella (SC)', parliament: 'Chevella', incharge: 'Pamena Bheembharat', voters: 248300, incVotes: 98100, brsVotes: 78400, bjpVotes: 34100, mimVotes: 1200, status: 'WINNING' as const, margin: '19,700', phone: '+91 98480 40015' },
-  { id: 16, name: 'Pargi', parliament: 'Chevella', incharge: 'T. Ram Mohan Reddy', voters: 241600, incVotes: 104200, brsVotes: 72100, bjpVotes: 29400, mimVotes: 1100, status: 'WINNING' as const, margin: '32,100', phone: '+91 98480 40016' },
-  { id: 17, name: 'Vikarabad (SC)', parliament: 'Chevella', incharge: 'G. Prasad Kumar', voters: 232100, incVotes: 99400, brsVotes: 71200, bjpVotes: 26400, mimVotes: 900, status: 'WINNING' as const, margin: '28,200', phone: '+91 98480 40017' },
-  { id: 18, name: 'Tandur', parliament: 'Chevella', incharge: 'B. Manohar Reddy', voters: 228400, incVotes: 94100, brsVotes: 74200, bjpVotes: 28100, mimVotes: 1200, status: 'WINNING' as const, margin: '19,900', phone: '+91 98480 40018' },
-  { id: 19, name: 'Maheshwaram', parliament: 'Chevella', incharge: 'K. Laxma Reddy', voters: 512000, incVotes: 178200, brsVotes: 154100, bjpVotes: 98200, mimVotes: 12400, status: 'WINNING' as const, margin: '24,100', phone: '+91 98480 40019' },
-  { id: 20, name: 'Rajendranagar', parliament: 'Chevella', incharge: 'Kasturi Narender', voters: 578000, incVotes: 194100, brsVotes: 172400, bjpVotes: 118400, mimVotes: 14200, status: 'WINNING' as const, margin: '21,700', phone: '+91 98480 40020' },
-  { id: 21, name: 'Serilingampally', parliament: 'Chevella', incharge: 'V. Jagadeeshwar Goud', voters: 712000, incVotes: 224100, brsVotes: 208400, bjpVotes: 158100, mimVotes: 12100, status: 'WINNING' as const, margin: '15,700', phone: '+91 98480 40021' }
-];
+import { useLocation, useNavigate } from 'react-router-dom';
 
-// Mandals under Parliament Segment
-const PARLIAMENT_MANDALS_DATA = [
-  { id: 1, name: 'Kodangal Rural', assembly: 'Kodangal', voters: 42100, booths: 48, status: 'WINNING', margin: '+24.1%' },
-  { id: 2, name: 'Bomraspet', assembly: 'Kodangal', voters: 39500, booths: 44, status: 'WINNING', margin: '+19.8%' },
-  { id: 3, name: 'Kosgi', assembly: 'Kodangal', voters: 45800, booths: 52, status: 'WINNING', margin: '+22.4%' },
-  { id: 4, name: 'Maddur', assembly: 'Kodangal', voters: 41200, booths: 46, status: 'WINNING', margin: '+18.9%' },
-  { id: 5, name: 'Doulathabad', assembly: 'Kodangal', voters: 36200, booths: 40, status: 'WINNING', margin: '+16.5%' },
-  { id: 6, name: 'Narayanpet Town', assembly: 'Narayanpet', voters: 48200, booths: 54, status: 'WINNING', margin: '+15.2%' },
-  { id: 7, name: 'Damaragidda', assembly: 'Narayanpet', voters: 38400, booths: 42, status: 'WINNING', margin: '+12.8%' },
-  { id: 8, name: 'Dhanwada', assembly: 'Narayanpet', voters: 37900, booths: 41, status: 'WINNING', margin: '+14.1%' },
-  { id: 9, name: 'Mahabubnagar Urban', assembly: 'Mahabubnagar', voters: 88400, booths: 92, status: 'WINNING', margin: '+13.5%' },
-  { id: 10, name: 'Mahabubnagar Rural', assembly: 'Mahabubnagar', voters: 54200, booths: 58, status: 'WINNING', margin: '+12.4%' },
-  { id: 11, name: 'Jadcherla Town', assembly: 'Jadcherla', voters: 52100, booths: 56, status: 'WINNING', margin: '+18.1%' },
-  { id: 12, name: 'Devarakadra', assembly: 'Devarakadra', voters: 43900, booths: 48, status: 'WINNING', margin: '+11.2%' },
-  { id: 13, name: 'Makthal Town', assembly: 'Makthal', voters: 46200, booths: 50, status: 'WINNING', margin: '+9.1%' },
-  { id: 14, name: 'Shadnagar Town', assembly: 'Shadnagar', voters: 64100, booths: 68, status: 'WINNING', margin: '+13.2%' }
-];
+const ZONE_TAB_TO_PATH: Record<ZoneTabType, string> = {
+  dashboard: '/zone',
+  parliament_list: '/zone/parliament_list',
+  constituency_list: '/zone/constituency_list',
+  highcommand_tasks: '/zone/highcommand_tasks',
+  cadre_network: '/zone/cadre_network',
+  fake_votes: '/zone/fake_votes',
+  strategic_intelligence: '/zone/strategic_intelligence',
+  training_analytics: '/zone/training_analytics',
+};
 
-// High Command Tasks
-const HIGH_COMMAND_TASKS_DATA = [
-  { id: 1, title: 'Verify Voter List Anomalies', desc: 'Check for duplicate entries in Booth 112A. 5 entries flagged as potentially fake.', priority: 'High', due: 'Today, 5:00 PM', status: 'Pending' },
-  { id: 2, title: 'Distribute "Haath Se Haath" Pamphlets', desc: 'Complete door-to-door distribution in Street No. 4 and 5.', priority: 'Medium', due: 'Tomorrow', status: 'In Progress' },
-  { id: 3, title: 'Organize Street Corner Meeting', desc: 'Arrange logistics (mic, chairs) for MLA candidate visit on Saturday.', priority: 'High', due: 'in 2 days', status: 'Pending' },
-  { id: 4, title: 'Update Voter Phone Numbers', desc: 'Collect missing mobile numbers for 50 households.', priority: 'Low', due: 'Next Week', status: 'Pending' }
-];
+const ZONE_PATH_TO_TAB: Record<string, ZoneTabType> = {
+  '': 'dashboard',
+  dashboard: 'dashboard',
+  parliament_list: 'parliament_list',
+  parliaments: 'parliament_list',
+  constituency_list: 'constituency_list',
+  assemblies: 'constituency_list',
+  highcommand_tasks: 'highcommand_tasks',
+  tasks: 'highcommand_tasks',
+  cadre_network: 'cadre_network',
+  cadre: 'cadre_network',
+  fake_votes: 'fake_votes',
+  'fake-votes': 'fake_votes',
+  strategic_intelligence: 'strategic_intelligence',
+  'ai-intel': 'strategic_intelligence',
+  training_analytics: 'training_analytics',
+};
 
-// Fake Votes
-const FAKE_VOTES_LIST = [
-  { id: 1, name: 'G. Venkateshwarlu', epic: 'TS91823101', booth: 'Booth 45 (ZPHS)', ac: 'Kodangal', reason: 'Deceased Record', status: 'FLAGGED' },
-  { id: 2, name: 'M. Padmamma', epic: 'TS72635102', booth: 'Booth 12', ac: 'Narayanpet', reason: 'Shifted Residence', status: 'UNDER VERIFICATION' },
-  { id: 3, name: 'K. Ramesh Goud', epic: 'TS18294103', booth: 'Booth 108A', ac: 'Mahabubnagar', reason: 'Duplicate Entry across AC', status: 'VERIFIED ISSUE' },
-  { id: 4, name: 'Ch. Anjamma', epic: 'TS82910104', booth: 'Booth 74', ac: 'Jadcherla', reason: 'Underage at Registration', status: 'FLAGGED' },
-  { id: 5, name: 'B. Sreenivasulu', epic: 'TS49102105', booth: 'Booth 82', ac: 'Shadnagar', reason: 'Photo Mismatch / Blank', status: 'RESOLVED' }
-];
+const PARLIAMENT_TAB_TO_PATH: Record<ParliamentTabType, string> = {
+  dashboard: '/parliament',
+  constituency_list: '/parliament/constituency_list',
+  mandal_list: '/parliament/mandal_list',
+  highcommand_tasks: '/parliament/highcommand_tasks',
+  cadre_network: '/parliament/cadre_network',
+  fake_votes: '/parliament/fake_votes',
+  strategic_intelligence: '/parliament/strategic_intelligence',
+  training_analytics: '/parliament/training_analytics',
+};
+
+const PARLIAMENT_PATH_TO_TAB: Record<string, ParliamentTabType> = {
+  '': 'dashboard',
+  dashboard: 'dashboard',
+  constituency_list: 'constituency_list',
+  constituencies: 'constituency_list',
+  mandal_list: 'mandal_list',
+  mandals: 'mandal_list',
+  highcommand_tasks: 'highcommand_tasks',
+  tasks: 'highcommand_tasks',
+  cadre_network: 'cadre_network',
+  cadre: 'cadre_network',
+  fake_votes: 'fake_votes',
+  'fake-votes': 'fake_votes',
+  strategic_intelligence: 'strategic_intelligence',
+  'ai-intel': 'strategic_intelligence',
+  training_analytics: 'training_analytics',
+};
 
 export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParliamentDashboardProps) {
   const { config } = useCms();
+  const location = useLocation();
+  const navigate = useNavigate();
   const isZone = session.role === 'ZONE_INCHARGE';
+  const baseRoute = isZone ? '/zone' : '/parliament';
 
-  const [zoneTab, setZoneTab] = useState<ZoneTabType>('dashboard');
-  const [parliamentTab, setParliamentTab] = useState<ParliamentTabType>('dashboard');
+  const subPath = location.pathname.replace(new RegExp(`^${baseRoute}\\/?`), '').split('/')[0] || '';
+  const isKnownSubPath = isZone
+    ? (subPath === '' || subPath in ZONE_PATH_TO_TAB)
+    : (subPath === '' || subPath in PARLIAMENT_PATH_TO_TAB);
+
+  const zoneTab: ZoneTabType = isZone
+    ? (isKnownSubPath ? (ZONE_PATH_TO_TAB[subPath] || 'dashboard') : 'dashboard')
+    : 'dashboard';
+
+  const parliamentTab: ParliamentTabType = !isZone
+    ? (isKnownSubPath ? (PARLIAMENT_PATH_TO_TAB[subPath] || 'dashboard') : 'dashboard')
+    : 'dashboard';
+
+  // Unknown sub-routes safely return to base route
+  useEffect(() => {
+    if (!isKnownSubPath) {
+      navigate(baseRoute, { replace: true });
+    }
+  }, [isKnownSubPath, navigate, baseRoute]);
+
+  const setZoneTab = (tab: ZoneTabType) => {
+    navigate(ZONE_TAB_TO_PATH[tab]);
+  };
+
+  const setParliamentTab = (tab: ParliamentTabType) => {
+    navigate(PARLIAMENT_TAB_TO_PATH[tab]);
+  };
   const [searchFilter, setSearchFilter] = useState('');
   const [viewingMandalsModal, setViewingMandalsModal] = useState<string | null>(null);
 
   const [totalVotersCount, setTotalVotersCount] = useState<number>(0);
   const [fakeVotersCount, setFakeVotersCount] = useState<number>(0);
   const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(true);
+
+  const [trainingAnalytics, setTrainingAnalytics] = useState<TrainingAnalyticsData>({
+    totalVideos: 0,
+    totalCadreMembers: 0,
+    totalAssignedTrainings: 0,
+    totalWatched: 0,
+    totalCompleted: 0,
+    completionRate: 0,
+  });
+  const [trainingVideos, setTrainingVideos] = useState<TrainingVideo[]>([]);
 
   useEffect(() => {
     let isMounted = true;
@@ -162,8 +197,25 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
       }
     }
     loadMetrics();
+
+    fetchTrainingAnalytics()
+      .then((data) => {
+        if (isMounted && data) {
+          setTrainingAnalytics(data);
+        }
+      })
+      .catch((err) => console.warn('[ZoneParliament] Failed to load training analytics:', err));
+
+    fetchTrainingVideos()
+      .then((videos) => {
+        if (isMounted && Array.isArray(videos)) {
+          setTrainingVideos(videos);
+        }
+      })
+      .catch((err) => console.warn('[ZoneParliament] Failed to load training videos:', err));
+
     return () => { isMounted = false; };
-  }, [session.userId]);
+  }, [session.userId, session.organisationId]);
 
   const activeRoleLabel = isZone ? 'ZONE COORDINATOR' : 'PARLIAMENT INCHARGE';
 
@@ -930,38 +982,30 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-medium">
-                    {hasVoters ? (
-                      PARLIAMENT_MANDALS_DATA.map((m) => (
-                        <tr key={m.id} className="hover:bg-slate-50">
-                          <td className="p-3.5 font-mono text-slate-400">{m.id}</td>
-                          <td className="p-3.5 font-extrabold text-slate-900">{m.name}</td>
-                          <td className="p-3.5 text-slate-500">{m.assembly}</td>
-                          <td className="p-3.5 text-right font-mono text-slate-800">{m.voters.toLocaleString()}</td>
-                          <td className="p-3.5 text-center font-mono text-slate-600">{m.booths}</td>
-                          <td className="p-3.5 text-center">
-                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">
-                              {m.status}
-                            </span>
-                          </td>
-                          <td className="p-3.5 text-right font-bold text-slate-900">{m.margin}</td>
-                        </tr>
-                      ))
-                    ) : (
+                    {relevantAssemblies.length > 0 ? (
                       relevantAssemblies.map((a, idx) => (
                         <tr key={a.id} className="hover:bg-slate-50">
                           <td className="p-3.5 font-mono text-slate-400">{idx + 1}</td>
-                          <td className="p-3.5 font-extrabold text-slate-900">{a.name} Mandal</td>
-                          <td className="p-3.5 text-slate-500">{a.name}</td>
-                          <td className="p-3.5 text-right font-mono text-slate-800">0</td>
-                          <td className="p-3.5 text-center font-mono text-slate-600">0</td>
+                          <td className="p-3.5 font-extrabold text-slate-900">{a.name} Segment</td>
+                          <td className="p-3.5 text-slate-500">{a.parliament}</td>
+                          <td className="p-3.5 text-right font-mono text-slate-800">{a.voters.toLocaleString()}</td>
+                          <td className="p-3.5 text-center font-mono text-slate-600">{a.voters > 0 ? Math.max(1, Math.round(a.voters / 800)) : 0}</td>
                           <td className="p-3.5 text-center">
-                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
-                              AWAITING ROLLS
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                              a.voters > 0 ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {a.voters > 0 ? 'ACTIVE INGESTION' : 'AWAITING ROLLS'}
                             </span>
                           </td>
-                          <td className="p-3.5 text-right font-bold text-slate-900">0</td>
+                          <td className="p-3.5 text-right font-bold text-slate-900">{a.voters > 0 ? a.margin : '0'}</td>
                         </tr>
                       ))
+                    ) : (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-slate-500">
+                          No jurisdiction units configured yet for this segment.
+                        </td>
+                      </tr>
                     )}
                   </tbody>
                 </table>
@@ -982,30 +1026,37 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                 </div>
               </div>
 
-              <div className="space-y-3">
-                {HIGH_COMMAND_TASKS_DATA.map((t) => (
-                  <div key={t.id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                          t.priority === 'High' ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-blue-50 text-blue-700 border border-blue-100'
-                        }`}>
-                          {t.priority}
-                        </span>
-                        <span className="text-xs font-mono text-slate-400">Due: {t.due}</span>
+              {HIGH_COMMAND_TASKS_DATA.length > 0 ? (
+                <div className="space-y-3">
+                  {HIGH_COMMAND_TASKS_DATA.map((t) => (
+                    <div key={t.id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                            t.priority === 'High' ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-blue-50 text-blue-700 border border-blue-100'
+                          }`}>
+                            {t.priority}
+                          </span>
+                          <span className="text-xs font-mono text-slate-400">Due: {t.due}</span>
+                        </div>
+                        <h4 className="text-base font-bold text-slate-900 mt-1">{t.title}</h4>
+                        <p className="text-xs text-slate-500 mt-0.5">{t.desc}</p>
                       </div>
-                      <h4 className="text-base font-bold text-slate-900 mt-1">{t.title}</h4>
-                      <p className="text-xs text-slate-500 mt-0.5">{t.desc}</p>
-                    </div>
 
-                    <span className={`px-3 py-1.5 rounded-xl text-xs font-bold ${
-                      t.status === 'In Progress' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-700'
-                    }`}>
-                      {t.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
+                      <span className={`px-3 py-1.5 rounded-xl text-xs font-bold ${
+                        t.status === 'In Progress' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-700'
+                      }`}>
+                        {t.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-white p-8 rounded-xl border border-slate-200 text-center text-slate-500 shadow-xs">
+                  <p className="font-bold text-slate-800">No High Command Tasks Assigned</p>
+                  <p className="text-xs text-slate-400 mt-1">No pending operational tasks assigned by War Room for this jurisdiction.</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -1027,14 +1078,14 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                 </div>
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs text-center">
                   <p className="text-xs font-bold text-slate-500 uppercase">Mandal Presidents</p>
-                  <p className="text-3xl font-black text-slate-900 mt-1">{hasVoters ? (isZone ? '114 / 114' : '45 / 45') : '0 / 0'}</p>
+                  <p className="text-3xl font-black text-slate-900 mt-1">{hasVoters ? `${relevantAssemblies.length} / ${relevantAssemblies.length}` : '0 / 0'}</p>
                   <p className={`text-xs font-bold mt-1 ${hasVoters ? 'text-green-600' : 'text-slate-400'}`}>
                     {hasVoters ? '100% Deployed' : 'Awaiting Ingestion'}
                   </p>
                 </div>
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs text-center">
                   <p className="text-xs font-bold text-slate-500 uppercase">Booth Committees</p>
-                  <p className="text-3xl font-black text-slate-900 mt-1">{hasVoters ? (isZone ? '5,820' : '1,920') : '0'}</p>
+                  <p className="text-3xl font-black text-slate-900 mt-1">{hasVoters ? (totalVotersCount > 0 ? Math.round(totalVotersCount / 850) : 0) : '0'}</p>
                   <p className={`text-xs font-bold mt-1 ${hasVoters ? 'text-green-600' : 'text-slate-400'}`}>
                     {hasVoters ? 'Operational' : 'Awaiting Ingestion'}
                   </p>
@@ -1051,7 +1102,7 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                 <p className="text-slate-500 text-sm">Flagged fraudulent &amp; duplicate voter audit records</p>
               </div>
 
-              {fakeVotersCount === 0 ? (
+              {fakeVotersCount === 0 || FAKE_VOTES_LIST.length === 0 ? (
                 <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 shadow-xs space-y-1">
                   <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
                   <p className="font-bold text-slate-800">0 Flagged Voter Records</p>
@@ -1108,7 +1159,7 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                   <p className="text-slate-500 text-sm">Track learning progress of your ground force (Village &amp; Booth Incharges).</p>
                 </div>
                 <div className="bg-white px-4 py-2 rounded-lg border border-slate-200 text-xs font-bold text-slate-700 shadow-xs">
-                  Completion Rate: <span className="text-green-600 font-extrabold">78.4%</span>
+                  Completion Rate: <span className="text-green-600 font-extrabold">{trainingAnalytics.completionRate.toFixed(1)}%</span>
                 </div>
               </div>
 
@@ -1116,33 +1167,47 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
                 <div>
                   <div className="flex justify-between text-sm font-bold mb-1">
                     <span className="text-slate-700">Overall Modules Completion</span>
-                    <span className="text-green-600">210 / 350 Fully Trained</span>
+                    <span className="text-green-600">
+                      {trainingAnalytics.totalCompleted} / {trainingAnalytics.totalCadreMembers > 0 ? trainingAnalytics.totalCadreMembers : (hasVoters ? relevantAssemblies.length : 0)} Fully Trained
+                    </span>
                   </div>
                   <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                    <div className="h-full bg-green-500 rounded-full" style={{ width: '78.4%' }} />
+                    <div
+                      className="h-full bg-green-500 rounded-full transition-all duration-500"
+                      style={{ width: `${Math.min(100, trainingAnalytics.completionRate)}%` }}
+                    />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-                  {[
-                    { id: 1, title: 'Door-to-Door Campaigns', completed: 290, total: 350, color: 'bg-green-500' },
-                    { id: 2, title: 'Voter Sentiment Analysis', completed: 245, total: 350, color: 'bg-blue-500' },
-                    { id: 3, title: 'App Usage Guidelines', completed: 310, total: 350, color: 'bg-purple-500' },
-                    { id: 4, title: 'Booth Mgmt Protocols', completed: 180, total: 350, color: 'bg-orange-500' },
-                    { id: 5, title: 'Party Ideology', completed: 150, total: 350, color: 'bg-yellow-500' },
-                    { id: 6, title: 'Social Media Guidelines', completed: 200, total: 350, color: 'bg-pink-500' }
-                  ].map((m) => (
-                    <div key={m.id} className="p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
-                      <div className="flex justify-between text-xs font-bold">
-                        <span className="text-slate-800">{m.title}</span>
-                        <span className="text-slate-600">{Math.round((m.completed / m.total) * 100)}%</span>
-                      </div>
-                      <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                        <div className={`h-full ${m.color} rounded-full`} style={{ width: `${(m.completed / m.total) * 100}%` }} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                {trainingVideos.length === 0 ? (
+                  <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-8 text-center text-slate-500 space-y-2">
+                    <GraduationCap className="w-8 h-8 text-slate-400 mx-auto mb-1" />
+                    <p className="font-bold text-slate-800 text-sm">0 Training Modules Published</p>
+                    <p className="text-xs text-slate-400 max-w-md mx-auto">
+                      Educational modules published in War Room will appear here with live completion rates as ground cadre complete coursework.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                    {trainingVideos.map((m, idx) => {
+                      const colors = ['bg-green-500', 'bg-blue-500', 'bg-purple-500', 'bg-orange-500', 'bg-yellow-500', 'bg-pink-500'];
+                      const color = colors[idx % colors.length];
+                      const totalCadres = trainingAnalytics.totalCadreMembers || 1;
+                      const pct = Math.min(100, Math.round((trainingAnalytics.totalCompleted / totalCadres) * 100));
+                      return (
+                        <div key={m.id} className="p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
+                          <div className="flex justify-between text-xs font-bold">
+                            <span className="text-slate-800 truncate" title={m.title}>{m.title}</span>
+                            <span className="text-slate-600 shrink-0 ml-2">{pct}%</span>
+                          </div>
+                          <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                            <div className={`h-full ${color} rounded-full`} style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           )}

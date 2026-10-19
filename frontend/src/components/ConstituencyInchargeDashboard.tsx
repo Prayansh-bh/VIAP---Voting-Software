@@ -106,6 +106,45 @@ type ConstTabType =
   | 'live_voter_tracking'
   | 'migrated_voters';
 
+import { useLocation, useNavigate } from 'react-router-dom';
+
+const CONST_TAB_TO_PATH: Record<ConstTabType, string> = {
+  dashboard: '/constituency',
+  mandal_list: '/constituency/mandal_list',
+  village_list: '/constituency/village_list',
+  tasks: '/constituency/tasks',
+  caste_analytics: '/constituency/caste_analytics',
+  cadre_network: '/constituency/cadre_network',
+  fake_votes: '/constituency/fake_votes',
+  strategic_intelligence: '/constituency/strategic_intelligence',
+  training_analytics: '/constituency/training_analytics',
+  live_voter_tracking: '/constituency/live_voter_tracking',
+  migrated_voters: '/constituency/migrated_voters',
+};
+
+const CONST_PATH_TO_TAB: Record<string, ConstTabType> = {
+  '': 'dashboard',
+  dashboard: 'dashboard',
+  mandal_list: 'mandal_list',
+  mandals: 'mandal_list',
+  village_list: 'village_list',
+  villages: 'village_list',
+  tasks: 'tasks',
+  caste_analytics: 'caste_analytics',
+  caste: 'caste_analytics',
+  cadre_network: 'cadre_network',
+  cadre: 'cadre_network',
+  fake_votes: 'fake_votes',
+  'fake-votes': 'fake_votes',
+  strategic_intelligence: 'strategic_intelligence',
+  'ai-intel': 'strategic_intelligence',
+  training_analytics: 'training_analytics',
+  live_voter_tracking: 'live_voter_tracking',
+  'live-track': 'live_voter_tracking',
+  migrated_voters: 'migrated_voters',
+  migrated: 'migrated_voters',
+};
+
 interface FlaggedVoter {
   sNo: number;
   name: string;
@@ -130,7 +169,24 @@ const CONST_PARTY_COLORS: Record<VoterPreference, string> = {
 };
 
 export default function ConstituencyInchargeDashboard({ session, onLogout }: ConstituencyInchargeDashboardProps) {
-  const [activeTab, setActiveTab] = useState<ConstTabType>('dashboard');
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const subPath = location.pathname.replace(/^\/constituency\/?/, '').split('/')[0] || '';
+  const isKnownSubPath = subPath === '' || subPath in CONST_PATH_TO_TAB;
+  const activeTab: ConstTabType = isKnownSubPath ? (CONST_PATH_TO_TAB[subPath] || 'dashboard') : 'dashboard';
+
+  // Unknown sub-routes safely return to base route
+  useEffect(() => {
+    if (!isKnownSubPath) {
+      navigate('/constituency', { replace: true });
+    }
+  }, [isKnownSubPath, navigate]);
+
+  const setActiveTab = (tab: ConstTabType) => {
+    navigate(CONST_TAB_TO_PATH[tab]);
+    setIsSidebarOpen(false);
+  };
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [drilledMandal, setDrilledMandal] = useState<string | null>(null);
   const [selectedMandalInVillageList, setSelectedMandalInVillageList] = useState<string | null>(null);
@@ -1109,77 +1165,98 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
               </div>
 
               {/* Constituency Political Position Chart Card */}
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-                <div>
-                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Kondapi Political Position</h3>
-                  <p className="text-xs text-slate-500">Overall support share of ECI registered parties based on latest ground surveys.</p>
-                </div>
+              {(() => {
+                const totalSurveyed = (constituencyStats.tdp || 0) + (constituencyStats.ysrcp || 0) + (constituencyStats.neutral || 0);
+                const hasData = totalSurveyed > 0;
+                const tdpPct = hasData ? Number(((constituencyStats.tdp / totalSurveyed) * 100).toFixed(1)) : 0;
+                const ysrcpPct = hasData ? Number(((constituencyStats.ysrcp / totalSurveyed) * 100).toFixed(1)) : 0;
+                const neutralPct = hasData ? Number(((constituencyStats.neutral / totalSurveyed) * 100).toFixed(1)) : 0;
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {/* Left Column: Legend List */}
-                  <div className="space-y-3">
-                    {[
-                      { party: 'TDP', votes: constituencyStats.tdp, pct: 50.39, color: 'bg-yellow-400 border-yellow-500' },
-                      { party: 'YSRCP', votes: constituencyStats.ysrcp, pct: 43.24, color: 'bg-blue-600 border-blue-700' },
-                      { party: 'Neutral', votes: constituencyStats.neutral, pct: 6.37, color: 'bg-slate-400 border-slate-500' },
-                      { party: 'JSP', votes: 0, pct: 0, color: 'bg-red-600' },
-                      { party: 'BJP', votes: 0, pct: 0, color: 'bg-orange-500' },
-                      { party: 'CONGRESS', votes: 0, pct: 0, color: 'bg-sky-400' }
-                    ].map((item) => (
-                      <div key={item.party} className="flex items-center justify-between border-b border-slate-100 pb-1.5 last:border-b-0">
-                        <div className="flex items-center gap-2">
-                          <span className={`w-3 h-3 rounded-full ${item.color} shrink-0`} />
-                          <span className="text-xs font-black text-slate-900">{item.party}</span>
+                return (
+                  <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">{backendSummary?.user?.unitName || 'Constituency'} Political Position</h3>
+                      <p className="text-xs text-slate-500">Overall support share of registered parties derived directly from database voter records.</p>
+                    </div>
+
+                    {!hasData ? (
+                      <div className="p-8 text-center bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                        <p className="font-bold text-slate-800">No Voter Survey Records Ingested</p>
+                        <p className="text-xs text-slate-500">Upload official voter rolls or submit ground surveys to display live party preference distributions.</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* Left Column: Legend List */}
+                        <div className="space-y-3">
+                          {[
+                            { party: 'TDP', votes: constituencyStats.tdp, pct: tdpPct, color: 'bg-yellow-400 border-yellow-500' },
+                            { party: 'YSRCP', votes: constituencyStats.ysrcp, pct: ysrcpPct, color: 'bg-blue-600 border-blue-700' },
+                            { party: 'Neutral', votes: constituencyStats.neutral, pct: neutralPct, color: 'bg-slate-400 border-slate-500' },
+                          ].map((item) => (
+                            <div key={item.party} className="flex items-center justify-between border-b border-slate-100 pb-1.5 last:border-b-0">
+                              <div className="flex items-center gap-2">
+                                <span className={`w-3 h-3 rounded-full ${item.color} shrink-0`} />
+                                <span className="text-xs font-black text-slate-900">{item.party}</span>
+                              </div>
+                              <div className="text-right text-xs">
+                                <span className="font-extrabold text-slate-900">{item.pct}%</span>
+                                <span className="text-[10px] text-slate-400 ml-1.5 font-bold">({item.votes.toLocaleString()} votes)</span>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                        <div className="text-right text-xs">
-                          <span className="font-extrabold text-slate-900">{item.pct}%</span>
-                          <span className="text-[10px] text-slate-400 ml-1.5 font-bold">({item.votes.toLocaleString()} votes)</span>
+
+                        {/* Middle Column: Interactive Progress Bars */}
+                        <div className="md:col-span-2 flex flex-col justify-center space-y-4">
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-xs font-extrabold text-slate-900">
+                              <span>TDP Preference Share</span>
+                              <span>{tdpPct}%</span>
+                            </div>
+                            <div className="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-yellow-400" style={{ width: `${tdpPct}%` }} />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-xs font-extrabold text-slate-900">
+                              <span>YSRCP Preference Share</span>
+                              <span>{ysrcpPct}%</span>
+                            </div>
+                            <div className="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-blue-600" style={{ width: `${ysrcpPct}%` }} />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-xs font-extrabold text-slate-900">
+                              <span>Neutral / Deciding Voters</span>
+                              <span>{neutralPct}%</span>
+                            </div>
+                            <div className="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-slate-400" style={{ width: `${neutralPct}%` }} />
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    ))}
+                    )}
                   </div>
-
-                  {/* Middle Column: Interactive Progress Bars */}
-                  <div className="md:col-span-2 flex flex-col justify-center space-y-4">
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs font-extrabold text-slate-900">
-                        <span>TDP Command share</span>
-                        <span>50.39%</span>
-                      </div>
-                      <div className="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-yellow-400" style={{ width: '50.39%' }} />
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs font-extrabold text-slate-900">
-                        <span>YSRCP Support share</span>
-                        <span>43.24%</span>
-                      </div>
-                      <div className="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-600" style={{ width: '43.24%' }} />
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs font-extrabold text-slate-900">
-                        <span>Neutral / Deciding voters</span>
-                        <span>6.37%</span>
-                      </div>
-                      <div className="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-slate-400" style={{ width: '6.37%' }} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* Brief Quick Links Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
                   <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Campaign Operations Summary</h4>
                   <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                    The overall constituency position stands at a steady <span className="text-yellow-600 font-extrabold">TDP Advantage (+17,920 voters)</span>. Out of 6 mandals, TDP maintains decisive leads in 3, close contests in 1, and trailing positions in 2 mandals. Strong operational focus is directed at neutral swing households.
+                    {constituencyStats.voters > 0 ? (
+                      <>
+                        The overall constituency position reflects {constituencyStats.mandals} mapped mandals with {constituencyStats.voters.toLocaleString()} enrolled voters in database.
+                        Strong operational focus is directed at voter survey completion and verified door-to-door coverage.
+                      </>
+                    ) : (
+                      <>Awaiting voter roll ingestion. No voters or campaign surveys recorded in database yet.</>
+                    )}
                   </p>
                   <button 
                     onClick={() => setActiveTab('mandal_list')}
@@ -1192,7 +1269,11 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                 <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
                   <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Command Center Status</h4>
                   <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                    Voter database sync with all 283 polling booth agents is <span className="text-emerald-600 font-extrabold">100% active</span>. Flagged duplication verification reports are undergoing manual audits on the ground. Live updates from Singarayakonda Mandal are fully synced.
+                    {constituencyStats.booths > 0 ? (
+                      <>Voter database synchronization active across all {constituencyStats.booths} polling booths. Flagged verification reports are audited continuously.</>
+                    ) : (
+                      <>No polling booth records configured yet in database.</>
+                    )}
                   </p>
                   <button 
                     onClick={() => setActiveTab('cadre_network')}
@@ -2561,23 +2642,40 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   <div className="space-y-4">
                     <h4 className="text-[11px] font-black text-slate-950 uppercase mb-2">Campaign Operational Modules Progress</h4>
                     
-                    {[
-                      { module: 'Door-to-Door Campaign Training', completion: 94 },
-                      { module: 'Voter Data Collection Guidelines', completion: 91 },
-                      { module: 'Command App Usage Instructions', completion: 88 },
-                      { module: 'Polling Booth Management', completion: 82 },
-                      { module: 'Ground Incident Reporting', completion: 78 }
-                    ].map(mod => (
-                      <div key={mod.module} className="space-y-1">
-                        <div className="flex justify-between">
-                          <span>{mod.module}</span>
-                          <span className="text-slate-900 font-extrabold">{mod.completion}%</span>
-                        </div>
-                        <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-yellow-400" style={{ width: `${mod.completion}%` }} />
-                        </div>
-                      </div>
-                    ))}
+                    {(() => {
+                      const moduleMap = new Map<string, { total: number; completed: number }>();
+                      trainingProgressItems.forEach((item) => {
+                        const title = item.video?.title || 'Operational Module';
+                        const cur = moduleMap.get(title) || { total: 0, completed: 0 };
+                        cur.total += 1;
+                        if (item.status === 'COMPLETED') cur.completed += 1;
+                        moduleMap.set(title, cur);
+                      });
+
+                      if (moduleMap.size === 0) {
+                        return (
+                          <div className="p-5 bg-slate-50 border border-slate-200/80 rounded-xl text-center text-slate-400 text-xs">
+                            <p className="font-bold text-slate-600">0 Course Modules Recorded</p>
+                            <p className="text-[11px] text-slate-400 mt-1">Live progress will appear here as cadre members complete their training videos.</p>
+                          </div>
+                        );
+                      }
+
+                      return Array.from(moduleMap.entries()).map(([module, stats]) => {
+                        const pct = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
+                        return (
+                          <div key={module} className="space-y-1">
+                            <div className="flex justify-between">
+                              <span className="truncate max-w-[200px]" title={module}>{module}</span>
+                              <span className="text-slate-900 font-extrabold">{pct}%</span>
+                            </div>
+                            <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-yellow-400 rounded-full" style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
 
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex flex-col justify-between space-y-3">

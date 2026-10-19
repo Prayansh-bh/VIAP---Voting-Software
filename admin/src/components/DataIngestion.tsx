@@ -36,7 +36,7 @@ export default function DataIngestion({ currentApp }: DataIngestionProps) {
     try {
       const [sum, vList] = await Promise.all([
         fetchApplicationSummary(currentApp.id),
-        fetchVotersList({ limit: 15 }),
+        fetchVotersList({ appId: currentApp.id, limit: 15 }),
       ]);
       setSummary(sum);
       setVoters(vList.items);

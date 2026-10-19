@@ -8,13 +8,13 @@ import { assertUnitAccess, populateHierarchyScope } from '../../middleware/rbac.
 import { AIService } from './ai.service.js';
 
 const aiQuerySchema = z.object({
-  unitId: z.string().uuid(),
-  prompt: z.string().min(3),
+  unitId: z.string().optional(),
+  prompt: z.string().min(1, 'Prompt cannot be empty'),
   language: z.enum(['en', 'te']).default('en'),
 });
 
 const aiReportSchema = z.object({
-  unitId: z.string().uuid(),
+  unitId: z.string().optional(),
   language: z.enum(['en', 'te']).default('en'),
 });
 
@@ -132,12 +132,32 @@ export async function aiRoutes(fastify: FastifyInstance) {
         return reply.status(403).send(errorResponse('AI Strategic Intelligence Center is currently disabled in CMS feature toggles.', 'FEATURE_DISABLED'));
       }
 
-      const { unitId, prompt, language } = req.body;
+      let { unitId, prompt, language } = req.body;
+
+      if (!unitId || unitId.trim() === '') {
+        unitId = req.hierarchyScope?.constituencyId ||
+                 req.hierarchyScope?.parliamentId ||
+                 req.hierarchyScope?.zoneId ||
+                 req.hierarchyScope?.stateId ||
+                 (req.hierarchyScope?.accessibleConstituencyIds ? Array.from(req.hierarchyScope.accessibleConstituencyIds)[0] : undefined);
+      }
+
+      if (!unitId) {
+        const firstC = await prisma.constituency.findFirst({ select: { id: true } });
+        unitId = firstC?.id || '00000000-0000-0000-0000-000000000000';
+      }
+
       if (!assertUnitAccess(req, reply, unitId)) {
         return;
       }
 
-      const result = await AIService.queryStrategy(unitId, prompt, language, req.user?.userId);
+      const result = await AIService.queryStrategy(
+        unitId,
+        prompt,
+        language,
+        req.user?.userId,
+        req.user?.organisationId,
+      );
       return reply.send(successResponse(result));
     },
   );
@@ -152,12 +172,31 @@ export async function aiRoutes(fastify: FastifyInstance) {
         return reply.status(403).send(errorResponse('AI Strategic Intelligence Center is currently disabled in CMS feature toggles.', 'FEATURE_DISABLED'));
       }
 
-      const { unitId, language } = req.body;
+      let { unitId, language } = req.body;
+
+      if (!unitId || unitId.trim() === '') {
+        unitId = req.hierarchyScope?.constituencyId ||
+                 req.hierarchyScope?.parliamentId ||
+                 req.hierarchyScope?.zoneId ||
+                 req.hierarchyScope?.stateId ||
+                 (req.hierarchyScope?.accessibleConstituencyIds ? Array.from(req.hierarchyScope.accessibleConstituencyIds)[0] : undefined);
+      }
+
+      if (!unitId) {
+        const firstC = await prisma.constituency.findFirst({ select: { id: true } });
+        unitId = firstC?.id || '00000000-0000-0000-0000-000000000000';
+      }
+
       if (!assertUnitAccess(req, reply, unitId)) {
         return;
       }
 
-      const report = await AIService.generateReport(unitId, language, req.user?.userId);
+      const report = await AIService.generateReport(
+        unitId,
+        language,
+        req.user?.userId,
+        req.user?.organisationId,
+      );
       return reply.send(successResponse(report));
     },
   );

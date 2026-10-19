@@ -4,6 +4,7 @@ import { prisma } from '../../lib/prisma.js';
 import { env } from '../../config/env.js';
 import { AnalyticsService } from '../analytics/analytics.service.js';
 import { logAudit } from '../../middleware/audit.js';
+import { CredentialsService } from '../credentials/credentials.service.js';
 
 export interface AIProvider {
   name: string;
@@ -11,52 +12,35 @@ export interface AIProvider {
   generateStrategicReport(unitId: string, language?: string): Promise<any>;
 }
 
-export class MockAIProvider implements AIProvider {
-  name = 'mock-provider';
+export class UnconfiguredAIProvider implements AIProvider {
+  name = 'unconfigured';
 
   async generateStrategyBrief(prompt: string, context: any, language: string = 'en'): Promise<string> {
-    const isTelugu = language === 'te';
-    const unitName = context.unit?.name || 'నియోజకవర్గం';
-
-    if (isTelugu) {
-      return `【వ్యూహాత్మక విశ్లేషణ - ${unitName}】
-1. మొత్తం ఓటర్లు: ${context.totalVoters || 0} | పోలైన ఓట్లు: ${context.turnout || 0}%
-2. ఆధిక్యం: TDP (${context.preferences?.TDP || 0}) vs YSRCP (${context.preferences?.YSRCP || 0})
-3. క్షేత్రస్థాయి పరిశీలన: బూత్ లెవెల్ కార్యకర్తలను సమీకరించడం మరియు తటస్థ ఓటర్లను ఆకట్టుకోవడం అత్యంత కీలకం.
-4. తక్షణ కార్యాచరణ: వలస ఓటర్ల రవాణా ఏర్పాట్లను వేగవంతం చేయండి మరియు నకిలీ ఓటర్ల అభ్యంతరాలను నివేదించండి.`;
-    }
-
-    return `Strategic Analysis for ${unitName}:
-• Total registered voters: ${context.totalVoters || 0} | Turnout: ${context.turnout || 0}%
-• Preference Margin: TDP (${context.preferences?.TDP || 0}) vs YSRCP (${context.preferences?.YSRCP || 0})
-• Key Priority: Mobilize booth workers in trailing pockets and coordinate transport for ${context.migratedVoters || 0} migrated voters.
-• Next Steps: Target neutral voters in the 18-35 age demographic with localized campaign messages.`;
+    const isTe = language === 'te';
+    return isTe
+      ? `AI స్ట్రాటజీ ఇంజిన్ ఇంకా యాక్టివేట్ కాలేదు. దయచేసి Platform Administration (CMS Console) > "API Keys & Secrets" విభాగంలో మీ ఉచిత Google Gemini API కీ (GEMINI_API_KEY) ను భద్రపరచండి.`
+      : `AI Strategic Intelligence Engine is not yet configured with an API key. Platform Administrators can easily configure the free Google Gemini API key by navigating to Platform Administration (CMS Console) > API Keys & Secrets and adding 'GEMINI_API_KEY'.`;
   }
 
   async generateStrategicReport(unitId: string, language: string = 'en'): Promise<any> {
     const analytics = await AnalyticsService.computeAnalyticsForUnit(unitId);
-    const isTelugu = language === 'te';
-
     return {
-      reportId: `REP-STRAT-${Date.now()}`,
+      reportId: `REP-UNCONFIGURED-${Date.now()}`,
       unitId,
       unitName: analytics.unit?.name || 'Unit',
       language,
       generatedAt: new Date().toISOString(),
-      executiveSummary: isTelugu
-        ? `${analytics.unit?.name || 'నియోజకవర్గం'} లో ఎన్నికల గెలుపు వ్యూహం: గెలుపు అవకాశాలు పుష్కలంగా ఉన్నాయి.`
-        : `Executive Strategy Report for ${analytics.unit?.name || 'Constituency'}: Strong momentum identified across majority polling booths.`,
+      executiveSummary: `Google Gemini AI API Key is not configured in the database vault. Please save GEMINI_API_KEY under Platform Administration > API Keys & Secrets.`,
       keyStrengths: [
-        isTelugu ? 'పటిష్టమైన 100-ఓటర్ల ఇన్‌చార్జ్ వ్యవస్థ' : 'Strong 100-voter in-charge field network',
-        isTelugu ? 'యువత మరియు మహిళా ఓటర్లలో సానుకూలత' : 'High engagement among youth & women demographics',
+        `Live Registered Voters: ${analytics.summary?.totalVoters?.toLocaleString() || 0}`,
+        `Current Polling Turnout: ${analytics.summary?.turnoutPercentage || 0}%`,
       ],
       vulnerabilities: [
-        isTelugu ? 'కొన్ని గ్రామాల్లో నకిలీ ఓటర్ల ముప్పు' : 'Identified suspected fake voter entries requiring formal objections',
-        isTelugu ? 'వలస ఓటర్ల పోలింగ్ శాతం తక్కువగా ఉండే అవకాశం' : 'Migrated voters turnout gap if transportation is delayed',
+        `AI Intelligence not configured to generate predictive battleground projections.`,
       ],
       actionPlan: [
-        isTelugu ? 'అన్ని బూత్‌లలో పోలింగ్ ఏజెంట్లకు మాక్ పోల్ శిక్షణ పూర్తి చేయండి' : 'Complete mock poll drill for all booth agents',
-        isTelugu ? 'సమీప పోరు ఉన్న గ్రామాల్లో ప్రత్యేక ప్రచార బృందాలను నియోగించండి' : 'Deploy senior leadership squads in close contest villages',
+        `Navigate to Platform Administration > API Keys & Secrets`,
+        `Click "+ Add Key / Secret", select "GEMINI_API_KEY", enter your Google AI Studio key, and click Save.`,
       ],
     };
   }
@@ -74,22 +58,27 @@ export class GeminiAIProvider implements AIProvider {
     try {
       const response = await this.client.models.generateContent({
         model: env.GEMINI_MODEL,
+        config: {
+          maxOutputTokens: 1000,
+          temperature: 0.4,
+          systemInstruction: `You are an elite, proactive political campaign war-room commander and strategist.
+Guidelines:
+- Answer the user's specific strategic query directly, insightfully, and decisively.
+- If the current party is newly provisioned or has 0 registered voters yet, acknowledge the setup phase and provide clear ground setup steps (voter enrollment, booth committee recruitment, incharge deployment across the listed Mandals/Constituencies).
+- NEVER cut off mid-sentence. Keep answers concise, highly readable, and complete (around 150-250 words).
+- Structure clearly using:
+  🎯 Direct Situation: (1-2 clear, insightful sentences addressing the prompt directly)
+  ⚡ Immediate Ground Actions: (3-4 crisp, highly tactical bullet points)
+  📊 Key Numbers to Watch: (2 relevant metrics or targets based on the jurisdiction)
+- Avoid raw asterisks like '***Action:**'. Use clean bullets and bold headers.
+- Language: ${language === 'te' ? 'Telugu (తెలుగు)' : 'English'}.`,
+        },
         contents: [
           {
             role: 'user',
             parts: [
               {
-                text: `You are an expert political election campaign strategist and war-room director.
-Language requested: ${language === 'te' ? 'Telugu (తెలుగు)' : 'English'}.
-Answer the user's strategic question directly using the contextual hierarchy data below.
-
-DATA CONTEXT:
-${JSON.stringify(context, null, 2)}
-
-USER QUESTION:
-${prompt}
-
-Provide structured, highly tactical, actionable ground recommendations.`,
+                text: `Contextual Hierarchy & Ground Metrics:\n${JSON.stringify(context)}\n\nUser Question:\n${prompt}\n\nProvide an executive war-room tactical response:`,
               },
             ],
           },
@@ -97,16 +86,18 @@ Provide structured, highly tactical, actionable ground recommendations.`,
       });
 
       return response.text || 'No response generated from AI.';
-    } catch {
-      return new MockAIProvider().generateStrategyBrief(prompt, context, language);
+    } catch (err: any) {
+      console.error('[GeminiAIProvider] Error generating content:', err);
+      return `Gemini AI Error: ${err.message || 'Failed to generate response'}. Please verify your GEMINI_API_KEY under Platform Administration > API Keys & Secrets.`;
     }
   }
 
   async generateStrategicReport(unitId: string, language: string = 'en'): Promise<any> {
     const analytics = await AnalyticsService.computeAnalyticsForUnit(unitId);
     const prompt = `Generate a full structured JSON political strategy report for ${analytics.unit?.name} (${analytics.unit?.level}).
-Format keys: executiveSummary, keyStrengths (array), vulnerabilities (array), actionPlan (array).
-Language: ${language === 'te' ? 'Telugu' : 'English'}.`;
+Format keys: executiveSummary (string), keyStrengths (string array), vulnerabilities (string array), actionPlan (string array).
+Language: ${language === 'te' ? 'Telugu' : 'English'}.
+Return strictly valid JSON only.`;
 
     try {
       const response = await this.client.models.generateContent({
@@ -134,23 +125,39 @@ Language: ${language === 'te' ? 'Telugu' : 'English'}.`;
         generatedAt: new Date().toISOString(),
         ...parsed,
       };
-    } catch {
-      return new MockAIProvider().generateStrategicReport(unitId, language);
+    } catch (err: any) {
+      console.error('[GeminiAIProvider] Error generating report:', err);
+      return {
+        reportId: `REP-ERR-${Date.now()}`,
+        unitId,
+        unitName: analytics.unit?.name || 'Unit',
+        language,
+        generatedAt: new Date().toISOString(),
+        executiveSummary: `AI Generation error: ${err.message || 'Could not connect to Gemini'}. Ensure your GEMINI_API_KEY is configured and valid.`,
+        keyStrengths: [
+          `Total Registered Voters in Area: ${analytics.summary?.totalVoters?.toLocaleString() || 0}`,
+          `Active Booth Coverage: ${analytics.projections?.winningAreasCount || 0} areas currently leading`,
+        ],
+        vulnerabilities: [
+          `Flagged Suspect/Fake Voters: ${analytics.summary?.fakeVoters || 0}`,
+          `Migrated Voters pending outreach: ${analytics.summary?.migratedVoters || 0}`,
+        ],
+        actionPlan: [
+          `Verify GEMINI_API_KEY in Platform Administration > API Keys & Secrets`,
+          `Deploy booth in-charges across ${analytics.projections?.trailingAreasCount || 0} trailing areas`,
+        ],
+      };
     }
   }
 }
 
 export class AIService {
-  private static provider: AIProvider = env.GEMINI_API_KEY
-    ? new GeminiAIProvider(env.GEMINI_API_KEY)
-    : new MockAIProvider();
-
-  static setProvider(newProvider: AIProvider) {
-    this.provider = newProvider;
-  }
-
-  static getProviderName(): string {
-    return this.provider.name;
+  static async getProviderForTenant(organisationId?: string | null): Promise<AIProvider> {
+    const apiKey = await CredentialsService.getDecryptedSecret(organisationId, 'GEMINI_API_KEY');
+    if (apiKey && apiKey.trim().length > 0) {
+      return new GeminiAIProvider(apiKey.trim());
+    }
+    return new UnconfiguredAIProvider();
   }
 
   static async isAiEnabled(): Promise<boolean> {
@@ -161,7 +168,14 @@ export class AIService {
     return toggles.aiCockpit !== false;
   }
 
-  static async queryStrategy(unitId: string, prompt: string, language: string = 'en', userId?: string) {
+  static async queryStrategy(
+    unitId: string,
+    prompt: string,
+    language: string = 'en',
+    userId?: string,
+    organisationId?: string | null,
+  ) {
+    const provider = await this.getProviderForTenant(organisationId);
     const analytics = await AnalyticsService.computeAnalyticsForUnit(unitId);
 
     const context = {
@@ -173,11 +187,16 @@ export class AIService {
       migratedVoters: analytics.summary.migratedVoters,
       winningAreas: analytics.projections.winningAreasCount,
       trailingAreas: analytics.projections.trailingAreasCount,
+      subUnits: [
+        ...analytics.projections.winningAreas,
+        ...analytics.projections.trailingAreas,
+        ...analytics.projections.closeContestAreas,
+      ].map((a) => ({ name: a.name, level: a.level, voters: a.totalVoters, status: a.status })),
       demographics: analytics.demographics,
       operations: analytics.operations,
     };
 
-    const answer = await this.provider.generateStrategyBrief(prompt, context, language);
+    const answer = await provider.generateStrategyBrief(prompt, context, language);
 
     if (userId) {
       await logAudit({
@@ -185,20 +204,26 @@ export class AIService {
         entityType: 'AIStrategyQuery',
         entityId: unitId,
         userId,
-        changes: { prompt, language, provider: this.provider.name },
+        changes: { prompt, language, provider: provider.name },
       });
     }
 
     return {
-      provider: this.provider.name,
+      provider: provider.name,
       language,
       answer,
       context,
     };
   }
 
-  static async generateReport(unitId: string, language: string = 'en', userId?: string) {
-    const report = await this.provider.generateStrategicReport(unitId, language);
+  static async generateReport(
+    unitId: string,
+    language: string = 'en',
+    userId?: string,
+    organisationId?: string | null,
+  ) {
+    const provider = await this.getProviderForTenant(organisationId);
+    const report = await provider.generateStrategicReport(unitId, language);
 
     if (userId) {
       await logAudit({
@@ -206,7 +231,7 @@ export class AIService {
         entityType: 'AIStrategicReport',
         entityId: unitId,
         userId,
-        changes: { language, provider: this.provider.name },
+        changes: { language, provider: provider.name },
       });
     }
 

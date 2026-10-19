@@ -135,9 +135,9 @@ export async function fetchHierarchySummary(unitId: string): Promise<HierarchySu
     const analytics = await apiFetch<HierarchyAnalyticsResponse>(`/api/analytics/constituency/${unitId}`);
     return {
       user: {
-        userCode: 'MLA-107',
-        name: 'Dr. Bala',
-        role: 'CONSTITUENCY_INCHARGE',
+        userCode: analytics.unit?.code || unitId,
+        name: (analytics.unit as any)?.inchargeName || 'In-Charge',
+        role: (analytics.unit?.level ? `${analytics.unit.level}_INCHARGE` : 'CONSTITUENCY_INCHARGE') as any,
         unitId: analytics.unit?.id || unitId,
         unitName: analytics.unit?.name || 'Constituency',
         unitLevel: analytics.unit?.level || 'CONSTITUENCY',
@@ -163,11 +163,11 @@ export async function fetchHierarchySummary(unitId: string): Promise<HierarchySu
     const state = await fetchStateAnalytics();
     return {
       user: {
-        userCode: 'MLA-107',
+        userCode: unitId,
         name: 'In-Charge',
         role: 'CONSTITUENCY_INCHARGE',
         unitId,
-        unitName: 'Constituency',
+        unitName: state.unit?.name || 'Constituency',
         unitLevel: 'CONSTITUENCY',
       },
       snapshot: {
@@ -201,18 +201,15 @@ export async function fetchChildrenAnalytics(unitId: string): Promise<ChildAnaly
       snapshot: {
         summary: {
           totalVoters: area.totalVoters || 0,
-          voted: Math.round((area.totalVoters || 0) * 0.7),
-          remaining: Math.round((area.totalVoters || 0) * 0.3),
-          fakeVoters: 0,
-          migrated: 0,
-          local: area.totalVoters || 0,
+          voted: area.voted ?? 0,
+          remaining: area.notVoted ?? (area.totalVoters || 0),
+          fakeVoters: area.fakeVoters ?? 0,
+          migrated: area.migrated ?? 0,
+          local: area.local ?? (area.totalVoters || 0),
         },
         hierarchyCounts: {},
         performance: { winningChildren: 0, trailingChildren: 0 },
-        politicalPreference: {
-          TDP: area.tdp || 0,
-          YSRCP: area.ysrcp || 0,
-        },
+        politicalPreference: area.partyPreference || {},
       },
     }));
   } catch {

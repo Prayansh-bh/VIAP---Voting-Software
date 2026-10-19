@@ -294,6 +294,7 @@ export interface TrainingVideo {
   duration: string;
   thumbnailUrl: string;
   youtubeId?: string;
+  videoUrl?: string;
 }
 
 
