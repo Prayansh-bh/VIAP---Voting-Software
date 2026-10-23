@@ -51,12 +51,24 @@ export class BaileysWhatsAppProvider implements SmsProvider {
       this.isSessionOwner = true;
       return true;
     }
+    if (this.isSessionOwner) {
+      return true;
+    }
     try {
       const res = await prisma.$queryRaw<Array<{ acquired: boolean }>>`
         SELECT pg_try_advisory_lock(${88299104}::bigint) AS acquired
       `;
-      this.isSessionOwner = Boolean(res?.[0]?.acquired);
-      return this.isSessionOwner;
+      if (res?.[0]?.acquired) {
+        this.isSessionOwner = true;
+        return true;
+      }
+      if (process.env.WHATSAPP_FORCE_SINGLE_INSTANCE === 'true' || !process.env.IS_MULTI_INSTANCE) {
+        console.warn('[WHATSAPP BAILEYS] Advisory lock busy (pooled connection), proceeding as primary instance.');
+        this.isSessionOwner = true;
+        return true;
+      }
+      this.isSessionOwner = false;
+      return false;
     } catch (err: any) {
       console.warn('[WHATSAPP BAILEYS] Advisory lock notice, assuming single instance:', err?.message);
       this.isSessionOwner = true;
@@ -173,6 +185,7 @@ export class BaileysWhatsAppProvider implements SmsProvider {
 
           if (connection === 'close') {
             this.isConnected = false;
+            this.currentQr = null;
             this.isInitializing = false;
 
             const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
@@ -390,12 +403,20 @@ export class BaileysWhatsAppProvider implements SmsProvider {
       : (cleanNumber.length === 10 ? `91${cleanNumber}` : cleanNumber);
 
     if (typeof (this.sock as any)?.requestPairingCode !== 'function') {
-      throw new Error('Pairing code is not supported in the current socket state.');
+      await this.initialize();
     }
 
-    const code = await (this.sock as any).requestPairingCode(recipientDigits);
-    console.log(`\n🔑 [WHATSAPP PAIRING CODE]: ${code} for phone +${recipientDigits.slice(0, 4)}****${recipientDigits.slice(-2)}\n`);
-    return code;
+    try {
+      const code = await (this.sock as any).requestPairingCode(recipientDigits);
+      console.log(`\n🔑 [WHATSAPP PAIRING CODE]: ${code} for phone +${recipientDigits.slice(0, 4)}****${recipientDigits.slice(-2)}\n`);
+      return code;
+    } catch (err: any) {
+      console.warn('[WHATSAPP BAILEYS] Initial pairing code request failed, cycling socket:', err?.message);
+      this.sock = null;
+      await this.initialize();
+      const code = await (this.sock as any).requestPairingCode(recipientDigits);
+      return code;
+    }
   }
 
   /**
