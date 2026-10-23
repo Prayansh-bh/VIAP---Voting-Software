@@ -43,10 +43,10 @@ export async function verifyOtpApi(
     {
       method: 'POST',
       body: JSON.stringify({
-        requestId,
-        otpCode,
+        requestId: requestId.trim(),
+        otpCode: otpCode.trim(),
         deviceId: resolvedDeviceId,
-        deviceName: deviceName || (typeof navigator !== 'undefined' ? navigator.userAgent : 'Authorized Device'),
+        deviceName: (deviceName || (typeof navigator !== 'undefined' ? navigator.userAgent : 'Authorized Device')).slice(0, 100),
       }),
     }
   );
@@ -111,7 +111,7 @@ export async function loginAsDemoRoleApi(
         mobileNumber,
         name,
         deviceId: resolvedDeviceId,
-        deviceName: deviceName || (typeof navigator !== 'undefined' ? navigator.userAgent : 'Authorized Demo Device'),
+        deviceName: (deviceName || (typeof navigator !== 'undefined' ? navigator.userAgent : 'Authorized Demo Device')).slice(0, 100),
       }),
     }
   );
@@ -251,7 +251,7 @@ export async function verifyRegistrationOtp(
 ): Promise<{ verified: boolean; mobileNumber?: string; message?: string }> {
   return apiFetch('/api/auth/verify-register-otp', {
     method: 'POST',
-    body: JSON.stringify({ requestId, otpCode }),
+    body: JSON.stringify({ requestId: requestId.trim(), otpCode: otpCode.trim() }),
   });
 }
 
@@ -272,7 +272,7 @@ export async function verifyMobileChangeOtpApi(
 ): Promise<{ token: string; refreshToken?: string; user: any; message: string }> {
   const data = await apiFetch<any>('/api/auth/mobile-change/verify', {
     method: 'POST',
-    body: JSON.stringify({ requestId, newMobileNumber, otpCode }),
+    body: JSON.stringify({ requestId: requestId.trim(), newMobileNumber: newMobileNumber.trim(), otpCode: otpCode.trim() }),
   });
 
   if (data?.token) {

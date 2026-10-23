@@ -77,7 +77,8 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
   // Verify OTP and issue access token
   const handleVerifyOtp = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!requestId || otpCode.length < 6) {
+    const cleanOtp = otpCode.trim();
+    if (!requestId || cleanOtp.length < 6) {
       setError('Please enter the complete 6-digit OTP code.');
       return;
     }
@@ -86,7 +87,7 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
     setIsSubmitting(true);
 
     try {
-      const result = await verifyOtp(requestId, otpCode);
+      const result = await verifyOtp(requestId.trim(), cleanOtp);
       onSuccess(result.session, result.token);
     } catch (err: any) {
       setError(err?.message || 'Invalid or expired OTP code. Please check your code and retry.');

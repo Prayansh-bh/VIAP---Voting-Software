@@ -17,14 +17,14 @@ export const registerOtpSchema = z.object({
 
 export const verifyRegisterOtpSchema = z.object({
   requestId: z.string().uuid(),
-  otpCode: z.string().length(6, 'OTP must be 6 digits'),
+  otpCode: z.string().trim().length(6, 'OTP must be 6 digits'),
 });
 
 export const verifyOtpSchema = z.object({
   requestId: z.string().uuid(),
-  otpCode: z.string().length(6, 'OTP must be 6 digits'),
+  otpCode: z.string().trim().length(6, 'OTP must be 6 digits'),
   deviceId: z.string().min(8).optional(),
-  deviceName: z.string().max(120).optional(),
+  deviceName: z.string().max(500).optional(),
 });
 
 export const refreshTokenSchema = z
@@ -48,7 +48,7 @@ export const demoLoginSchema = z.object({
   mobileNumber: z.string().optional(),
   name: z.string().optional(),
   deviceId: z.string().min(8).optional(),
-  deviceName: z.string().max(120).optional(),
+  deviceName: z.string().max(500).optional(),
 });
 
 export type RequestOtpDto = z.infer<typeof requestOtpSchema>;
@@ -91,7 +91,7 @@ export type RequestMobileChangeOtpDto = z.infer<typeof requestMobileChangeOtpSch
 export const verifyMobileChangeOtpSchema = z.object({
   requestId: z.string().uuid('Valid OTP requestId is required'),
   newMobileNumber: z.string().min(10, 'Mobile number must be at least 10 digits').max(15),
-  otpCode: z.string().length(6, 'OTP must be 6 digits'),
+  otpCode: z.string().trim().length(6, 'OTP must be 6 digits'),
 }).strict();
 export type VerifyMobileChangeOtpDto = z.infer<typeof verifyMobileChangeOtpSchema>;
 
@@ -101,7 +101,7 @@ export const adminLoginSchema = z
     passcode: z.string().min(1).optional(),
     password: z.string().min(1).optional(),
     deviceId: z.string().optional(),
-    deviceName: z.string().optional(),
+    deviceName: z.string().max(500).optional(),
   })
   .refine((data) => Boolean(data.passcode || data.password), {
     message: 'Either passcode or password is required for admin login',

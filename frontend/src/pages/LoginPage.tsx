@@ -88,7 +88,8 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
   // Verify OTP handler
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!requestId || otpCode.length < 6) {
+    const cleanOtp = otpCode.trim();
+    if (!requestId || cleanOtp.length < 6) {
       setError('Please enter the complete 6-digit verification code.');
       return;
     }
@@ -97,7 +98,7 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
     setIsSubmitting(true);
 
     try {
-      const result = await verifyOtp(requestId, otpCode);
+      const result = await verifyOtp(requestId.trim(), cleanOtp);
       onLoginSuccess(result.session, result.token);
     } catch (err: any) {
       setError(err?.message || 'Invalid or expired OTP code. Please verify your code and retry.');
