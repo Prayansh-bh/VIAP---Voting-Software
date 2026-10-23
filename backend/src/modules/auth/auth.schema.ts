@@ -95,4 +95,18 @@ export const verifyMobileChangeOtpSchema = z.object({
 }).strict();
 export type VerifyMobileChangeOtpDto = z.infer<typeof verifyMobileChangeOtpSchema>;
 
+export const adminLoginSchema = z
+  .object({
+    mobileNumber: z.string().min(3, 'Admin identifier or mobile number must be at least 3 characters').max(150),
+    passcode: z.string().min(1).optional(),
+    password: z.string().min(1).optional(),
+    deviceId: z.string().optional(),
+    deviceName: z.string().optional(),
+  })
+  .refine((data) => Boolean(data.passcode || data.password), {
+    message: 'Either passcode or password is required for admin login',
+    path: ['passcode'],
+  });
+export type AdminLoginDto = z.infer<typeof adminLoginSchema>;
+
 

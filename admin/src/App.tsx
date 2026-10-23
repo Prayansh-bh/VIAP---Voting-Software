@@ -48,7 +48,7 @@ import {
 } from './lib/auth';
 import { useNotification } from './context/NotificationContext';
 import { useCms } from './context/CmsContext';
-import { Shield, Radio, Server, ExternalLink, AlertTriangle, ArrowLeft, Plus, Layers, Palette, Sparkles } from 'lucide-react';
+import { Shield, Radio, Server, ExternalLink, AlertTriangle, ArrowLeft, Plus, Layers, Palette, Sparkles, Menu } from 'lucide-react';
 
 // 404 Route View
 function AdminNotFound() {
@@ -247,6 +247,7 @@ export default function App() {
   const navigate = useNavigate();
 
   const [adminUser, setAdminUser] = useState<AdminUser | null>(() => getAdminSession());
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
   // Multi-party state
   const [apps, setApps] = useState<AppInstance[]>([]);
@@ -423,10 +424,15 @@ export default function App() {
       {/* Platform Sidebar */}
       <AdminSidebar
         activeTab={currentTab}
-        onSelectTab={(tab) => navigate(`/admin/${tab}`)}
+        onSelectTab={(tab) => {
+          navigate(`/admin/${tab}`);
+          setIsMobileNavOpen(false);
+        }}
         adminUser={adminUser}
         onLogout={handleLogout}
         pendingApprovalsCount={approvals.filter((a) => a.status === 'PENDING').length}
+        isOpen={isMobileNavOpen}
+        onClose={() => setIsMobileNavOpen(false)}
       />
 
       {/* Main Administrative Viewport */}
@@ -434,6 +440,14 @@ export default function App() {
         {/* Top Operational Header */}
         <header className="sticky top-0 z-20 bg-slate-900/80 backdrop-blur-md border-b border-slate-800/80 px-6 py-3.5 flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsMobileNavOpen((prev) => !prev)}
+              className="md:hidden p-2 rounded-xl bg-slate-800 text-slate-200 hover:text-white hover:bg-slate-700 transition cursor-pointer border border-slate-700/60"
+              aria-label="Toggle navigation drawer"
+              title="Open Navigation"
+            >
+              <Menu className="w-4 h-4" />
+            </button>
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="text-xs font-bold text-slate-200 tracking-wide uppercase">

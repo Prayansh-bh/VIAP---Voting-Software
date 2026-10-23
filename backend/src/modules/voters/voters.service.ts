@@ -121,7 +121,15 @@ export class VotersService {
         err.code = 'FORBIDDEN_TENANT';
         throw err;
       }
-      where.state = { organisationId: scope.organisationId };
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        {
+          OR: [
+            { state: { organisationId: scope.organisationId } },
+            { constituency: { parliament: { zone: { state: { organisationId: scope.organisationId } } } } },
+          ],
+        },
+      ];
 
       if (scope.role === 'VOTER_100_INCHARGE') {
         const groupIds = Array.from(scope.accessibleVoterGroupIds);
@@ -167,10 +175,68 @@ export class VotersService {
       }
     } else {
       if (targetOrgId) {
-        where.state = { organisationId: targetOrgId };
+        where.AND = [
+          ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+          {
+            OR: [
+              { state: { organisationId: targetOrgId } },
+              { constituency: { parliament: { zone: { state: { organisationId: targetOrgId } } } } },
+            ],
+          },
+        ];
       }
-      if (unitId) {
-        where.unitId = unitId;
+    }
+
+    if (unitId && !boothId && !villageId && !mandalId && !constituencyId && !voterGroupId) {
+      if (scope && !scope.isGlobalScope) {
+        // Confirm unitId is accessible within user hierarchy scope to prevent horizontal or cross-tenant leakage
+        const isAccessible =
+          scope.accessibleUnitIds.has(unitId) ||
+          scope.accessibleBoothIds.has(unitId) ||
+          scope.accessibleVillageIds.has(unitId) ||
+          scope.accessibleMandalIds.has(unitId) ||
+          scope.accessibleConstituencyIds.has(unitId) ||
+          scope.accessibleParliamentIds.has(unitId) ||
+          scope.accessibleZoneIds.has(unitId) ||
+          scope.accessibleStateIds.has(unitId) ||
+          scope.accessibleVoterGroupIds.has(unitId) ||
+          scope.boothId === unitId ||
+          scope.villageId === unitId ||
+          scope.mandalId === unitId ||
+          scope.constituencyId === unitId;
+
+        if (!isAccessible) {
+          where.unitId = '00000000-0000-0000-0000-000000000000';
+        } else {
+          where.AND = [
+            ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+            {
+              OR: [
+                { unitId },
+                { boothId: unitId },
+                { villageId: unitId },
+                { mandalId: unitId },
+                { constituencyId: unitId },
+                { voterGroupId: unitId },
+              ],
+            },
+          ];
+        }
+      } else {
+        const unitCondition: Prisma.VoterWhereInput = {
+          OR: [
+            { unitId },
+            { boothId: unitId },
+            { villageId: unitId },
+            { mandalId: unitId },
+            { constituencyId: unitId },
+            { voterGroupId: unitId },
+          ],
+        };
+        where.AND = [
+          ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+          unitCondition,
+        ];
       }
     }
 
@@ -210,10 +276,12 @@ export class VotersService {
           village: true,
           booth: true,
           voterGroup: true,
-          assignedIncharge: true,
+          assignedIncharge: {
+            select: { id: true, name: true, mobileNumber: true, role: true },
+          },
           fakeVoterFlags: { where: { status: FakeVoterStatus.FLAGGED } },
         },
-        orderBy: { [sortBy]: sortOrder },
+        orderBy: [{ [sortBy]: sortOrder }, { id: 'asc' }],
       }),
     ]);
 

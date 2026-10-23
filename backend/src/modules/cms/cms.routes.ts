@@ -99,6 +99,107 @@ const announcementSchema = z.object({
   expiresAt: z.string().datetime().optional(),
 });
 
+const cmsConfigUpdateSchema = z.object({
+  id: z.string().optional(),
+  applicationId: z.string().optional(),
+  organisationId: z.string().optional(),
+  configKey: z.string().optional(),
+  organisationName: z.string().optional(),
+  appName: z.string().optional(),
+  headerTitle: z.string().optional(),
+  slogan: z.string().optional(),
+  logoUrl: z.string().optional(),
+  faviconUrl: z.string().optional(),
+  stateName: z.string().optional(),
+  defaultLanguage: z.string().optional(),
+  primaryColor: z.string().optional(),
+  secondaryColor: z.string().optional(),
+  accentColor: z.string().optional(),
+  activePartyCode: z.string().optional(),
+  appScope: z.string().optional(),
+  parliamentName: z.string().optional(),
+  parliamentCode: z.string().optional(),
+  candidateName: z.string().optional(),
+  hierarchyLabels: z.record(z.string(), z.string()).optional(),
+  featureToggles: z.record(z.string(), z.boolean()).optional(),
+  activeHierarchyLevels: z.array(z.string()).optional(),
+  dashboardConfig: z.record(z.string(), z.any()).optional(),
+  analyticsConfig: z.record(z.string(), z.any()).optional(),
+  aiEnabled: z.boolean().optional(),
+});
+
+const uploadAssetSchema = z
+  .object({
+    data: z.string().optional(),
+    base64Data: z.string().optional(),
+    fileData: z.string().optional(),
+    filename: z.string().optional(),
+    mimeType: z.string().optional(),
+  })
+  .refine((data) => Boolean(data.data || data.base64Data || data.fileData), {
+    message: 'Base64 image data is required in data, base64Data, or fileData field.',
+    path: ['data'],
+  });
+
+const assignInchargeSchema = z.object({
+  unitLevel: z.enum(['STATE', 'ZONE', 'PARLIAMENT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP']),
+  unitId: z.string().min(1, 'unitId is required'),
+  role: z.nativeEnum(RoleType),
+  userName: z.string().min(2, 'userName must be at least 2 characters'),
+  mobileNumber: z.string().min(10, 'mobileNumber must be at least 10 digits'),
+  email: z.string().email().optional(),
+});
+
+const inchargesBulkImportSchema = z.object({
+  applicationId: z.string().optional(),
+  constituencyId: z.string().optional(),
+  level: z.enum(['STATE', 'ZONE', 'PARLIAMENT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP']).default('CONSTITUENCY'),
+  rows: z.array(z.record(z.string(), z.any())).min(1, 'No incharge records provided for import.'),
+  validateOnly: z.boolean().optional(),
+});
+
+const deactivateInchargeSchema = z.object({
+  userId: z.string().min(1, 'userId is required'),
+  reason: z.string().optional(),
+});
+
+const transferInchargeSchema = z.object({
+  userId: z.string().min(1, 'userId is required'),
+  fromUnitLevel: z.string().optional(),
+  fromUnitId: z.string().optional(),
+  toUnitLevel: z.enum(['STATE', 'ZONE', 'PARLIAMENT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP']),
+  toUnitId: z.string().min(1, 'toUnitId is required'),
+  reason: z.string().optional(),
+});
+
+const replaceInchargeSchema = z.object({
+  currentUserId: z.string().optional(),
+  unitLevel: z.enum(['STATE', 'ZONE', 'PARLIAMENT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP']),
+  unitId: z.string().min(1, 'unitId is required'),
+  newUserName: z.string().min(2, 'newUserName is required'),
+  newMobileNumber: z.string().min(10, 'newMobileNumber must be at least 10 digits'),
+  newUserId: z.string().optional(),
+  reason: z.string().optional(),
+});
+
+const createVersionSchema = z.object({
+  versionName: z.string().min(1, 'versionName is required'),
+  changeSummary: z.string().min(1, 'changeSummary is required'),
+});
+
+const createGeographyUnitSchema = z.object({
+  level: z.enum(['STATE', 'ZONE', 'PARLIAMENT', 'CONSTITUENCY', 'MANDAL']),
+  name: z.string().min(1, 'Entity name is required'),
+  code: z.string().optional(),
+  parentId: z.string().optional(),
+  totalVoters: z.number().optional(),
+});
+
+const validateExcelMappingSchema = z.object({
+  columnMapping: z.record(z.string(), z.string()),
+  sampleRows: z.array(z.record(z.string(), z.any())).default([]),
+});
+
 export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // PUBLIC / APP CONFIG ENDPOINT (Consumed dynamically by Frontend)
@@ -137,6 +238,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     '/config',
     {
       preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN, RoleType.CONSTITUENCY_INCHARGE)],
+      preValidation: [validateBody(cmsConfigUpdateSchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = (req.body || {}) as Record<string, any>;
@@ -238,6 +340,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     '/upload-asset',
     {
       preHandler: [optionalAuthenticate],
+      preValidation: [validateBody(uploadAssetSchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = (req.body || {}) as { data?: string; base64Data?: string; fileData?: string; filename?: string; mimeType?: string };
@@ -1621,6 +1724,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     '/assign-incharge',
     {
       preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN, RoleType.CONSTITUENCY_INCHARGE)],
+      preValidation: [validateBody(assignInchargeSchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as {
@@ -1777,6 +1881,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     '/incharges/bulk-import',
     {
       preHandler: [authenticate, populateHierarchyScope, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN, RoleType.CONSTITUENCY_INCHARGE)],
+      preValidation: [validateBody(inchargesBulkImportSchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as {
@@ -2283,6 +2388,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     '/incharges/deactivate',
     {
       preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN, RoleType.CONSTITUENCY_INCHARGE)],
+      preValidation: [validateBody(deactivateInchargeSchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as { userId: string; reason?: string };
@@ -2353,6 +2459,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     '/incharges/transfer',
     {
       preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN, RoleType.CONSTITUENCY_INCHARGE)],
+      preValidation: [validateBody(transferInchargeSchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as {
@@ -2440,6 +2547,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     '/incharges/replace',
     {
       preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN, RoleType.CONSTITUENCY_INCHARGE)],
+      preValidation: [validateBody(replaceInchargeSchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as {
@@ -2723,6 +2831,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     '/versions',
     {
       preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND)],
+      preValidation: [validateBody(createVersionSchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const body = req.body as { versionName: string; changeSummary: string };
@@ -2876,6 +2985,7 @@ export async function cmsRoutes(fastify: FastifyInstance) {
     '/geography/unit',
     {
       preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.HIGH_COMMAND, RoleType.STATE_ADMIN)],
+      preValidation: [validateBody(createGeographyUnitSchema)],
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const isSuperAdmin = req.user?.role === RoleType.SUPER_ADMIN;
@@ -3024,7 +3134,12 @@ export async function cmsRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   // 16. EXCEL COLUMN MAPPING VALIDATOR
   // --------------------------------------------------------------------------
-  fastify.post('/validate-excel-mapping', async (req: FastifyRequest, reply: FastifyReply) => {
+  fastify.post(
+    '/validate-excel-mapping',
+    {
+      preValidation: [validateBody(validateExcelMappingSchema)],
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
     const body = req.body as {
       columnMapping: Record<string, string>;
       sampleRows: any[];

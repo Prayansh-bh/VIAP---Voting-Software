@@ -49,5 +49,33 @@ describe('Baileys WhatsApp Provider Suite', () => {
     await provider.disconnect();
     assert.equal(provider.getStatus().isConnected, false);
   });
+
+  it('6. Exposes accurate connection state with session ownership and reconnect attempts', async () => {
+    const provider = new BaileysWhatsAppProvider({ autoConnect: false });
+    const status = provider.getStatus();
+    assert.equal(typeof status.isOwner, 'boolean');
+    assert.equal(typeof status.reconnectAttempts, 'number');
+    await provider.disconnect();
+  });
+
+  it('7. Never leaks OTP codes or sensitive credentials in logs', async () => {
+    const provider = new BaileysWhatsAppProvider({ autoConnect: false });
+    const loggedMessages: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args: any[]) => {
+      loggedMessages.push(args.join(' '));
+    };
+
+    try {
+      await provider.sendOtp('9848012345', 'SECRET_OTP_777');
+    } finally {
+      console.warn = origWarn;
+      await provider.disconnect();
+    }
+
+    const fullLog = loggedMessages.join('\n');
+    assert.ok(!fullLog.includes('SECRET_OTP_777'), 'Raw OTP code must never be logged');
+    assert.ok(fullLog.includes('[REDACTED]'), 'OTP must be redacted in logs');
+  });
 });
 

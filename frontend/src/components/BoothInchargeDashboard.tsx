@@ -32,7 +32,8 @@ import {
   Check,
   Phone,
   Pencil,
-  Play
+  Play,
+  Loader2
 } from 'lucide-react';
 import { UserSession, Voter, VoterPreference, VoterStatus, SurveyStatus, VoterTask, TrainingVideo, GroundReport } from '../types';
 import Pagination from './common/Pagination';
@@ -46,6 +47,7 @@ import {
   fetchTasksForUnit,
   fetchTrainingProgress,
   fetchTrainingVideos,
+  fetchVoters,
   fetchVotersForUnit,
   fetchCadreNetwork,
   type HierarchySummaryPayload,
@@ -380,9 +382,21 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   // --------------------------------------------------------
   // DASHBOARD CALCULATIONS & METRICS
   // --------------------------------------------------------
-  const totalVoters = voters.length;
+  const totalVoters = backendSummary?.snapshot?.summary?.totalVoters ?? voters.length;
 
   const partyStats = useMemo(() => {
+    if (backendSummary?.snapshot?.politicalPreference) {
+      const pref = backendSummary.snapshot.politicalPreference;
+      return {
+        TDP: pref['TDP'] || 0,
+        YSRCP: pref['YSRCP'] || 0,
+        JSP: pref['JSP'] || 0,
+        BJP: pref['BJP'] || 0,
+        INC: pref['INC'] || 0,
+        Neutral: pref['Neutral'] || pref['NEUTRAL'] || 0,
+        OTH: pref['OTH'] || pref['OTHER'] || 0,
+      } as Record<VoterPreference, number>;
+    }
     const stats: Record<VoterPreference, number> = {
       TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0
     };
@@ -392,18 +406,18 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
       }
     });
     return stats;
-  }, [voters]);
+  }, [backendSummary, voters]);
 
   const totalValid = useMemo(() => {
     return (Object.values(partyStats) as number[]).reduce((a, b) => a + b, 0);
   }, [partyStats]);
 
-  const fakeCount = voters.filter(v => v.voterStatus === 'Fake').length;
+  const fakeCount = backendSummary?.snapshot?.summary?.fakeVoters ?? voters.filter(v => v.voterStatus === 'Fake').length;
   const doubtfulCount = voters.filter(v => v.voterStatus === 'Doubtful').length;
 
   // Forecast leading calculation
   const forecast = useMemo(() => {
-    if (voters.length === 0) {
+    if (totalVoters === 0) {
       return { status: "AWAITING DATA INGESTION", lead: 0 };
     }
     const tdpVotes = (partyStats.TDP as number) + (partyStats.JSP as number) + (partyStats.BJP as number); // NDA alliance
@@ -416,7 +430,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
     } else {
       return { status: "TOO CLOSE TO CALL", lead: 0 };
     }
-  }, [partyStats, voters.length]);
+  }, [partyStats, totalVoters]);
 
   // --------------------------------------------------------
   // SEARCH & FILTERS FOR TAB 2: VOTERS LIST
@@ -427,38 +441,76 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   const [voterStatusFilter, setVoterStatusFilter] = useState('ALL');
   const [voterGenderFilter, setVoterGenderFilter] = useState('ALL');
 
-  const filteredVoters = useMemo(() => {
-    return voters.filter(v => {
-      const q = voterSearch.toLowerCase().trim();
-      const matchSearch = !q || 
-        (v.name || '').toLowerCase().includes(q) ||
-        (v.epicNumber || '').toLowerCase().includes(q) ||
-        (v.serialNumber || '').toString() === q ||
-        (v.mobileNumber || '').includes(q) ||
-        (v.houseNumber || '').toLowerCase().includes(q) ||
-        (v.caste || '').toLowerCase().includes(q);
-
-      const matchGroup = voterGroupFilter === 'ALL' || v.assignedVoterGroup === voterGroupFilter;
-      const matchPref = voterPrefFilter === 'ALL' || v.politicalPreference === voterPrefFilter;
-      const matchStatus = voterStatusFilter === 'ALL' || v.voterStatus === voterStatusFilter;
-      const matchGender = voterGenderFilter === 'ALL' || v.gender === voterGenderFilter;
-
-      return matchSearch && matchGroup && matchPref && matchStatus && matchGender;
-    });
-  }, [voters, voterSearch, voterGroupFilter, voterPrefFilter, voterStatusFilter, voterGenderFilter]);
-
-  // Pagination for Voter Registry Table
+  // Server-side pagination & query state for Voter Registry
   const [voterPage, setVoterPage] = useState<number>(1);
   const [voterPageSize, setVoterPageSize] = useState<number>(25);
+  const [registryVoters, setRegistryVoters] = useState<Voter[]>([]);
+  const [registryTotal, setRegistryTotal] = useState<number>(0);
+  const [isRegistryLoading, setIsRegistryLoading] = useState<boolean>(false);
+  const [registryError, setRegistryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setIsRegistryLoading(true);
+    setRegistryError(null);
+
+    const queryParams: any = {
+      unitId: session.unitId,
+      page: voterPage,
+      limit: voterPageSize,
+    };
+    if (voterSearch.trim()) {
+      queryParams.search = voterSearch.trim();
+    }
+    if (voterPrefFilter !== 'ALL') {
+      queryParams.politicalPreference = voterPrefFilter;
+    }
+    if (voterStatusFilter !== 'ALL') {
+      queryParams.voterStatus = voterStatusFilter.toUpperCase();
+    }
+    if (voterGroupFilter !== 'ALL') {
+      const matchedCadre = cadreList.find((c) => c.group === voterGroupFilter);
+      if (matchedCadre) {
+        queryParams.assignedInchargeId = matchedCadre.id;
+      }
+    }
+
+    fetchVoters(queryParams)
+      .then((res) => {
+        if (!active) return;
+        setRegistryVoters(res.items);
+        setRegistryTotal(res.total);
+        setIsRegistryLoading(false);
+      })
+      .catch((err) => {
+        if (!active) return;
+        console.error('Failed to load paginated voters:', err);
+        setRegistryError('Failed to load voters. Please try again.');
+        setIsRegistryLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    session.unitId,
+    voterPage,
+    voterPageSize,
+    voterSearch,
+    voterGroupFilter,
+    voterPrefFilter,
+    voterStatusFilter,
+    cadreList,
+  ]);
 
   const paginatedVoters = useMemo(() => {
-    const start = (voterPage - 1) * voterPageSize;
-    return filteredVoters.slice(start, start + voterPageSize);
-  }, [filteredVoters, voterPage, voterPageSize]);
+    if (voterGenderFilter === 'ALL') return registryVoters;
+    return registryVoters.filter((v) => v.gender === voterGenderFilter);
+  }, [registryVoters, voterGenderFilter]);
 
   useEffect(() => {
     setVoterPage(1);
-  }, [voterSearch, voterGroupFilter, voterPrefFilter, voterStatusFilter, voterGenderFilter]);
+  }, [voterSearch, voterGroupFilter, voterPrefFilter, voterStatusFilter, voterGenderFilter, voterPageSize]);
 
   // --------------------------------------------------------
   // EDITING MODAL STATE
@@ -466,7 +518,8 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   const [editingVoter, setEditingVoter] = useState<Voter | null>(null);
 
   const handleUpdateVoter = (updated: Voter) => {
-    setVoters(prev => prev.map(v => v.id === updated.id ? updated : v));
+    setRegistryVoters((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
+    setVoters((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
     setEditingVoter(null);
 
     void syncVoter(updated, session.userId).catch(() => {
@@ -485,8 +538,8 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   const [fakePage, setFakePage] = useState<number>(1);
   const [fakePageSize, setFakePageSize] = useState<number>(25);
 
-  const voteDoneCount = voters.filter(v => v.voteStatus === 'VOTE DONE').length;
-  const yetToVoteCount = totalVoters - voteDoneCount;
+  const voteDoneCount = backendSummary?.snapshot?.summary?.voted ?? voters.filter(v => v.voteStatus === 'VOTE DONE').length;
+  const yetToVoteCount = backendSummary?.snapshot?.summary?.remaining ?? Math.max(0, totalVoters - voteDoneCount);
   const turnoutPercentage = totalVoters > 0 ? Math.round((voteDoneCount / totalVoters) * 100) : 0;
 
   const liveBoothStats = useMemo(() => {
@@ -1525,7 +1578,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
 
                 {/* Results Counter */}
                 <div className="ml-auto text-slate-400 uppercase tracking-wider text-[10px] font-black">
-                  Found: <span className="text-slate-800 font-extrabold">{filteredVoters.length}</span> / {voters.length}
+                  Found: <span className="text-slate-800 font-extrabold">{registryTotal}</span> / {totalVoters}
                 </div>
               </div>
             </div>
@@ -1545,7 +1598,20 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-xs font-semibold">
-                  {filteredVoters.length === 0 ? (
+                  {isRegistryLoading ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-12 text-slate-500 font-bold">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-yellow-500" />
+                        Loading voter records...
+                      </td>
+                    </tr>
+                  ) : registryError ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-12 text-red-500 font-bold">
+                        {registryError}
+                      </td>
+                    </tr>
+                  ) : paginatedVoters.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="text-center py-12 text-gray-400 font-bold">
                         No voter records match the active search or filters.
@@ -1692,10 +1758,13 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
               </table>
               <Pagination
                 currentPage={voterPage}
-                totalItems={filteredVoters.length}
+                totalItems={registryTotal}
                 pageSize={voterPageSize}
                 onPageChange={setVoterPage}
-                onPageSizeChange={setVoterPageSize}
+                onPageSizeChange={(newSize) => {
+                  setVoterPageSize(newSize);
+                  setVoterPage(1);
+                }}
                 pageSizeOptions={[15, 25, 50, 100]}
                 itemLabel="voters"
               />

@@ -1,5 +1,5 @@
 import { SurveyStatus, Voter, VoterPreference, VoterStatus } from '../../types';
-import { apiFetch } from './client';
+import { apiFetch, apiFetchWithMeta } from './client';
 
 export interface VoterQueryParams {
   page?: number;
@@ -79,25 +79,28 @@ export async function fetchVoters(params: VoterQueryParams = {}): Promise<Pagina
   const endpoint = `/api/voters${queryString ? `?${queryString}` : ''}`;
 
   try {
-    const json = await apiFetch<any>(endpoint);
-    const rawList = Array.isArray(json?.data) ? json.data : (Array.isArray(json?.items) ? json.items : (Array.isArray(json) ? json : []));
+    const envelope = await apiFetchWithMeta<any[]>(endpoint);
+    const rawList = Array.isArray(envelope.data)
+      ? envelope.data
+      : (Array.isArray((envelope.data as any)?.items) ? (envelope.data as any).items : []);
+    const meta = envelope.meta || (envelope.data as any)?.__meta;
 
-    // Return the genuine database state from PostgreSQL
-    if (json !== undefined && json !== null) {
-      const total = typeof json?.meta?.total === 'number' ? json.meta.total : rawList.length;
-      const limit = typeof json?.meta?.limit === 'number' ? json.meta.limit : (params.limit || 50);
-      const totalPages = typeof json?.meta?.totalPages === 'number' ? json.meta.totalPages : (total > 0 ? Math.ceil(total / limit) : 0);
+    const total = typeof meta?.total === 'number' ? meta.total : rawList.length;
+    const limit = typeof meta?.limit === 'number' ? meta.limit : (params.limit || 50);
+    const page = typeof meta?.page === 'number' ? meta.page : (params.page || 1);
+    const totalPages = typeof meta?.totalPages === 'number'
+      ? meta.totalPages
+      : (total > 0 ? Math.ceil(total / limit) : 1);
 
-      return {
-        items: rawList.map(normalizeVoter),
-        total,
-        page: json?.meta?.page || params.page || 1,
-        limit,
-        totalPages,
-        hasNextPage: Boolean(json?.meta?.hasNextPage),
-        hasPrevPage: Boolean(json?.meta?.hasPrevPage),
-      };
-    }
+    return {
+      items: rawList.map(normalizeVoter),
+      total,
+      page,
+      limit,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    };
   } catch (err) {
     console.warn('[Voters API] Error fetching voters from DB:', err);
   }
@@ -113,18 +116,32 @@ export async function fetchVoters(params: VoterQueryParams = {}): Promise<Pagina
   };
 }
 
-export async function fetchVotersForIncharge(userId: string): Promise<Voter[]> {
+export async function fetchVotersForIncharge(userId: string, params: Omit<VoterQueryParams, 'assignedInchargeId'> = {}): Promise<Voter[]> {
   try {
-    const res = await fetchVoters({ assignedInchargeId: userId, limit: 100 });
-    return res.items;
+    const res = await fetchVoters({ ...params, assignedInchargeId: userId, limit: params.limit || 100 });
+    const items = res.items;
+    (items as any).pagination = res;
+    return items;
   } catch {
     return [];
   }
 }
 
-export async function fetchVotersForUnit(unitId: string): Promise<Voter[]> {
-  const res = await fetchVoters({ unitId, limit: 100 });
-  return res.items;
+export async function fetchVotersForUnit(
+  unitId: string,
+  params: Omit<VoterQueryParams, 'unitId'> = {}
+): Promise<Voter[]> {
+  const res = await fetchVoters({ ...params, unitId, limit: params.limit || 50 });
+  const items = res.items;
+  (items as any).pagination = res;
+  return items;
+}
+
+export async function fetchPaginatedVotersForUnit(
+  unitId: string,
+  params: Omit<VoterQueryParams, 'unitId'> = {}
+): Promise<PaginatedVotersResponse> {
+  return fetchVoters({ ...params, unitId });
 }
 
 export async function syncVoter(voter: Partial<Voter> & { id: string }, _userId?: string): Promise<Voter> {

@@ -10,3 +10,4 @@ export * from './notifications.api';
 export * from './auth.api';
 export * from './cms.api';
 export * from './audit.api';
+export * from './hierarchy.api';

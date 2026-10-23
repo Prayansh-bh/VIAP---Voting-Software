@@ -10,6 +10,7 @@ import qrcode from 'qrcode-terminal';
 import path from 'path';
 import fs from 'fs';
 import { SmsOptions, SmsProvider, SmsSendResult } from '../types.js';
+import { prisma } from '../../prisma.js';
 
 export interface BaileysConfig {
   authDir?: string;
@@ -23,7 +24,11 @@ export class BaileysWhatsAppProvider implements SmsProvider {
   private isConnected = false;
   private currentQr: string | null = null;
   private isInitializing = false;
+  private initPromise: Promise<WASocket> | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectAttempts = 0;
+  private isSessionOwner = false;
+  private saveCredsQueue: Promise<void> = Promise.resolve();
   private readonly authDir: string;
 
   constructor(config?: BaileysConfig) {
@@ -38,6 +43,41 @@ export class BaileysWhatsAppProvider implements SmsProvider {
   }
 
   /**
+   * Acquire a PostgreSQL session-level advisory lock to guarantee only a single
+   * application instance actively controls the WhatsApp Baileys session.
+   */
+  async acquireSessionLock(): Promise<boolean> {
+    if (process.env.NODE_ENV === 'test') {
+      this.isSessionOwner = true;
+      return true;
+    }
+    try {
+      const res = await prisma.$queryRaw<Array<{ acquired: boolean }>>`
+        SELECT pg_try_advisory_lock(${88299104}::bigint) AS acquired
+      `;
+      this.isSessionOwner = Boolean(res?.[0]?.acquired);
+      return this.isSessionOwner;
+    } catch (err: any) {
+      console.warn('[WHATSAPP BAILEYS] Advisory lock notice, assuming single instance:', err?.message);
+      this.isSessionOwner = true;
+      return true;
+    }
+  }
+
+  async releaseSessionLock(): Promise<void> {
+    if (process.env.NODE_ENV === 'test' || !this.isSessionOwner) {
+      this.isSessionOwner = false;
+      return;
+    }
+    try {
+      await prisma.$queryRaw`
+        SELECT pg_advisory_unlock(${88299104}::bigint)
+      `;
+    } catch {}
+    this.isSessionOwner = false;
+  }
+
+  /**
    * Initializes or re-establishes the Baileys WhatsApp Web socket.
    */
   async initialize(): Promise<WASocket> {
@@ -45,100 +85,157 @@ export class BaileysWhatsAppProvider implements SmsProvider {
       return this.sock;
     }
 
-    if (this.isInitializing && this.sock) {
-      return this.sock;
+    if (this.initPromise) {
+      return this.initPromise;
     }
 
-    this.isInitializing = true;
-
-    try {
-      if (!fs.existsSync(this.authDir)) {
-        fs.mkdirSync(this.authDir, { recursive: true });
+    this.initPromise = (async () => {
+      // 1. Single-instance ownership guard: only one backend instance can hold the session
+      const hasLock = await this.acquireSessionLock();
+      if (!hasLock) {
+        console.warn(
+          '[WHATSAPP BAILEYS] Another application instance holds the active WhatsApp session lock. Running in standby mode.'
+        );
+        throw new Error('WhatsApp session is active on another application instance.');
       }
 
-      const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
-
-      const logger = pino({
-        level: (process.env.BAILEYS_LOG_LEVEL || 'silent') as any,
-      });
-
-      const sock = makeWASocket({
-        auth: state,
-        logger,
-        printQRInTerminal: false,
-        browser: Browsers.ubuntu('Chrome'),
-        syncFullHistory: false,
-        connectTimeoutMs: 60000,
-        defaultQueryTimeoutMs: 60000,
-      });
-
-      this.sock = sock;
-
-      sock.ev.on('creds.update', saveCreds);
-
-      sock.ev.on('connection.update', (update: Partial<ConnectionState>) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
-          this.currentQr = qr;
-          this.printTerminalQr(qr);
+      this.isInitializing = true;
+      try {
+        // Clean up previous socket instance before re-creating
+        if (this.sock) {
+          try {
+            this.sock.ev.removeAllListeners('connection.update');
+            this.sock.ev.removeAllListeners('creds.update');
+            this.sock.end(undefined);
+          } catch {}
+          this.sock = null;
         }
 
-        if (connection === 'open') {
-          this.isConnected = true;
-          this.currentQr = null;
-          this.isInitializing = false;
-          const userJid = sock.user?.id || 'Connected Phone';
-          console.log(`\n======================================================================`);
-          console.log(` ✅ [WHATSAPP BAILEYS ACTIVE]`);
-          console.log(` 📱 WhatsApp session linked and active for user: ${userJid}`);
-          console.log(` 💬 Outgoing OTPs will be sent via this WhatsApp session.`);
-          console.log(`======================================================================\n`);
+        if (!fs.existsSync(this.authDir)) {
+          fs.mkdirSync(this.authDir, { recursive: true });
         }
 
-        if (connection === 'close') {
-          this.isConnected = false;
-          this.isInitializing = false;
+        const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
 
-          const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-          const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        const logger = pino({
+          level: (process.env.BAILEYS_LOG_LEVEL || 'silent') as any,
+        });
 
-          console.warn(
-            `[WHATSAPP BAILEYS] Connection closed (statusCode: ${statusCode || 'unknown'}, reconnectable: ${shouldReconnect})`
-          );
+        const sock = makeWASocket({
+          auth: state,
+          logger,
+          printQRInTerminal: false,
+          browser: Browsers.ubuntu('Chrome'),
+          syncFullHistory: false,
+          connectTimeoutMs: 60000,
+          defaultQueryTimeoutMs: 60000,
+        });
 
-          if (shouldReconnect) {
-            if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-            this.reconnectTimer = setTimeout(() => {
-              this.initialize().catch((err) => {
-                console.error('[WHATSAPP BAILEYS] Reconnection attempt failed:', err?.message);
-              });
-            }, 5000);
-          } else {
-            console.warn('[WHATSAPP BAILEYS] WhatsApp device logged out. Clearing stored credentials to present fresh QR...');
-            try {
-              if (fs.existsSync(this.authDir)) {
-                fs.rmSync(this.authDir, { recursive: true, force: true });
+        this.sock = sock;
+
+        // Serialize credential updates to prevent concurrent write corruption
+        sock.ev.on('creds.update', () => {
+          this.saveCredsQueue = this.saveCredsQueue
+            .then(async () => {
+              try {
+                await saveCreds();
+              } catch (err: any) {
+                console.error('[WHATSAPP BAILEYS] Failed to persist credentials:', err?.message);
               }
-            } catch (cleanupErr) {
-              console.error('[WHATSAPP BAILEYS] Failed to remove credentials directory:', cleanupErr);
-            }
+            })
+            .catch(() => {});
+        });
 
-            setTimeout(() => {
-              this.initialize().catch((err) => {
-                console.error('[WHATSAPP BAILEYS] Fresh initialization failed:', err?.message);
-              });
-            }, 3000);
+        sock.ev.on('connection.update', (update: Partial<ConnectionState>) => {
+          const { connection, lastDisconnect, qr } = update;
+
+          if (qr) {
+            this.currentQr = qr;
+            this.printTerminalQr(qr);
           }
-        }
-      });
 
-      return sock;
-    } catch (err: any) {
-      this.isInitializing = false;
-      console.error('[WHATSAPP BAILEYS] Initialization error:', err);
-      throw err;
+          if (connection === 'open') {
+            this.isConnected = true;
+            this.currentQr = null;
+            this.isInitializing = false;
+            this.reconnectAttempts = 0;
+            if (this.reconnectTimer) {
+              clearTimeout(this.reconnectTimer);
+              this.reconnectTimer = null;
+            }
+            const userJid = sock.user?.id || 'Connected Phone';
+            console.log(`\n======================================================================`);
+            console.log(` ✅ [WHATSAPP BAILEYS ACTIVE]`);
+            console.log(` 📱 WhatsApp session linked and active for user: ${userJid}`);
+            console.log(` 💬 Outgoing OTPs will be sent via this WhatsApp session.`);
+            console.log(`======================================================================\n`);
+          }
+
+          if (connection === 'close') {
+            this.isConnected = false;
+            this.isInitializing = false;
+
+            const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+
+            console.warn(
+              `[WHATSAPP BAILEYS] Connection closed (statusCode: ${statusCode || 'unknown'}, reconnectable: ${shouldReconnect})`
+            );
+
+            if (shouldReconnect) {
+              this.scheduleReconnect();
+            } else {
+              console.warn('[WHATSAPP BAILEYS] WhatsApp device logged out. Clearing stored credentials to present fresh QR...');
+              this.reconnectAttempts = 0;
+              try {
+                if (fs.existsSync(this.authDir)) {
+                  fs.rmSync(this.authDir, { recursive: true, force: true });
+                }
+              } catch (cleanupErr) {
+                console.error('[WHATSAPP BAILEYS] Failed to remove credentials directory:', cleanupErr);
+              }
+
+              this.scheduleReconnect(3000);
+            }
+          }
+        });
+
+        return sock;
+      } finally {
+        this.isInitializing = false;
+      }
+    })();
+
+    try {
+      return await this.initPromise;
+    } finally {
+      this.initPromise = null;
     }
+  }
+
+  private scheduleReconnect(fixedDelay?: number): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    let delay = fixedDelay;
+    if (delay === undefined) {
+      this.reconnectAttempts += 1;
+      const baseDelay = 2000;
+      const maxDelay = 60000;
+      const jitter = Math.floor(Math.random() * 1000);
+      delay = Math.min(maxDelay, baseDelay * Math.pow(1.5, Math.min(this.reconnectAttempts, 8))) + jitter;
+    }
+
+    console.log(`[WHATSAPP BAILEYS] Reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${this.reconnectAttempts})...`);
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.initialize().catch((err) => {
+        console.error('[WHATSAPP BAILEYS] Reconnection attempt failed:', err?.message);
+      });
+    }, delay);
   }
 
   /**
@@ -157,8 +254,8 @@ export class BaileysWhatsAppProvider implements SmsProvider {
       }
 
       console.warn(`\n⚠️  [WHATSAPP BAILEYS NOT LINKED]`);
-      console.warn(` 📱 Recipient : +${recipientDigits}`);
-      console.warn(` 🔑 OTP Code  : ${otpCode}`);
+      console.warn(` 📱 Recipient : +${recipientDigits.slice(0, 4)}****${recipientDigits.slice(-2)}`);
+      console.warn(` 🔑 OTP Code  : [REDACTED]`);
       console.warn(` 📌 Notice    : Please scan the QR code in the server terminal or at /api/auth/whatsapp/qr.`);
       console.warn(`──────────────────────────────────────────────────────────────────────\n`);
 
@@ -176,7 +273,7 @@ export class BaileysWhatsAppProvider implements SmsProvider {
         const [waAccount] = (await this.sock.onWhatsApp(recipientDigits)) || [];
         if (waAccount) {
           if (!waAccount.exists) {
-            console.warn(`[WHATSAPP BAILEYS] Recipient +${recipientDigits} is not registered on WhatsApp.`);
+            console.warn(`[WHATSAPP BAILEYS] Recipient +${recipientDigits.slice(0, 4)}****${recipientDigits.slice(-2)} is not registered on WhatsApp.`);
             return {
               success: false,
               error: `Mobile number +${recipientDigits} is not registered on WhatsApp.`,
@@ -190,7 +287,7 @@ export class BaileysWhatsAppProvider implements SmsProvider {
         }
       }
     } catch (checkErr: any) {
-      console.warn(`[WHATSAPP BAILEYS] onWhatsApp check notice for +${recipientDigits}:`, checkErr?.message);
+      console.warn(`[WHATSAPP BAILEYS] onWhatsApp check notice for +${recipientDigits.slice(0, 4)}****${recipientDigits.slice(-2)}:`, checkErr?.message);
     }
 
     const messageText = `🔒 *Kondapi Verification Code*\n\nYour OTP is: *${otpCode}*\n\nValid for 5 minutes. Do not share this code with anyone.`;
@@ -198,7 +295,7 @@ export class BaileysWhatsAppProvider implements SmsProvider {
     try {
       const result = await this.sock.sendMessage(jid, { text: messageText });
       const messageId = result?.key?.id || `baileys-${Date.now()}`;
-      console.log(`[WHATSAPP BAILEYS] ✅ OTP dispatched to +${recipientDigits} (JID: ${jid}, Message ID: ${messageId})`);
+      console.log(`[WHATSAPP BAILEYS] ✅ OTP dispatched to +${recipientDigits.slice(0, 4)}****${recipientDigits.slice(-2)} (JID: ${jid}, Message ID: ${messageId})`);
       return {
         success: true,
         messageId,
@@ -206,7 +303,7 @@ export class BaileysWhatsAppProvider implements SmsProvider {
         timestamp: new Date(),
       };
     } catch (err: any) {
-      console.error(`[WHATSAPP BAILEYS] ❌ Failed to dispatch OTP to +${recipientDigits}:`, err?.message);
+      console.error(`[WHATSAPP BAILEYS] ❌ Failed to dispatch OTP to +${recipientDigits.slice(0, 4)}****${recipientDigits.slice(-2)}:`, err?.message);
       return {
         success: false,
         error: err?.message || 'Failed to send WhatsApp message',
@@ -297,7 +394,7 @@ export class BaileysWhatsAppProvider implements SmsProvider {
     }
 
     const code = await (this.sock as any).requestPairingCode(recipientDigits);
-    console.log(`\n🔑 [WHATSAPP PAIRING CODE]: ${code} for phone +${recipientDigits}\n`);
+    console.log(`\n🔑 [WHATSAPP PAIRING CODE]: ${code} for phone +${recipientDigits.slice(0, 4)}****${recipientDigits.slice(-2)}\n`);
     return code;
   }
 
@@ -310,6 +407,8 @@ export class BaileysWhatsAppProvider implements SmsProvider {
       isConnected: this.isConnected,
       hasQr: Boolean(this.currentQr),
       user: this.sock?.user?.id || null,
+      isOwner: this.isSessionOwner,
+      reconnectAttempts: this.reconnectAttempts,
     };
   }
 
@@ -330,10 +429,13 @@ export class BaileysWhatsAppProvider implements SmsProvider {
     }
     if (this.sock) {
       try {
+        this.sock.ev.removeAllListeners('connection.update');
+        this.sock.ev.removeAllListeners('creds.update');
         this.sock.end(undefined);
       } catch {}
       this.sock = null;
       this.isConnected = false;
     }
+    await this.releaseSessionLock();
   }
 }

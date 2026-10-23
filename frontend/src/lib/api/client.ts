@@ -105,5 +105,104 @@ export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}
   }
 
   const json = await res.json();
-  return json.data !== undefined ? json.data : json;
+  if (json && typeof json === 'object' && json.data !== undefined) {
+    if (json.meta !== undefined && typeof json.data === 'object' && json.data !== null) {
+      try {
+        Object.defineProperty(json.data, '__meta', {
+          value: json.meta,
+          enumerable: false,
+          writable: true,
+          configurable: true,
+        });
+      } catch {}
+    }
+    return json.data;
+  }
+  return json;
+}
+
+export async function apiFetchWithMeta<T = any>(
+  endpoint: string,
+  init: RequestInit = {}
+): Promise<{ data: T; meta?: any }> {
+  const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const apiBase = getApiBase();
+  const primaryUrl = endpoint.startsWith('http') ? endpoint : `${apiBase}${normalizedEndpoint}`;
+  const fallbackUrl = endpoint.startsWith('http') ? endpoint : normalizedEndpoint;
+
+  const headers = new Headers(init.headers);
+  const token = getAuthToken();
+
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const sessionStr = localStorage.getItem('kdp_active_session');
+      if (sessionStr) {
+        const session = JSON.parse(sessionStr);
+        const orgId = session?.organisationId || session?.organisation?.id;
+        const tenantCode = session?.organisation?.code;
+        if (orgId && !headers.has('x-organisation-id')) {
+          headers.set('x-organisation-id', orgId);
+        }
+        if (tenantCode && !headers.has('x-tenant-code')) {
+          headers.set('x-tenant-code', tenantCode);
+        }
+      }
+
+      if (!headers.has('x-tenant-code')) {
+        const urlParams = new URLSearchParams(window.location.search || window.location.hash.split('?')[1] || '');
+        const urlTenant = urlParams.get('app') || urlParams.get('tenant');
+        if (urlTenant) {
+          headers.set('x-tenant-code', urlTenant);
+        }
+      }
+    } catch {}
+  }
+
+  if (init.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(primaryUrl, {
+      ...init,
+      headers,
+      credentials: 'include',
+    });
+  } catch (_err) {
+    try {
+      res = await fetch(fallbackUrl, {
+        ...init,
+        headers,
+        credentials: 'include',
+      });
+    } catch (secondErr: any) {
+      throw new Error(secondErr?.message || 'Failed to communicate with API server. Please check your backend connection.');
+    }
+  }
+
+  if (!res.ok) {
+    let errMessage = `HTTP ${res.status}: ${res.statusText}`;
+    let errJson: any = null;
+    try {
+      errJson = await res.json();
+      errMessage = errJson?.error?.message || errJson?.message || errMessage;
+    } catch {}
+    const err: any = new Error(errMessage);
+    err.status = res.status;
+    err.statusCode = res.status;
+    err.code = errJson?.error?.code || errJson?.code;
+    err.data = errJson?.data;
+    throw err;
+  }
+
+  const json = await res.json();
+  return {
+    data: json?.data !== undefined ? json.data : json,
+    meta: json?.meta,
+  };
 }

@@ -1,0 +1,12 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+.baileys_auth
+uploads
+*.log
+.git
+.agents
+src/tests
+coverage

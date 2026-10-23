@@ -105,4 +105,5 @@ export interface ApplicationSummary {
   totalTasks: number;
   totalMandals?: number;
   totalConstituencies?: number;
+  constituencyId?: string;
 }

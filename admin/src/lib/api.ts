@@ -47,7 +47,10 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       }
     }
     const errorMsg = data?.error?.message || data?.error || data?.message || `Request failed with status ${res.status}`;
-    throw new Error(errorMsg);
+    const err: any = new Error(errorMsg);
+    err.data = data?.data || data?.error?.details || data?.error;
+    err.status = res.status;
+    throw err;
   }
 
   return (data?.data !== undefined ? data.data : data) as T;
@@ -495,6 +498,7 @@ export async function importVoterRolls(appId: string, payload: {
   fileName?: string;
   fileSize?: number;
   targetConstituencyId?: string;
+  columnMapping?: Record<string, string>;
   importMode?: 'APPEND' | 'REPLACE';
 }): Promise<any> {
   return request(`/applications/${appId}/data/import`, {
@@ -505,8 +509,93 @@ export async function importVoterRolls(appId: string, payload: {
       fileName: payload.fileName || 'voter_roll.xlsx',
       fileSize: payload.fileSize || 0,
       targetConstituencyId: payload.targetConstituencyId,
+      columnMapping: payload.columnMapping,
       importMode: payload.importMode || 'APPEND',
     }),
+  });
+}
+
+export async function uploadVoterCsvStream(
+  appId: string,
+  file: File,
+  fields: {
+    targetConstituencyId?: string;
+    importMode?: 'APPEND' | 'REPLACE';
+    columnMapping?: Record<string, string>;
+    voterGroupSize?: number;
+  },
+  onUploadProgress?: (percentage: number) => void
+): Promise<any> {
+  const token = getAdminToken();
+  const url = `${API_BASE}/applications/${appId}/data/import/upload`;
+  const formData = new FormData();
+  formData.append('file', file, file.name);
+  if (fields.targetConstituencyId) formData.append('targetConstituencyId', fields.targetConstituencyId);
+  if (fields.importMode) formData.append('importMode', fields.importMode);
+  if (fields.columnMapping) formData.append('columnMapping', JSON.stringify(fields.columnMapping));
+  if (fields.voterGroupSize) formData.append('voterGroupSize', String(fields.voterGroupSize));
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    }
+
+    if (xhr.upload && onUploadProgress) {
+      xhr.upload.onprogress = (evt) => {
+        if (evt.lengthComputable) {
+          const pct = Math.round((evt.loaded / evt.total) * 100);
+          onUploadProgress(pct);
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      try {
+        const resp = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(resp?.data || resp);
+        } else {
+          const errMsg = resp.error?.message || resp.message || `Upload failed with status ${xhr.status}`;
+          reject(new Error(errMsg));
+        }
+      } catch {
+        reject(new Error(xhr.responseText || `Upload failed with status ${xhr.status}`));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Network error during streaming upload.'));
+    xhr.send(formData);
+  });
+}
+
+export async function fetchImportJobStatus(appId: string, jobId: string): Promise<any> {
+  return request(`/applications/${appId}/data/imports/${jobId}`);
+}
+
+export async function validateVoterRolls(appId: string, payload: {
+  rows: any[];
+  columnMapping?: Record<string, string>;
+  targetConstituencyId?: string;
+  fileName?: string;
+}): Promise<any> {
+  return request(`/applications/${appId}/data/validate`, {
+    method: 'POST',
+    body: JSON.stringify({
+      level: 'VOTER',
+      rows: payload.rows,
+      columnMapping: payload.columnMapping,
+      targetConstituencyId: payload.targetConstituencyId,
+      fileName: payload.fileName || 'voter_roll.xlsx',
+    }),
+  });
+}
+
+export async function suggestColumnMapping(appId: string, headers: string[]): Promise<any> {
+  return request(`/applications/${appId}/data/mapping`, {
+    method: 'POST',
+    body: JSON.stringify({ headers }),
   });
 }
 

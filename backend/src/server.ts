@@ -2,6 +2,8 @@ import { buildApp } from './app.js';
 import { env } from './config/env.js';
 import { initSocketServer } from './lib/socket.js';
 import { prisma } from './lib/prisma.js';
+import { closeRedis } from './lib/redis.js';
+import { ImportQueueService } from './modules/applications/import-queue.service.js';
 
 async function start() {
   const app = buildApp();
@@ -18,6 +20,9 @@ async function start() {
 
     app.log.info(`🚀 Kondapi Fastify Production Backend running on http://${env.HOST}:${env.PORT}`);
 
+    // Initialize $0 in-process bulk CSV import queue processor
+    ImportQueueService.init();
+
     // Pre-initialize WhatsApp Baileys Gateway in background if enabled
     if (env.WHATSAPP_PROVIDER === 'baileys' && env.NODE_ENV !== 'test') {
       const { SmsProviderFactory } = await import('./lib/sms/factory.js');
@@ -33,10 +38,14 @@ async function start() {
     process.exit(1);
   }
 
+  let isShuttingDown = false;
   const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
   signals.forEach((signal) => {
     process.on(signal, async () => {
+      if (isShuttingDown) return;
+      isShuttingDown = true;
       app.log.info(`Received ${signal}, shutting down gracefully...`);
+      ImportQueueService.stop();
       try {
         const { SmsProviderFactory } = await import('./lib/sms/factory.js');
         const wa = SmsProviderFactory.getProvider('WHATSAPP');
@@ -45,9 +54,19 @@ async function start() {
         }
       } catch {}
       await app.close();
+      await closeRedis();
       await prisma.$disconnect();
       process.exit(0);
     });
+  });
+
+  process.on('unhandledRejection', (reason) => {
+    app.log.error({ reason }, 'Unhandled Promise Rejection caught at process level');
+  });
+
+  process.on('uncaughtException', (err) => {
+    app.log.fatal({ err: err?.message || err }, 'Uncaught Exception at process level');
+    process.exit(1);
   });
 }
 

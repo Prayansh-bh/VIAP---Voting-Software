@@ -69,6 +69,7 @@ export async function applicationsRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/:applicationId/data/validate',
     {
+      bodyLimit: 50 * 1024 * 1024,
       preHandler: [authenticate, populateHierarchyScope, requireRoles(...ADMIN_DATA_ROLES), validateBody(validateDataSchema)],
     },
     ApplicationsController.validateData,
@@ -77,9 +78,19 @@ export async function applicationsRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/:applicationId/data/import',
     {
+      bodyLimit: 50 * 1024 * 1024,
       preHandler: [authenticate, populateHierarchyScope, requireRoles(...ADMIN_DATA_ROLES), validateBody(importDataSchema)],
     },
     ApplicationsController.importData,
+  );
+
+  // Streaming CSV Multipart Upload Route ($0 In-Process Queue)
+  fastify.post(
+    '/:applicationId/data/import/upload',
+    {
+      preHandler: [authenticate, populateHierarchyScope, requireRoles(...ADMIN_DATA_ROLES)],
+    },
+    ApplicationsController.uploadImportFile,
   );
 
   // 4. Data Import History & Error Reports

@@ -18,7 +18,10 @@ export const validateDataSchema = z.object({
   rows: z.array(z.record(z.string(), z.any())).min(1, 'At least one data row is required'),
   targetConstituencyId: z.string().optional(),
   columnMapping: z.record(z.string(), z.string()).optional(),
-  fileName: z.string().optional(),
+  fileName: z
+    .string()
+    .regex(/\.(xlsx|xls|csv)$/i, 'Only .xlsx, .xls, and .csv files are supported')
+    .optional(),
 });
 
 export const importDataSchema = z.object({
@@ -28,8 +31,12 @@ export const importDataSchema = z.object({
   columnMapping: z.record(z.string(), z.string()).optional(),
   importMode: z.enum(['APPEND', 'REPLACE']).default('APPEND'),
   voterGroupSize: z.number().int().min(10).max(500).default(100),
-  fileName: z.string().optional().default('import_data.xlsx'),
-  fileSize: z.number().optional().default(0),
+  fileName: z
+    .string()
+    .regex(/\.(xlsx|xls|csv)$/i, 'Only .xlsx, .xls, and .csv files are supported')
+    .optional()
+    .default('import_data.xlsx'),
+  fileSize: z.number().max(50 * 1024 * 1024, 'File size exceeds maximum permitted limit of 50MB').optional().default(0),
 });
 
 export const mappingSchema = z.object({

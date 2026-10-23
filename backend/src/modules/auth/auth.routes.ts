@@ -10,6 +10,7 @@ import {
   deviceSessionSchema,
   revokeDeviceSchema,
   demoLoginSchema,
+  adminLoginSchema,
   updateProfileSchema,
   changePasswordSchema,
   requestMobileChangeOtpSchema,
@@ -43,6 +44,7 @@ export async function authRoutes(fastify: FastifyInstance) {
           timeWindow: '1 minute',
         },
       },
+      preValidation: [validateBody(adminLoginSchema)],
     },
     AuthController.adminLogin,
   );

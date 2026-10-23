@@ -13,6 +13,7 @@
     "dev:all": "npm --prefix backend run dev & npm --prefix frontend run dev & npm --prefix admin run dev",
     "start": "npm --prefix backend run start",
     "start:backend": "npm --prefix backend run start",
+    "start:prod": "npm --prefix backend run start:prod",
     "start:frontend": "npm --prefix frontend run start",
     "start:all": "npm --prefix backend run start & npm --prefix frontend run start",
     "build": "npm --prefix backend run prisma:generate && npm --prefix backend run build && npm --prefix frontend run build && node scripts/prepare_dist.mjs",

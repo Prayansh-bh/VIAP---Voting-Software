@@ -8,8 +8,19 @@ import { UserHierarchyScope } from '../common/types.js';
 import { getRedisClient, createRedisSubscriber } from './redis.js';
 
 let io: SocketIOServer | null = null;
+let cachedUnits: Map<string, { id: string; parentId: string | null }> | null = null;
+let unitCacheExpiry = 0;
 
 export function initSocketServer(httpServer: HTTPServer, corsOrigin: string): SocketIOServer {
+  // Prevent duplicate socket server instances on re-initialization
+  if (io) {
+    try {
+      io.removeAllListeners();
+      io.close();
+    } catch {}
+    io = null;
+  }
+
   io = new SocketIOServer(httpServer, {
     cors: {
       origin: !corsOrigin || corsOrigin === '*' ? true : corsOrigin.split(',').map((s) => s.trim()),
@@ -64,6 +75,11 @@ export function initSocketServer(httpServer: HTTPServer, corsOrigin: string): So
       return;
     }
 
+    socket.on('error', (err) => {
+      // Prevent unhandled client error from crashing server
+      console.warn('[Socket.IO] Client socket error:', err?.message);
+    });
+
     // Join ONLY the authenticated user's own room (never trust handshake userId)
     socket.join(`user:${user.userId}`);
 
@@ -97,11 +113,15 @@ export function initSocketServer(httpServer: HTTPServer, corsOrigin: string): So
     socket.on('ping', () => {
       socket.emit('pong', { timestamp: Date.now() });
     });
+
+    socket.on('disconnect', () => {
+      // Clean up all client listeners to avoid memory leaks on reconnect
+      socket.removeAllListeners();
+    });
   });
 
   return io;
 }
-
 
 export function getSocketIO(): SocketIOServer | null {
   return io;
@@ -110,16 +130,24 @@ export function getSocketIO(): SocketIOServer | null {
 export async function emitHierarchyEvent(unitId: string, event: string, payload: unknown) {
   if (!io) return;
 
-  const units = await prisma.organizationUnit.findMany({
-    select: { id: true, parentId: true, level: true, name: true },
-  });
+  const now = Date.now();
+  if (!cachedUnits || now > unitCacheExpiry) {
+    try {
+      const units = await prisma.organizationUnit.findMany({
+        select: { id: true, parentId: true },
+      });
+      cachedUnits = new Map(units.map((u) => [u.id, u]));
+      unitCacheExpiry = now + 30000; // 30s TTL cache prevents database hammering during high turnout broadcasts
+    } catch {
+      // If DB error, proceed with existing cache or skip
+      if (!cachedUnits) return;
+    }
+  }
 
-  const byId = new Map(units.map((u) => [u.id, u]));
-  let current = byId.get(unitId);
-
+  let current = cachedUnits.get(unitId);
   while (current) {
     io.to(`unit:${current.id}`).emit(event, payload);
-    current = current.parentId ? byId.get(current.parentId) : undefined;
+    current = current.parentId ? cachedUnits.get(current.parentId) : undefined;
   }
 }
 

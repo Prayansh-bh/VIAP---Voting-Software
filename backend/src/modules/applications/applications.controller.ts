@@ -1,6 +1,7 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { errorResponse, successResponse } from '../../common/response.js';
 import { ApplicationsService } from './applications.service.js';
+import { ImportQueueService } from './import-queue.service.js';
 import { UpdateApplicationDto } from './applications.schema.js';
 import { provisionApplication } from '../cms/cms.service.js';
 
@@ -94,6 +95,14 @@ export class ApplicationsController {
 
   static async validateData(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId } = req.params as { applicationId: string };
+    const rawContentLength = Number(req.headers['content-length'] || 0);
+    const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+    if (rawContentLength > MAX_UPLOAD_BYTES) {
+      return reply.status(413).send(
+        errorResponse('Request body exceeds maximum permitted upload limit of 25MB.', 'PAYLOAD_TOO_LARGE')
+      );
+    }
+
     const body = req.body as {
       level?: string;
       rows: any[];
@@ -123,6 +132,16 @@ export class ApplicationsController {
     };
     const actorId = req.user?.userId;
 
+    // Verify raw content-length headers to prevent trusting untrusted client fileSize
+    const rawContentLength = Number(req.headers['content-length'] || 0);
+    const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+    if (rawContentLength > MAX_UPLOAD_BYTES) {
+      return reply.status(413).send(
+        errorResponse('Request body exceeds maximum permitted upload limit of 50MB.', 'PAYLOAD_TOO_LARGE')
+      );
+    }
+    const authoritativeFileSize = rawContentLength > 0 ? rawContentLength : (body.fileSize || 0);
+
     try {
       const result = await ApplicationsService.importData(
         applicationId,
@@ -134,16 +153,44 @@ export class ApplicationsController {
           importMode: body.importMode,
           voterGroupSize: body.voterGroupSize,
           fileName: body.fileName,
-          fileSize: body.fileSize,
+          fileSize: authoritativeFileSize,
         },
         actorId,
         req.hierarchyScope,
       );
-      return reply.status(201).send(successResponse(result, 'Data successfully imported and committed to hierarchy'));
+      const committedTotal = (result.importedCount || 0) + (result.updatedCount || 0);
+      const failedTotal = result.failedCount || result.errorCount || 0;
+
+      if (result.status === 'FAILED' || (committedTotal === 0 && failedTotal > 0)) {
+        return reply.status(400).send(
+          errorResponse(
+            `Import failed: 0 records committed. ${failedTotal} record(s) failed validation.`,
+            'IMPORT_FAILED',
+            result
+          )
+        );
+      }
+
+      if (result.status === 'PARTIAL_SUCCESS' || (committedTotal > 0 && failedTotal > 0)) {
+        return reply.status(200).send(
+          successResponse(
+            result,
+            `Partial import completed: ${committedTotal} committed, ${failedTotal} failed.`
+          )
+        );
+      }
+
+      return reply.status(201).send(
+        successResponse(result, `Data successfully imported: ${committedTotal} records committed to hierarchy.`)
+      );
     } catch (err: any) {
       const statusCode = err.statusCode || 500;
       return reply.status(statusCode).send(errorResponse(err.message || 'Import failed', err.code || 'IMPORT_FAILED', err.data));
     }
+  }
+
+  static async uploadImportFile(req: FastifyRequest, reply: FastifyReply) {
+    return ImportQueueService.handleStreamingUpload(req, reply);
   }
 
   static async getDataImports(req: FastifyRequest, reply: FastifyReply) {

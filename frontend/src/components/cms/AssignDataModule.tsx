@@ -243,8 +243,18 @@ export default function AssignDataModule({
 
     // Check extension
     const nameLower = pickedFile.name.toLowerCase();
-    if (!nameLower.endsWith('.xlsx') && !nameLower.endsWith('.xls')) {
-      setImportError('Invalid file format. Only Excel spreadsheets (.xlsx, .xls) are supported.');
+    if (!nameLower.endsWith('.xlsx') && !nameLower.endsWith('.xls') && !nameLower.endsWith('.csv')) {
+      setImportError('Invalid file format. Only spreadsheet files (.xlsx, .xls, .csv) are supported.');
+      e.target.value = '';
+      return;
+    }
+
+    // Check file size before reading into memory
+    const MAX_UPLOAD_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25MB
+    if (pickedFile.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
+      const sizeMb = (pickedFile.size / (1024 * 1024)).toFixed(1);
+      setImportError(`File size (${sizeMb} MB) exceeds maximum permitted limit of 25 MB.`);
+      e.target.value = '';
       return;
     }
 

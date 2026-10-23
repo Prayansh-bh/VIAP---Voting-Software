@@ -4,7 +4,12 @@ import { Prisma } from '@prisma/client';
 import { errorResponse } from '../common/response.js';
 
 export function errorHandler(error: FastifyError, req: FastifyRequest, reply: FastifyReply) {
-  req.log.error({ err: error, url: req.url, method: req.method }, 'Request Error');
+  const statusCode = error.statusCode || 500;
+  if (statusCode >= 500) {
+    req.log.error({ err: error, url: req.url, method: req.method }, 'Internal Server Error');
+  } else {
+    req.log.warn({ statusCode, message: error.message, url: req.url, method: req.method }, 'Client Request Notice');
+  }
 
   if (error instanceof ZodError) {
     return reply.status(400).send(errorResponse('Validation error', 'VALIDATION_ERROR', (error as any).issues || (error as any).errors));
@@ -23,7 +28,6 @@ export function errorHandler(error: FastifyError, req: FastifyRequest, reply: Fa
     }
   }
 
-  const statusCode = error.statusCode || 500;
   const message = statusCode >= 500 ? 'Internal server error occurred' : error.message;
 
   return reply.status(statusCode).send(

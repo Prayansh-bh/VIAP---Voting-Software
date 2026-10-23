@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import sensible from '@fastify/sensible';
+import multipart from '@fastify/multipart';
 import { env } from './config/env.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
@@ -35,14 +36,14 @@ export function buildApp(): FastifyInstance {
       level: env.NODE_ENV === 'production' ? 'info' : 'debug',
     },
     trustProxy: true,
-    bodyLimit: 10 * 1024 * 1024,
+    bodyLimit: 50 * 1024 * 1024,
   });
 
   // Centralized Error Handler
   app.setErrorHandler(errorHandler);
 
   // Safely parse application/json when body is empty or blank (e.g. DELETE requests)
-  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, defaultDone) => {
+  app.addContentTypeParser('application/json', { parseAs: 'string', bodyLimit: 50 * 1024 * 1024 }, (_req, body, defaultDone) => {
     if (!body || (typeof body === 'string' && body.trim() === '')) {
       return defaultDone(null, {});
     }
@@ -67,6 +68,12 @@ export function buildApp(): FastifyInstance {
 
   // Plugins
   app.register(sensible);
+  app.register(multipart, {
+    limits: {
+      fileSize: 100 * 1024 * 1024, // 100 MB max for bulk CSV file streaming
+      files: 1,
+    },
+  });
 
   app.register(cors, {
     origin: (origin, cb) => {

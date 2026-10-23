@@ -633,7 +633,9 @@ model Voter {
   updatedAt           DateTime             @updatedAt
 
   @@index([epicNumber])
+  @@index([name])
   @@index([mobileNumber])
+  @@index([unitId])
   @@index([stateId])
   @@index([zoneId])
   @@index([parliamentId])
@@ -644,11 +646,16 @@ model Voter {
   @@index([voterGroupId])
   @@index([assignedInchargeId])
   @@index([voterStatus])
+  @@index([surveyStatus])
   @@index([voteStatus])
   @@index([locationStatus])
   @@index([voterLocationStatus])
   @@index([politicalPreference])
   @@index([caste])
+  @@index([constituencyId, serialNumber])
+  @@index([constituencyId, boothId])
+  @@index([constituencyId, voteStatus])
+  @@index([constituencyId, surveyStatus])
 }
 
 model VoterAssignment {

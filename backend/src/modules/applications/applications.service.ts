@@ -92,91 +92,98 @@ export const SYSTEM_FIELDS: SystemFieldDefinition[] = [
     label: 'Voter ID / EPIC',
     required: true,
     description: 'Unique voter registration card number',
-    aliases: ['voter id', 'epic', 'epic number', 'voter id / epic', 'epic_no', 'voter_id', 'card no', 'id'],
+    aliases: ['voter id', 'epic', 'epic number', 'voter id / epic', 'epic_no', 'voter_id', 'card no', 'id', 'epicno', 'voter id no', 'voter id card', 'epic id', 'epic_num', 'electors no'],
   },
   {
     key: 'fullName',
     label: 'Voter Full Name',
     required: true,
     description: 'Citizen legal full name',
-    aliases: ['voter name', 'full name', 'name', 'citizen name', 'voter_name', 'candidate name'],
+    aliases: ['voter name', 'full name', 'name', 'citizen name', 'voter_name', 'candidate name', 'voter fullname', 'elector name', 'fullname'],
   },
   {
     key: 'relativeName',
     label: 'Father / Husband / Relative Name',
     required: false,
     description: 'Father or husband name as registered in electoral roll',
-    aliases: ['relative name', 'father/husband name', 'father name', 'husband name', 'guardian name', 'relative_name'],
+    aliases: ['relative name', 'father/husband name', 'father name', 'husband name', 'guardian name', 'relative_name', 'father_husband_name', 'father_name', 'husband_name', 'parent name', 'care of'],
   },
   {
     key: 'relationType',
     label: 'Relation Type',
     required: false,
     description: 'FATHER, HUSBAND, MOTHER, or OTHER',
-    aliases: ['relation type', 'relation', 'relationship', 'rel_type'],
+    aliases: ['relation type', 'relation', 'relationship', 'rel_type', 'relation_type'],
   },
   {
     key: 'age',
     label: 'Age',
     required: true,
     description: 'Voter legal age (must be >= 18)',
-    aliases: ['age', 'voter age', 'years'],
+    aliases: ['age', 'voter age', 'years', 'age in years'],
   },
   {
     key: 'gender',
     label: 'Gender',
     required: true,
     description: 'MALE, FEMALE, or OTHER',
-    aliases: ['gender', 'sex'],
+    aliases: ['gender', 'sex', 'gender type'],
   },
   {
     key: 'mobileNumber',
     label: 'Mobile Number',
     required: false,
     description: '10-digit citizen contact number',
-    aliases: ['mobile number', 'mobile', 'phone', 'contact', 'cell', 'phone number'],
+    aliases: ['mobile number', 'mobile', 'phone', 'contact', 'cell', 'phone number', 'mobile_number', 'mobile_no'],
   },
   {
     key: 'houseNumber',
     label: 'House / Door No',
     required: false,
     description: 'Residential address / door number',
-    aliases: ['house number', 'door no', 'house no', 'address', 'h.no', 'door_no'],
+    aliases: ['house number', 'door no', 'house no', 'address', 'h.no', 'door_no', 'house_no', 'd.no', 'hno', 'dno'],
+  },
+  {
+    key: 'constituency',
+    label: 'Constituency',
+    required: false,
+    description: 'Assembly Constituency name or code',
+    aliases: ['constituency', 'constituency name', 'assembly constituency', 'ac', 'ac name', 'constituency_name', 'assembly_constituency', 'ac_no', 'acno'],
   },
   {
     key: 'mandal',
     label: 'Mandal',
     required: true,
     description: 'Sub-district / administrative Mandal name',
-    aliases: ['mandal', 'mandal name', 'tehsil', 'block', 'taluk'],
+    aliases: ['mandal', 'mandal name', 'tehsil', 'block', 'taluk', 'mandal_name'],
   },
   {
     key: 'village',
     label: 'Village / Ward',
     required: true,
     description: 'Revenue Village, Panchayat, or Urban Ward',
-    aliases: ['village', 'village name', 'panchayat', 'ward', 'town', 'village / ward'],
+    aliases: ['village', 'village name', 'panchayat', 'ward', 'town', 'village / ward', 'village_name', 'ward no'],
   },
   {
     key: 'boothNumber',
     label: 'Booth Number',
     required: true,
     description: 'Assigned polling booth or part number',
-    aliases: ['booth number', 'booth', 'part no', 'polling station no', 'booth no'],
+    aliases: ['booth number', 'booth', 'part no', 'polling station no', 'booth no', 'booth_no', 'part_no', 'ps no', 'booth_number'],
   },
   {
     key: 'voterGroup',
     label: '100-Voter Group',
     required: false,
     description: 'Cluster / micro-incharge group name or number',
-    aliases: ['voter group', '100-voter group', 'group', 'cluster', 'section', '100 voter incharge'],
+    aliases: ['voter group', '100-voter group', 'group', 'cluster', 'section', '100 voter incharge', 'voter_group'],
   },
   {
     key: 'caste',
     label: 'Caste / Category',
     required: false,
     description: 'Demographic caste or social group',
-    aliases: ['caste', 'community', 'category', 'sub-caste', 'social group'],
+    aliases: ['caste', 'community', 'category', 'sub-caste', 'social group', 'sub_caste'],
   },
   {
     key: 'profession',
@@ -190,9 +197,106 @@ export const SYSTEM_FIELDS: SystemFieldDefinition[] = [
     label: 'Political Preference',
     required: false,
     description: 'Party leaning or neutral inclination',
-    aliases: ['political preference', 'party preference', 'leaning', 'preference', 'party'],
+    aliases: ['political preference', 'party preference', 'leaning', 'preference', 'party', 'political_preference'],
   },
 ];
+
+// Helper to normalize strings for robust fuzzy key matching (e.g., "EPIC_NO" -> "epicno", "Polling Station No." -> "pollingstationno")
+export function normalizeColumnKey(str: string): string {
+  return String(str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+export const SYSTEM_FIELD_ALIASES: Record<string, string[]> = {
+  epicNumber: [
+    'epicnumber', 'epicno', 'epicnum', 'epic', 'voterid', 'voteridno', 'voteridnumber',
+    'voteridcard', 'cardno', 'slno', 'idno', 'id', 'electorsno', 'epicid',
+  ],
+  fullName: [
+    'fullname', 'votername', 'electorname', 'citizenname', 'name', 'candidatename',
+    'personname', 'applicantname', 'voterfullname',
+  ],
+  relativeName: [
+    'relativename', 'fatherhusbandname', 'fathername', 'husbandname', 'guardianname',
+    'relationname', 'parentname', 'careof', 'fatherorhusbandname', 'fname', 'hname',
+  ],
+  relationType: [
+    'relationtype', 'relationship', 'relation', 'reltype', 'reltypecode',
+  ],
+  age: [
+    'age', 'voterage', 'citizenage', 'ageinyears', 'years',
+  ],
+  gender: [
+    'gender', 'sex', 'gendertype',
+  ],
+  mobileNumber: [
+    'mobilenumber', 'mobile', 'mobileno', 'phone', 'phonenumber', 'contact',
+    'contactno', 'cell', 'cellno', 'whatsapp', 'whatsappno',
+  ],
+  houseNumber: [
+    'housenumber', 'houseno', 'doorno', 'doornumber', 'dno', 'hno', 'address',
+    'residentialaddress', 'flatno', 'buildingno',
+  ],
+  constituency: [
+    'constituency', 'constituencyname', 'assemblyconstituency', 'ac', 'acname', 'acno', 'constituencycode',
+  ],
+  mandal: [
+    'mandal', 'mandalname', 'tehsil', 'taluka', 'block', 'mandalblock',
+  ],
+  village: [
+    'village', 'villagename', 'panchayat', 'ward', 'town', 'habitation',
+    'locality', 'grampanchayat', 'villageward',
+  ],
+  boothNumber: [
+    'boothnumber', 'boothno', 'booth', 'pollingstationno', 'pollingstationnumber',
+    'psno', 'psnumber', 'partno', 'partnumber', 'stationno', 'boothcode',
+  ],
+  voterGroup: [
+    'votergroup', '100votergroup', 'cluster', 'group', 'votergroupno',
+    'votercluster', 'unit',
+  ],
+  caste: [
+    'caste', 'community', 'socialcategory', 'category', 'subcaste',
+  ],
+  profession: [
+    'profession', 'occupation', 'employment', 'job',
+  ],
+  politicalPreference: [
+    'politicalpreference', 'preference', 'partypreference', 'leaning',
+    'affiliation', 'party', 'supporter',
+  ],
+};
+
+export function extractRowValue(row: any, systemKey: string, mapping?: Record<string, string>): string {
+  if (!row || typeof row !== 'object') return '';
+
+  // 1. Explicit user/caller column mapping
+  if (mapping) {
+    for (const [excelCol, mappedKey] of Object.entries(mapping)) {
+      if (mappedKey === systemKey && row[excelCol] !== undefined && row[excelCol] !== null && String(row[excelCol]).trim() !== '') {
+        return String(row[excelCol]).trim();
+      }
+    }
+  }
+
+  // 2. Direct property access
+  if (row[systemKey] !== undefined && row[systemKey] !== null && String(row[systemKey]).trim() !== '') {
+    return String(row[systemKey]).trim();
+  }
+
+  // 3. Normalized fuzzy lookup against known aliases
+  const aliases = SYSTEM_FIELD_ALIASES[systemKey] || [normalizeColumnKey(systemKey)];
+  const rowEntries = Object.entries(row);
+
+  for (const [rawKey, rawVal] of rowEntries) {
+    if (rawVal === undefined || rawVal === null || String(rawVal).trim() === '') continue;
+    const normKey = normalizeColumnKey(rawKey);
+    if (aliases.includes(normKey)) {
+      return String(rawVal).trim();
+    }
+  }
+
+  return '';
+}
 
 export class ApplicationsService {
   /**
@@ -284,6 +388,131 @@ export class ApplicationsService {
     }
 
     return config;
+  }
+
+  /**
+   * Authoritatively resolves the target constituency for an application or import job
+   */
+  static async resolveConstituencyForApp(
+    config: any,
+    targetConstituencyId?: string
+  ): Promise<any> {
+    let constituency: any = null;
+
+    if (targetConstituencyId) {
+      const targetId = targetConstituencyId.trim();
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId)) {
+        try {
+          constituency = await prisma.constituency.findUnique({
+            where: { id: targetId },
+            include: { parliament: { include: { zone: { include: { state: true } } } } },
+          });
+        } catch {}
+      }
+      if (!constituency) {
+        constituency = await prisma.constituency.findUnique({
+          where: { code: targetId },
+          include: { parliament: { include: { zone: { include: { state: true } } } } },
+        });
+      }
+      if (!constituency) {
+        const cleanName = targetId.replace(/\s*\(AC.*?\)\s*/gi, '').trim();
+        const matches = await prisma.constituency.findMany({
+          where: { name: { equals: cleanName, mode: 'insensitive' } },
+          include: { parliament: { include: { zone: { include: { state: true } } } } },
+        });
+        if (matches.length === 1) {
+          constituency = matches[0];
+        } else if (matches.length > 1) {
+          const err: any = new Error(`Ambiguous target constituency '${targetConstituencyId}'. Multiple matches found.`);
+          err.statusCode = 400;
+          throw err;
+        }
+      }
+      if (!constituency) {
+        const err: any = new Error(`Target constituency '${targetConstituencyId}' not found.`);
+        err.statusCode = 404;
+        throw err;
+      }
+      return constituency;
+    }
+
+    // 1. Try resolving via configured parliament on this application
+    if (config?.parliamentCode || config?.parliamentName) {
+      const p: any = await prisma.parliament.findFirst({
+        where: {
+          OR: [
+            ...(config.parliamentCode ? [{ code: config.parliamentCode }] : []),
+            ...(config.parliamentName ? [{ name: { equals: config.parliamentName, mode: 'insensitive' as const } }] : []),
+          ],
+        },
+        include: {
+          constituencies: {
+            include: { parliament: { include: { zone: { include: { state: true } } } } },
+            take: 1,
+          },
+        },
+      });
+      if (p?.constituencies?.[0]) {
+        return p.constituencies[0];
+      }
+    }
+
+    // 2. Try resolving via tenant organisation hierarchy
+    if (config?.organisationId) {
+      const orgState: any = await prisma.state.findFirst({
+        where: { organisationId: config.organisationId },
+        include: {
+          zones: {
+            include: {
+              parliaments: {
+                include: {
+                  constituencies: {
+                    include: { parliament: { include: { zone: { include: { state: true } } } } },
+                    take: 1,
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+      for (const z of orgState?.zones || []) {
+        for (const p of z.parliaments || []) {
+          if (p.constituencies?.[0]) {
+            return p.constituencies[0];
+          }
+        }
+      }
+    }
+
+    // 3. Try matching constituency name by app organisationName / headerTitle
+    if (config?.organisationName || config?.headerTitle) {
+      constituency = await prisma.constituency.findFirst({
+        where: {
+          OR: [
+            ...(config.organisationName ? [{ name: { contains: config.organisationName, mode: 'insensitive' as const } }] : []),
+            ...(config.headerTitle ? [{ name: { contains: config.headerTitle, mode: 'insensitive' as const } }] : []),
+          ],
+        },
+        include: { parliament: { include: { zone: { include: { state: true } } } } },
+      });
+      if (constituency) return constituency;
+    }
+
+    // 4. System fallback: Pick first available constituency in the database
+    constituency = await prisma.constituency.findFirst({
+      include: { parliament: { include: { zone: { include: { state: true } } } } },
+      orderBy: { name: 'asc' },
+    });
+
+    if (!constituency) {
+      const err: any = new Error(`No valid constituency configured or available for application '${config?.id || 'unknown'}'.`);
+      err.statusCode = 404;
+      throw err;
+    }
+
+    return constituency;
   }
 
   /**
@@ -1588,50 +1817,8 @@ export class ApplicationsService {
 
     const mapping = options?.columnMapping;
 
-    // Extract value using mapping or direct raw keys
-    const getRowValue = (row: any, systemKey: string): string => {
-      if (mapping) {
-        for (const [excelCol, mappedKey] of Object.entries(mapping)) {
-          if (mappedKey === systemKey && row[excelCol] !== undefined && row[excelCol] !== '') {
-            return String(row[excelCol]).trim();
-          }
-        }
-      }
-      switch (systemKey) {
-        case 'epicNumber':
-          return String(row.epicNumber || row.epic || row.voterId || row['Voter ID / EPIC'] || row['Voter ID'] || row['EPIC'] || '').trim();
-        case 'fullName':
-          return String(row.fullName || row.name || row['Full Name'] || row['Voter Name'] || '').trim();
-        case 'relativeName':
-          return String(row.relativeName || row.fatherHusbandName || row['Relative Name'] || row['Father/Husband Name'] || '').trim();
-        case 'relationType':
-          return String(row.relationType || row['Relation Type'] || '').trim();
-        case 'age':
-          return String(row.age || row['Age'] || '').trim();
-        case 'gender':
-          return String(row.gender || row['Gender'] || '').trim();
-        case 'mobileNumber':
-          return String(row.mobileNumber || row.phone || row['Mobile Number'] || '').trim();
-        case 'houseNumber':
-          return String(row.houseNumber || row.doorNo || row['House No'] || row['Door No'] || '').trim();
-        case 'mandal':
-          return String(row.mandal || row.mandalName || row['Mandal'] || '').trim();
-        case 'village':
-          return String(row.village || row.villageName || row.panchayat || row['Village'] || '').trim();
-        case 'boothNumber':
-          return String(row.boothNumber || row.booth || row['Booth Number'] || '').trim();
-        case 'voterGroup':
-          return String(row.voterGroup || row['100-Voter Group'] || row.cluster || '').trim();
-        case 'caste':
-          return String(row.caste || row['Caste'] || '').trim();
-        case 'profession':
-          return String(row.profession || row['Profession'] || '').trim();
-        case 'politicalPreference':
-          return String(row.politicalPreference || row['Political Preference'] || '').trim();
-        default:
-          return String(row[systemKey] || '').trim();
-      }
-    };
+    // Extract value using robust normalized fuzzy mapping
+    const getRowValue = (row: any, systemKey: string): string => extractRowValue(row, systemKey, mapping);
 
     // Pre-fetch existing voter EPICs in database to detect duplicates
     const allEpicsInFile: string[] = [];
@@ -1908,108 +2095,13 @@ export class ApplicationsService {
     }
 
     // Helper to get row value using mapping or fallback
-    const getRowValue = (row: any, systemKey: string): string => {
-      if (mapping) {
-        for (const [excelCol, mappedKey] of Object.entries(mapping)) {
-          if (mappedKey === systemKey && row[excelCol] !== undefined && row[excelCol] !== '') {
-            return String(row[excelCol]).trim();
-          }
-        }
-      }
-      switch (systemKey) {
-        case 'epicNumber':
-          return String(row.epicNumber || row.epic || row.voterId || row['Voter ID / EPIC'] || row['Voter ID'] || row['EPIC'] || '').trim();
-        case 'fullName':
-          return String(row.fullName || row.name || row['Full Name'] || row['Voter Name'] || '').trim();
-        case 'relativeName':
-          return String(row.relativeName || row.fatherHusbandName || row['Relative Name'] || row['Father/Husband Name'] || '').trim();
-        case 'relationType':
-          return String(row.relationType || row['Relation Type'] || '').trim();
-        case 'age':
-          return String(row.age || row['Age'] || '').trim();
-        case 'gender':
-          return String(row.gender || row['Gender'] || '').trim();
-        case 'mobileNumber':
-          return String(row.mobileNumber || row.phone || row['Mobile Number'] || '').trim();
-        case 'houseNumber':
-          return String(row.houseNumber || row.doorNo || row['House No'] || row['Door No'] || '').trim();
-        case 'mandal':
-          return String(row.mandal || row.mandalName || row['Mandal'] || '').trim();
-        case 'village':
-          return String(row.village || row.villageName || row.panchayat || row['Village'] || '').trim();
-        case 'boothNumber':
-          return String(row.boothNumber || row.booth || row['Booth Number'] || '').trim();
-        case 'voterGroup':
-          return String(row.voterGroup || row['100-Voter Group'] || row.cluster || '').trim();
-        case 'caste':
-          return String(row.caste || row['Caste'] || '').trim();
-        case 'profession':
-          return String(row.profession || row['Profession'] || '').trim();
-        case 'politicalPreference':
-          return String(row.politicalPreference || row['Political Preference'] || '').trim();
-        default:
-          return String(row[systemKey] || '').trim();
-      }
-    };
+    const getRowValue = (row: any, systemKey: string): string => extractRowValue(row, systemKey, mapping);
 
     // 1. Resolve Target Constituency strictly & deterministically
-    let constituency: any = null;
-    if (options.targetConstituencyId) {
-      const targetId = options.targetConstituencyId.trim();
-      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId)) {
-        try {
-          constituency = await prisma.constituency.findUnique({
-            where: { id: targetId },
-            include: { parliament: { include: { zone: { include: { state: true } } } } },
-          });
-        } catch {}
-      }
-      if (!constituency) {
-        constituency = await prisma.constituency.findUnique({
-          where: { code: targetId },
-          include: { parliament: { include: { zone: { include: { state: true } } } } },
-        });
-      }
-      if (!constituency) {
-        const cleanName = targetId.replace(/\s*\(AC.*?\)\s*/gi, '').trim();
-        const matches = await prisma.constituency.findMany({
-          where: { name: { equals: cleanName, mode: 'insensitive' } },
-          include: { parliament: { include: { zone: { include: { state: true } } } } },
-        });
-        if (matches.length === 1) {
-          constituency = matches[0];
-        } else if (matches.length > 1) {
-          const err: any = new Error(`Ambiguous target constituency '${options.targetConstituencyId}'. Multiple matches found.`);
-          err.statusCode = 400;
-          throw err;
-        }
-      }
-      // Fail closed: explicit targetConstituencyId provided but not found
-      if (!constituency) {
-        const err: any = new Error(`Target constituency '${options.targetConstituencyId}' not found.`);
-        err.statusCode = 404;
-        throw err;
-      }
-    }
-
-    if (!constituency) {
-      // Resolve app's configured default constituency only when no target was specified
-      constituency = await prisma.constituency.findFirst({
-        where: {
-          OR: [
-            { name: { contains: config.organisationName, mode: 'insensitive' } },
-            { name: { contains: config.headerTitle || '', mode: 'insensitive' } },
-          ],
-        },
-        include: { parliament: { include: { zone: { include: { state: true } } } } },
-      });
-    }
-
-    if (!constituency) {
-      const err: any = new Error(`No valid constituency configured for application '${appId}'.`);
-      err.statusCode = 404;
-      throw err;
-    }
+    const constituency = await this.resolveConstituencyForApp(config, options.targetConstituencyId);
+    const resolvedParliamentId = constituency.parliamentId || constituency.parliament?.id || null;
+    const resolvedZoneId = constituency.parliament?.zoneId || constituency.parliament?.zone?.id || null;
+    const resolvedStateId = constituency.parliament?.zone?.stateId || constituency.parliament?.zone?.state?.id || null;
 
     // 2. Enforce Hierarchy Scope Authorization (P1-A reuse)
     if (scope && !scope.isGlobalScope) {
@@ -2402,6 +2494,9 @@ export class ApplicationsService {
           caste: item.caste,
           profession: item.profession,
           politicalPreference: item.politicalPref,
+          stateId: resolvedStateId,
+          zoneId: resolvedZoneId,
+          parliamentId: resolvedParliamentId,
           constituencyId: constituency.id,
           mandalId: item.mandalId,
           villageId: item.villageId,
@@ -2516,6 +2611,9 @@ export class ApplicationsService {
                       caste: item.caste,
                       profession: item.profession,
                       politicalPreference: item.politicalPref,
+                      stateId: resolvedStateId,
+                      zoneId: resolvedZoneId,
+                      parliamentId: resolvedParliamentId,
                       constituencyId: constituency.id,
                       mandalId: item.mandalId,
                       villageId: item.villageId,
@@ -2539,6 +2637,9 @@ export class ApplicationsService {
                     caste: item.caste,
                     profession: item.profession,
                     politicalPreference: item.politicalPref,
+                    stateId: resolvedStateId,
+                    zoneId: resolvedZoneId,
+                    parliamentId: resolvedParliamentId,
                     constituencyId: constituency.id,
                     mandalId: item.mandalId,
                     villageId: item.villageId,
@@ -3432,23 +3533,104 @@ export class ApplicationsService {
    * Get incharge operational performance summary
    */
   static async getInchargePerformance(appId: string) {
-    await this.resolveApplication(appId);
-    const totalAssignments = await prisma.userHierarchyAssignment.count({ where: { isActive: true } });
-    const inactiveAssignments = await prisma.userHierarchyAssignment.count({ where: { isActive: false } });
-    const totalVoters = await prisma.voter.count();
-    const surveyedVoters = await prisma.voter.count({ where: { surveyStatus: 'SURVEYED' } });
-    const verifiedVoters = await prisma.voter.count({ where: { surveyStatus: 'VERIFIED' } });
+    const config = await this.resolveApplication(appId);
+
+    // Resolve tenant-scoped constituencies to guarantee strict multi-tenant isolation
+    let tenantConstituencyIds: string[] = [];
+    if (config.organisationId) {
+      const orgConstituencies = await prisma.constituency.findMany({
+        where: {
+          parliament: {
+            zone: {
+              state: {
+                organisationId: config.organisationId,
+              },
+            },
+          },
+        },
+        select: { id: true },
+      });
+      tenantConstituencyIds = orgConstituencies.map((c) => c.id);
+    }
+
+    const voterScope: Prisma.VoterWhereInput = tenantConstituencyIds.length > 0
+      ? { constituencyId: { in: tenantConstituencyIds } }
+      : { constituencyId: '00000000-0000-0000-0000-000000000000' };
+
+    const assignmentScope: Prisma.UserHierarchyAssignmentWhereInput = tenantConstituencyIds.length > 0
+      ? { constituencyId: { in: tenantConstituencyIds } }
+      : { constituencyId: '00000000-0000-0000-0000-000000000000' };
+
+    const [
+      totalAssignments,
+      inactiveAssignments,
+      voterSurveyGroups,
+      voterVoteGroups,
+      assignedVoters,
+      mandals,
+    ] = await Promise.all([
+      prisma.userHierarchyAssignment.count({
+        where: { ...assignmentScope, isActive: true },
+      }),
+      prisma.userHierarchyAssignment.count({
+        where: { ...assignmentScope, isActive: false },
+      }),
+      prisma.voter.groupBy({
+        by: ['surveyStatus'],
+        where: voterScope,
+        _count: { _all: true },
+      }),
+      prisma.voter.groupBy({
+        by: ['voteStatus'],
+        where: voterScope,
+        _count: { _all: true },
+      }),
+      prisma.voter.count({
+        where: { ...voterScope, assignedInchargeId: { not: null } },
+      }),
+      tenantConstituencyIds.length > 0
+        ? prisma.mandal.findMany({
+            where: { constituencyId: { in: tenantConstituencyIds } },
+            select: { name: true },
+            take: 5,
+            orderBy: { name: 'asc' },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    let totalVoters = 0;
+    let completedSurveys = 0;
+    for (const g of voterSurveyGroups) {
+      const count = Number(g._count._all || 0);
+      totalVoters += count;
+      if (g.surveyStatus === 'SURVEYED' || g.surveyStatus === 'VERIFIED') {
+        completedSurveys += count;
+      }
+    }
+
+    let votedCount = 0;
+    for (const v of voterVoteGroups) {
+      if (v.voteStatus === 'VOTE_DONE') {
+        votedCount += Number(v._count._all || 0);
+      }
+    }
+
+    const pendingVoters = Math.max(0, totalVoters - assignedVoters);
+    const avgTurnoutLogged = totalVoters > 0
+      ? `${((votedCount / totalVoters) * 100).toFixed(1)}%`
+      : '0.0%';
+    const topPerformingMandals = mandals.map((m) => m.name);
 
     return {
       totalIncharges: totalAssignments,
       activeIncharges: totalAssignments,
       inactiveIncharges: inactiveAssignments,
       totalVoters,
-      assignedVoters: Math.round(totalVoters * 0.85),
-      pendingVoters: Math.round(totalVoters * 0.15),
-      completedSurveys: surveyedVoters + verifiedVoters,
-      avgTurnoutLogged: '73.4%',
-      topPerformingMandals: ['Kondapi', 'Ponnaluru', 'Marripudi'],
+      assignedVoters,
+      pendingVoters,
+      completedSurveys,
+      avgTurnoutLogged,
+      topPerformingMandals,
     };
   }
 
@@ -3473,9 +3655,16 @@ export class ApplicationsService {
 
     const where: any = {};
 
-    // Explicitly scope query to the target application's organization
+    // Explicitly scope query to the target application's organization (via direct state OR constituency hierarchy chain)
     if (config.organisationId) {
-      where.state = { organisationId: config.organisationId };
+      where.AND = [
+        {
+          OR: [
+            { state: { organisationId: config.organisationId } },
+            { constituency: { parliament: { zone: { state: { organisationId: config.organisationId } } } } },
+          ],
+        },
+      ];
     } else {
       where.state = { organisationId: '00000000-0000-0000-0000-000000000000' };
     }
@@ -3540,10 +3729,15 @@ export class ApplicationsService {
       }
     }
     if (query?.search) {
-      where.OR = [
-        { name: { contains: query.search, mode: 'insensitive' } },
-        { epicNumber: { contains: query.search, mode: 'insensitive' } },
-        { mobileNumber: { contains: query.search } },
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        {
+          OR: [
+            { name: { contains: query.search, mode: 'insensitive' } },
+            { epicNumber: { contains: query.search, mode: 'insensitive' } },
+            { mobileNumber: { contains: query.search } },
+          ],
+        },
       ];
     }
 
@@ -3557,7 +3751,7 @@ export class ApplicationsService {
           booth: true,
           voterGroup: true,
         },
-        orderBy: { serialNumber: 'asc' },
+        orderBy: [{ serialNumber: 'asc' }, { id: 'asc' }],
         skip,
         take: limit,
       }),
@@ -3638,10 +3832,14 @@ export class ApplicationsService {
       }
     }
 
-    const [totalVoters, verifiedVoters, totalBooths, totalGroups, totalIncharges, totalTasks, totalMandals, totalConstituencies] =
+    // Consolidate voter counts into a single groupBy query to avoid double full-table scans
+    const [voterSurveyGroups, totalBooths, totalGroups, totalIncharges, totalTasks, totalMandals, totalConstituencies] =
       await Promise.all([
-        prisma.voter.count({ where: scopeWhere }),
-        prisma.voter.count({ where: { ...scopeWhere, surveyStatus: 'VERIFIED' } }),
+        prisma.voter.groupBy({
+          by: ['surveyStatus'],
+          where: scopeWhere,
+          _count: { _all: true },
+        }),
         prisma.booth.count({ where: boothFilter }),
         prisma.voterGroup.count({ where: voterGroupFilter }),
         prisma.userHierarchyAssignment.count({ where: userFilter }),
@@ -3655,6 +3853,16 @@ export class ApplicationsService {
               ? 7
               : prisma.constituency.count({ where: constituencyFilter }),
       ]);
+
+    let totalVoters = 0;
+    let verifiedVoters = 0;
+    for (const g of voterSurveyGroups) {
+      const count = Number(g._count._all || 0);
+      totalVoters += count;
+      if (g.surveyStatus === 'VERIFIED') {
+        verifiedVoters += count;
+      }
+    }
 
     return {
       applicationId: config.id,

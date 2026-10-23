@@ -8,6 +8,7 @@ import {
   fetchLiveTurnoutSummaryByUser,
   fetchTasksForUnit,
   fetchTrainingProgressForUnit,
+  fetchVoters,
   fetchVotersForUnit,
   type CadreNetworkItem,
   type ChildAnalyticsItem,
@@ -52,7 +53,9 @@ import {
   Activity,
   Globe,
   Plus,
-  Crown
+  Crown,
+  Loader2,
+  Database,
 } from 'lucide-react';
 import MandalInchargeDashboard from './MandalInchargeDashboard';
 import AIStrategicIntelligenceCenter from './AIStrategicIntelligenceCenter';
@@ -95,6 +98,7 @@ interface ConstituencyInchargeDashboardProps {
 
 type ConstTabType = 
   | 'dashboard'
+  | 'electoral_roll'
   | 'mandal_list'
   | 'village_list'
   | 'tasks'
@@ -110,6 +114,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 
 const CONST_TAB_TO_PATH: Record<ConstTabType, string> = {
   dashboard: '/constituency',
+  electoral_roll: '/constituency/electoral_roll',
   mandal_list: '/constituency/mandal_list',
   village_list: '/constituency/village_list',
   tasks: '/constituency/tasks',
@@ -125,6 +130,9 @@ const CONST_TAB_TO_PATH: Record<ConstTabType, string> = {
 const CONST_PATH_TO_TAB: Record<string, ConstTabType> = {
   '': 'dashboard',
   dashboard: 'dashboard',
+  electoral_roll: 'electoral_roll',
+  'electoral-roll': 'electoral_roll',
+  voters: 'electoral_roll',
   mandal_list: 'mandal_list',
   mandals: 'mandal_list',
   village_list: 'village_list',
@@ -188,6 +196,14 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
     setIsSidebarOpen(false);
   };
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsSidebarOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
   const [drilledMandal, setDrilledMandal] = useState<string | null>(null);
   const [selectedMandalInVillageList, setSelectedMandalInVillageList] = useState<string | null>(null);
   const [backendSummary, setBackendSummary] = useState<HierarchySummaryPayload | null>(null);
@@ -647,43 +663,8 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
   const [fakeSearch, setFakeSearch] = useState('');
   const [fakeFilterStatus, setFakeFilterStatus] = useState<string>('ALL');
   const [flaggedVoters, setFlaggedVoters] = useState<FlaggedVoter[]>([]);
-
-  useEffect(() => {
-    if (scopedVoters && scopedVoters.length > 0) {
-      const flagged = scopedVoters
-        .filter(v => v.voterStatus === 'Doubtful' || v.voterStatus === 'Fake' || v.voterStatus === 'Shifted' || v.voterStatus === 'Deceased')
-        .map((v, index) => ({
-          sNo: index + 1,
-          name: v.name,
-          epic: v.epicNumber,
-          age: v.age,
-          gender: v.gender,
-          village: v.village,
-          mandal: v.mandal,
-          booth: v.boothNumber,
-          reason: v.notes || `${v.voterStatus} Record`,
-          status: (v.voterStatus === 'Fake' ? 'FLAGGED' : 'UNDER VERIFICATION') as FlaggedVoter['status'],
-        }));
-      setFlaggedVoters(flagged);
-    } else {
-      setFlaggedVoters([]);
-    }
-  }, [scopedVoters]);
-
-  const [auditingVoter, setAuditingVoter] = useState<FlaggedVoter | null>(null);
-
-  const filteredFlaggedVoters = useMemo(() => {
-    return flaggedVoters.filter(v => {
-      const matchSearch = 
-        (v.name || '').toLowerCase().includes((fakeSearch || '').toLowerCase()) ||
-        (v.epic || '').toLowerCase().includes((fakeSearch || '').toLowerCase()) ||
-        (v.village || '').toLowerCase().includes((fakeSearch || '').toLowerCase()) ||
-        (v.mandal || '').toLowerCase().includes((fakeSearch || '').toLowerCase());
-
-      const matchStatus = fakeFilterStatus === 'ALL' || v.status === fakeFilterStatus;
-      return matchSearch && matchStatus;
-    });
-  }, [flaggedVoters, fakeSearch, fakeFilterStatus]);
+  const [flaggedTotal, setFlaggedTotal] = useState(0);
+  const [isFlaggedLoading, setIsFlaggedLoading] = useState(false);
 
   // Pagination states
   const [villagesPage, setVillagesPage] = useState(1);
@@ -692,15 +673,73 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
   const [flaggedPageSize, setFlaggedPageSize] = useState(15);
   const [migratedPage, setMigratedPage] = useState(1);
   const [migratedPageSize, setMigratedPageSize] = useState(15);
+  const [electoralPage, setElectoralPage] = useState(1);
+  const [electoralPageSize, setElectoralPageSize] = useState(15);
+  const [electoralVoters, setElectoralVoters] = useState<Voter[]>([]);
+  const [electoralTotal, setElectoralTotal] = useState(0);
+  const [isElectoralLoading, setIsElectoralLoading] = useState(false);
+  const [electoralError, setElectoralError] = useState<string | null>(null);
+  const [electoralSearch, setElectoralSearch] = useState('');
+  const [electoralPrefFilter, setElectoralPrefFilter] = useState('ALL');
+  const [electoralGenderFilter, setElectoralGenderFilter] = useState('ALL');
 
   useEffect(() => {
     setFlaggedPage(1);
   }, [fakeSearch, fakeFilterStatus]);
 
-  const paginatedFlaggedVoters = useMemo(() => {
-    const start = (flaggedPage - 1) * flaggedPageSize;
-    return filteredFlaggedVoters.slice(start, start + flaggedPageSize);
-  }, [filteredFlaggedVoters, flaggedPage, flaggedPageSize]);
+  useEffect(() => {
+    if (activeTab !== 'fake_votes') return;
+    let active = true;
+    setIsFlaggedLoading(true);
+
+    const voterStatus =
+      fakeFilterStatus === 'FLAGGED'
+        ? ('FAKE' as any)
+        : fakeFilterStatus === 'UNDER VERIFICATION'
+        ? ('DOUBTFUL' as any)
+        : undefined;
+
+    fetchVoters({
+      unitId: session.unitId,
+      page: flaggedPage,
+      limit: flaggedPageSize,
+      search: fakeSearch || undefined,
+      voterStatus,
+    })
+      .then((res) => {
+        if (!active) return;
+        const mapped = res.items.map((v, index) => ({
+          sNo: (flaggedPage - 1) * flaggedPageSize + index + 1,
+          name: v.name,
+          epic: v.epicNumber,
+          age: v.age,
+          gender: v.gender,
+          village: v.village,
+          mandal: v.mandal,
+          booth: v.boothNumber,
+          reason: v.notes || `${v.voterStatus} Record`,
+          status: (v.voterStatus === 'Fake' || (v.voterStatus as string) === 'FAKE' ? 'FLAGGED' : 'UNDER VERIFICATION') as FlaggedVoter['status'],
+        }));
+        setFlaggedVoters(mapped);
+        setFlaggedTotal(res.total);
+      })
+      .catch(() => {
+        if (!active) return;
+        setFlaggedVoters([]);
+        setFlaggedTotal(0);
+      })
+      .finally(() => {
+        if (active) setIsFlaggedLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [activeTab, session.unitId, flaggedPage, flaggedPageSize, fakeSearch, fakeFilterStatus]);
+
+  const [auditingVoter, setAuditingVoter] = useState<FlaggedVoter | null>(null);
+
+  const paginatedFlaggedVoters = flaggedVoters;
 
   // --- Strategic Intelligence ---
   const [isGeneratingAnalysis, setIsGeneratingAnalysis] = useState(false);
@@ -843,49 +882,103 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
     assistanceRequired: 'NONE' as const, assignedVolunteer: '', notes: ''
   });
 
+  const [migratedTotal, setMigratedTotal] = useState(0);
+  const [isMigratedLoading, setIsMigratedLoading] = useState(false);
+
   useEffect(() => {
-    const derivedMigrated = scopedVoters
-      .filter((voter) => voter.voterLocationStatus === 'Migrated')
-      .map((voter) => ({
-        id: voter.epicNumber,
-        name: voter.name,
-        epic: voter.epicNumber,
-        mandal: voter.mandal,
-        village: voter.village,
-        booth: voter.boothNumber,
-        currentLocation: voter.currentLocation || 'Unknown',
-        contactNumber: voter.mobileNumber || 'N/A',
-        travelStatus: 'PENDING_CONFIRMATION' as const,
-        assistanceRequired: 'NONE' as const,
-        assignedVolunteer: '',
-        notes: voter.notes || '',
-      }));
+    if (activeTab !== 'migrated_voters') return;
+    let active = true;
+    setIsMigratedLoading(true);
 
-    setMigratedVotersList((prev) => {
-      const manualOnly = prev.filter((item) => item.id.startsWith('M-'));
-      return [...derivedMigrated, ...manualOnly];
-    });
-  }, [scopedVoters]);
+    fetchVoters({
+      unitId: session.unitId,
+      page: migratedPage,
+      limit: migratedPageSize,
+      search: migratedSearch || undefined,
+      voterLocationStatus: 'MIGRATED' as any,
+    })
+      .then((res) => {
+        if (!active) return;
+        const derivedMigrated = res.items.map((voter) => ({
+          id: voter.epicNumber,
+          name: voter.name,
+          epic: voter.epicNumber,
+          mandal: voter.mandal,
+          village: voter.village,
+          booth: voter.boothNumber,
+          currentLocation: voter.currentLocation || 'Unknown',
+          contactNumber: voter.mobileNumber || 'N/A',
+          travelStatus: 'PENDING_CONFIRMATION' as const,
+          assistanceRequired: 'NONE' as const,
+          assignedVolunteer: '',
+          notes: voter.notes || '',
+        }));
+        setMigratedVotersList(derivedMigrated);
+        setMigratedTotal(res.total);
+      })
+      .catch(() => {
+        if (!active) return;
+        setMigratedVotersList([]);
+        setMigratedTotal(0);
+      })
+      .finally(() => {
+        if (active) setIsMigratedLoading(false);
+      });
 
-  const filteredMigratedVoters = useMemo(() => {
-    return migratedVotersList.filter(v => {
-      const matchSearch = 
-        (v.name || '').toLowerCase().includes((migratedSearch || '').toLowerCase()) ||
-        (v.epic || '').toLowerCase().includes((migratedSearch || '').toLowerCase()) ||
-        (v.currentLocation || '').toLowerCase().includes((migratedSearch || '').toLowerCase()) ||
-        (v.assignedVolunteer || '').toLowerCase().includes((migratedSearch || '').toLowerCase());
-      
-      const matchMandal = migratedMandalFilter === 'ALL' || v.mandal === migratedMandalFilter;
-      const matchStatus = migratedStatusFilter === 'ALL' || v.travelStatus === migratedStatusFilter;
+    return () => {
+      active = false;
+    };
+  }, [activeTab, session.unitId, migratedPage, migratedPageSize, migratedSearch]);
 
-      return matchSearch && matchMandal && matchStatus;
-    });
-  }, [migratedVotersList, migratedSearch, migratedMandalFilter, migratedStatusFilter]);
+  // --- Constituency Electoral Roll Query ---
+  useEffect(() => {
+    setElectoralPage(1);
+  }, [electoralSearch, electoralPrefFilter, electoralGenderFilter]);
 
-  const paginatedMigratedVoters = useMemo(() => {
-    const start = (migratedPage - 1) * migratedPageSize;
-    return filteredMigratedVoters.slice(start, start + migratedPageSize);
-  }, [filteredMigratedVoters, migratedPage, migratedPageSize]);
+  const loadElectoralRoll = () => {
+    if (activeTab !== 'electoral_roll') return;
+    let active = true;
+    setIsElectoralLoading(true);
+    setElectoralError(null);
+
+    fetchVoters({
+      unitId: session.unitId,
+      constituencyId: session.unitId,
+      page: electoralPage,
+      limit: electoralPageSize,
+      search: electoralSearch.trim() || undefined,
+      politicalPreference: electoralPrefFilter !== 'ALL' ? electoralPrefFilter : undefined,
+    })
+      .then((res) => {
+        if (!active) return;
+        let items = res.items || [];
+        if (electoralGenderFilter !== 'ALL') {
+          items = items.filter((v) => v.gender?.toUpperCase() === electoralGenderFilter.toUpperCase());
+        }
+        setElectoralVoters(items);
+        setElectoralTotal(res.total);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setElectoralError(err?.message || 'Failed to load electoral roll');
+        setElectoralVoters([]);
+        setElectoralTotal(0);
+      })
+      .finally(() => {
+        if (active) setIsElectoralLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  };
+
+  useEffect(() => {
+    const cleanup = loadElectoralRoll();
+    return cleanup;
+  }, [activeTab, session.unitId, electoralPage, electoralPageSize, electoralSearch, electoralPrefFilter, electoralGenderFilter]);
+
+  const paginatedMigratedVoters = migratedVotersList;
 
   const handleUpdateMigratedVoter = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1002,6 +1095,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1 no-scrollbar">
           {[
             { id: 'dashboard', name: 'Dashboard', icon: Home },
+            { id: 'electoral_roll', name: 'Electoral Roll', icon: Database },
             { id: 'mandal_list', name: 'Mandal List', icon: Layers },
             { id: 'village_list', name: 'Village List', icon: MapPin },
             { id: 'tasks', name: 'High Command Tasks', icon: Calendar },
@@ -1049,6 +1143,15 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
           </button>
         </div>
       </aside>
+
+      {/* Mobile Drawer Backdrop */}
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
 
       {/* --------------------------------------------------------
           MAIN DISPLAY VIEW AREA
@@ -1284,6 +1387,232 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                 </div>
               </div>
 
+            </div>
+          )}
+
+          {/* --------------------------------------------------------
+              TAB: CONSTITUENCY ELECTORAL ROLL
+             -------------------------------------------------------- */}
+          {activeTab === 'electoral_roll' && (
+            <div className="space-y-6 animate-fade-in" id="const-electoral-roll-tab">
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-5">
+                {/* Header & Quick stats */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="p-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200">
+                        <Database className="w-4 h-4" />
+                      </span>
+                      <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">Constituency Electoral Roll</h3>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Official verified voter records across all Mandals and Booths in this Assembly Constituency.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs bg-slate-100 border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-black">
+                      Total Voters: {electoralTotal.toLocaleString()}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void loadElectoralRoll()}
+                      disabled={isElectoralLoading}
+                      className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+                      title="Refresh Roll"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${isElectoralLoading ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Search & Filter Bar */}
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                  <div className="sm:col-span-6 relative">
+                    <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search by Voter Name, EPIC ID, Relative Name, or Mobile..."
+                      value={electoralSearch}
+                      onChange={(e) => setElectoralSearch(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <select
+                      value={electoralPrefFilter}
+                      onChange={(e) => setElectoralPrefFilter(e.target.value)}
+                      className="w-full py-2 px-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-none focus:border-amber-400"
+                    >
+                      <option value="ALL">All Political Alignments</option>
+                      <option value="TDP">TDP (Support)</option>
+                      <option value="YSRCP">YSRCP</option>
+                      <option value="JSP">JSP</option>
+                      <option value="BJP">BJP</option>
+                      <option value="INC">INC</option>
+                      <option value="Neutral">Neutral</option>
+                      <option value="OTH">Other</option>
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <select
+                      value={electoralGenderFilter}
+                      onChange={(e) => setElectoralGenderFilter(e.target.value)}
+                      className="w-full py-2 px-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-none focus:border-amber-400"
+                    >
+                      <option value="ALL">All Genders</option>
+                      <option value="MALE">Male</option>
+                      <option value="FEMALE">Female</option>
+                      <option value="OTHER">Other</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Error Banner */}
+                {electoralError && !isElectoralLoading && (
+                  <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between text-red-700 text-xs font-bold">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                      <span>{electoralError}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void loadElectoralRoll()}
+                      className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-[10px] font-black uppercase tracking-wider cursor-pointer"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+
+                {/* Loading State */}
+                {isElectoralLoading && (
+                  <div className="py-16 text-center space-y-3">
+                    <Loader2 className="w-8 h-8 animate-spin text-amber-500 mx-auto" />
+                    <p className="text-xs font-bold text-slate-500">Querying verified electoral roll records...</p>
+                  </div>
+                )}
+
+                {/* Empty State */}
+                {!isElectoralLoading && !electoralError && electoralVoters.length === 0 && (
+                  <div className="py-16 text-center space-y-3 border-2 border-dashed border-slate-200 rounded-xl">
+                    <Database className="w-10 h-10 text-slate-300 mx-auto" />
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">No Voters Found</h4>
+                      <p className="text-xs text-slate-400 font-medium max-w-sm mx-auto">
+                        No voter records match the specified filters in this constituency. Try modifying the search keyword or filter settings.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Table */}
+                {!isElectoralLoading && !electoralError && electoralVoters.length > 0 && (
+                  <div className="space-y-4">
+                    <div className="overflow-x-auto rounded-lg border border-slate-200">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-black uppercase text-[10px] tracking-wider">
+                            <th className="py-3 px-3.5 text-center">S.No</th>
+                            <th className="py-3 px-3.5">EPIC ID</th>
+                            <th className="py-3 px-3.5">Voter Details</th>
+                            <th className="py-3 px-3.5">Relative</th>
+                            <th className="py-3 px-3.5">Age / Gender</th>
+                            <th className="py-3 px-3.5">Mandal / Village</th>
+                            <th className="py-3 px-3.5">Booth</th>
+                            <th className="py-3 px-3.5">Preference</th>
+                            <th className="py-3 px-3.5 text-center">Vote Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                          {electoralVoters.map((voter, idx) => {
+                            const prefColor = CONST_PARTY_COLORS[voter.politicalPreference] || '#64748b';
+                            return (
+                              <tr key={voter.id || voter.epicNumber || idx} className="hover:bg-slate-50/80 transition-colors">
+                                <td className="py-3 px-3.5 text-center text-slate-400 font-mono text-[11px]">
+                                  {(electoralPage - 1) * electoralPageSize + idx + 1}
+                                </td>
+                                <td className="py-3 px-3.5 font-mono font-black text-slate-900 tracking-wider">
+                                  {voter.epicNumber}
+                                </td>
+                                <td className="py-3 px-3.5">
+                                  <div className="font-black text-slate-950 uppercase">{voter.name}</div>
+                                  {voter.mobileNumber && (
+                                    <div className="text-[10px] text-slate-400 font-mono">{voter.mobileNumber}</div>
+                                  )}
+                                  {voter.houseNumber && (
+                                    <div className="text-[10px] text-slate-400 font-medium">H.No: {voter.houseNumber}</div>
+                                  )}
+                                </td>
+                                <td className="py-3 px-3.5 text-slate-600">
+                                  <div className="text-xs font-semibold">{voter.fatherHusbandName || '—'}</div>
+                                  <div className="text-[10px] text-slate-400 uppercase font-medium">{voter.relationType || 'Relative'}</div>
+                                </td>
+                                <td className="py-3 px-3.5 text-slate-700">
+                                  <span className="font-bold">{voter.age}</span>
+                                  <span className="text-slate-400 text-[10px] font-semibold uppercase ml-1.5">
+                                    • {voter.gender}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-3.5">
+                                  <div className="font-bold text-slate-900">{voter.mandal || '—'}</div>
+                                  <div className="text-[10px] text-slate-500 font-medium">{voter.village || '—'}</div>
+                                </td>
+                                <td className="py-3 px-3.5 font-semibold text-slate-700">
+                                  {voter.boothNumber || '—'}
+                                </td>
+                                <td className="py-3 px-3.5">
+                                  <span
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
+                                    style={{
+                                      backgroundColor: `${prefColor}15`,
+                                      color: prefColor,
+                                      border: `1px solid ${prefColor}40`,
+                                    }}
+                                  >
+                                    <span
+                                      className="w-1.5 h-1.5 rounded-full"
+                                      style={{ backgroundColor: prefColor }}
+                                    />
+                                    {voter.politicalPreference || 'Neutral'}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-3.5 text-center">
+                                  {voter.voteStatus === 'VOTE DONE' ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
+                                      <Check className="w-3 h-3 text-emerald-600" /> Voted
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200 uppercase">
+                                      Not Voted
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Pagination */}
+                    <Pagination
+                      currentPage={electoralPage}
+                      pageSize={electoralPageSize}
+                      totalItems={electoralTotal}
+                      onPageChange={setElectoralPage}
+                      onPageSizeChange={(newSize) => {
+                        setElectoralPageSize(newSize);
+                        setElectoralPage(1);
+                      }}
+                      pageSizeOptions={[10, 15, 25, 50, 100]}
+                      itemName="voters"
+                      accentColor="amber"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1602,7 +1931,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
                   {/* Villages Table */}
                   <div className="overflow-x-auto border border-slate-100 rounded-xl">
-                    <table className="w-full text-left border-collapse text-xs">
+                    <table className="w-full min-w-[700px] text-left border-collapse text-xs">
                       <thead>
                         <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-black uppercase text-[9px] tracking-wider">
                           <th className="py-3 px-4 text-center">S.No</th>
@@ -2452,7 +2781,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
                 {/* Flagged table */}
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
+                  <table className="w-full min-w-[700px] text-left border-collapse text-xs">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-black uppercase text-[9px] tracking-wider">
                         <th className="py-3 px-4 text-center">S.No</th>
@@ -2512,7 +2841,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                 <Pagination
                   currentPage={flaggedPage}
                   pageSize={flaggedPageSize}
-                  totalItems={filteredFlaggedVoters.length}
+                  totalItems={flaggedTotal}
                   onPageChange={setFlaggedPage}
                   onPageSizeChange={(newSize) => {
                     setFlaggedPageSize(newSize);
@@ -3446,7 +3775,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                     <h4 className="text-xs font-black text-slate-950 uppercase tracking-tight">Voters Directory</h4>
                     <span className="text-[10px] bg-slate-50 border border-slate-200 text-slate-500 px-2 py-0.5 rounded font-black">
-                      Matches: {filteredMigratedVoters.length}
+                      Matches: {migratedTotal}
                     </span>
                   </div>
 
@@ -3534,7 +3863,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   <Pagination
                     currentPage={migratedPage}
                     pageSize={migratedPageSize}
-                    totalItems={filteredMigratedVoters.length}
+                    totalItems={migratedTotal}
                     onPageChange={setMigratedPage}
                     onPageSizeChange={(newSize) => {
                       setMigratedPageSize(newSize);

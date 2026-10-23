@@ -33,7 +33,9 @@ import {
   ShieldAlert,
   Flame,
   CheckSquare,
-  Award
+  Award,
+  Menu,
+  X
 } from 'lucide-react';
 import { UserSession } from '../types';
 import { useCms } from '../context/CmsContext';
@@ -105,8 +107,19 @@ export default function StateDashboard({ session, onLogout }: StateDashboardProp
     }
   }, [isKnownSubPath, navigate]);
 
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsSidebarOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const setActiveTab = (tab: StateTabType) => {
     navigate(STATE_TAB_TO_PATH[tab]);
+    setIsSidebarOpen(false);
   };
   const [assemblyFilter, setAssemblyFilter] = useState<'all' | 'winning' | 'trailing'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -272,24 +285,38 @@ export default function StateDashboard({ session, onLogout }: StateDashboardProp
   return (
     <div className="w-full h-screen overflow-hidden flex flex-col md:flex-row bg-[#F8FAFC] text-slate-900 font-sans antialiased" id="state-dashboard-root">
       {/* Sidebar Navigation: Fixed Full-Height matching Mandal / Booth benchmark */}
-      <aside className="fixed inset-y-0 left-0 z-40 w-64 h-screen bg-slate-950 text-white flex flex-col justify-between border-r border-slate-900 p-5 shrink-0 select-none md:fixed" id="state-sidebar">
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-64 h-screen bg-slate-950 text-white flex flex-col justify-between border-r border-slate-900 p-5 shrink-0 select-none transition-transform duration-300 md:fixed md:translate-x-0 ${
+          isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        }`}
+        id="state-sidebar"
+      >
         <div className="space-y-5">
           {/* Logo / Header */}
-          <div className="flex items-center gap-3 border-b border-slate-800/80 pb-4">
-            <div
-              className="w-11 h-11 rounded-full flex items-center justify-center text-slate-950 font-black text-base shadow-md shrink-0"
-              style={{ backgroundColor: config.primaryColor || '#fbbf24' }}
+          <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
+            <div className="flex items-center gap-3">
+              <div
+                className="w-11 h-11 rounded-full flex items-center justify-center text-slate-950 font-black text-base shadow-md shrink-0"
+                style={{ backgroundColor: config.primaryColor || '#fbbf24' }}
+              >
+                {config.activePartyCode || 'APP'}
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-sm font-black tracking-tight text-white truncate">
+                  {config.organisationName || 'State Command'}
+                </h2>
+                <span className="text-[10px] bg-slate-900 text-amber-300 font-extrabold uppercase px-2 py-0.5 rounded tracking-wide border border-amber-400/20">
+                  STATE INCHARGE
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => setIsSidebarOpen(false)}
+              className="md:hidden p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white cursor-pointer"
+              aria-label="Close sidebar"
             >
-              {config.activePartyCode || 'APP'}
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-sm font-black tracking-tight text-white truncate">
-                {config.organisationName || 'State Command'}
-              </h2>
-              <span className="text-[10px] bg-slate-900 text-amber-300 font-extrabold uppercase px-2 py-0.5 rounded tracking-wide border border-amber-400/20">
-                STATE INCHARGE
-              </span>
-            </div>
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
           {/* Assigned Jurisdiction Card */}
@@ -353,8 +380,38 @@ export default function StateDashboard({ session, onLogout }: StateDashboardProp
         </div>
       </aside>
 
+      {/* Mobile Drawer Backdrop */}
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* Main Workspace with native scroll */}
       <main className="flex-1 h-screen overflow-y-auto overflow-x-hidden bg-[#F8FAFC] relative md:pl-64" id="main-workspace-section">
+        {/* Mobile top navigation header */}
+        <div className="md:hidden flex items-center justify-between bg-white border border-slate-100 rounded-xl p-3 shadow-xs m-4 mb-0">
+          <div className="flex items-center gap-2">
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-slate-950 text-xs"
+              style={{ backgroundColor: config.primaryColor || '#fbbf24' }}
+            >
+              {config.activePartyCode || 'APP'}
+            </div>
+            <span className="font-black text-sm text-slate-900 tracking-tight">
+              {config.organisationName || 'State Command'}
+            </span>
+          </div>
+          <button
+            onClick={() => setIsSidebarOpen(true)}
+            className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-700 cursor-pointer"
+            aria-label="Open navigation menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        </div>
         {/* Tab Content */}
         <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto w-full pb-28">
           {/* In-page Header Banner (White Card matching Mandal / Booth standard) */}
@@ -856,8 +913,8 @@ export default function StateDashboard({ session, onLogout }: StateDashboardProp
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-                <table className="w-full text-left text-xs">
+              <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto shadow-xs">
+                <table className="w-full min-w-[700px] text-left text-xs">
                   <thead className="bg-slate-50 text-slate-600 uppercase font-mono text-[10px] border-b border-slate-200">
                     <tr>
                       <th className="p-3.5"># AC</th>

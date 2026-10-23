@@ -251,15 +251,30 @@ export class HierarchyService {
       return [];
     }
 
+    let resolvedMandalId = mandalId;
+    if (mandalId) {
+      const mandalExists = await prisma.mandal.findUnique({ where: { id: mandalId } });
+      if (!mandalExists) {
+        const orgUnit = await prisma.organizationUnit.findUnique({ where: { id: mandalId } });
+        if (orgUnit?.code) {
+          const m = await prisma.mandal.findFirst({ where: { code: orgUnit.code } });
+          if (m) resolvedMandalId = m.id;
+        }
+      }
+    }
+
     const where: Prisma.VillageWhereInput = {};
-    if (mandalId) where.mandalId = mandalId;
+    if (resolvedMandalId) where.mandalId = resolvedMandalId;
     if (!isSuperAdmin || organisationId) {
       where.mandal = { constituency: { parliament: { zone: { state: { organisationId } } } } };
     }
 
     return prisma.village.findMany({
       where,
-      include: { mandal: true, booths: true },
+      include: {
+        mandal: { include: { constituency: true } },
+        booths: true,
+      },
       orderBy: { name: 'asc' },
     });
   }
@@ -311,20 +326,42 @@ export class HierarchyService {
     return item;
   }
 
-  static async getBooths(villageId?: string, organisationId?: string | null, isSuperAdmin = false) {
+  static async getBooths(villageId?: string, organisationId?: string | null, isSuperAdmin = false, mandalId?: string) {
     if (!isSuperAdmin && !organisationId) {
       return [];
     }
 
+    let resolvedMandalId = mandalId;
+    if (mandalId) {
+      const mandalExists = await prisma.mandal.findUnique({ where: { id: mandalId } });
+      if (!mandalExists) {
+        const orgUnit = await prisma.organizationUnit.findUnique({ where: { id: mandalId } });
+        if (orgUnit?.code) {
+          const m = await prisma.mandal.findFirst({ where: { code: orgUnit.code } });
+          if (m) resolvedMandalId = m.id;
+        }
+      }
+    }
+
     const where: Prisma.BoothWhereInput = {};
     if (villageId) where.villageId = villageId;
+    if (resolvedMandalId) {
+      where.village = { mandalId: resolvedMandalId };
+    }
     if (!isSuperAdmin || organisationId) {
-      where.village = { mandal: { constituency: { parliament: { zone: { state: { organisationId } } } } } };
+      where.village = {
+        ...(where.village as any),
+        mandal: { constituency: { parliament: { zone: { state: { organisationId } } } } },
+      };
     }
 
     return prisma.booth.findMany({
       where,
-      include: { village: true, voterGroups: true, cadreAssignments: true },
+      include: {
+        village: true,
+        voterGroups: true,
+        users: { include: { user: true } },
+      },
       orderBy: { boothNumber: 'asc' },
     });
   }

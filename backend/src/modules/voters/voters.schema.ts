@@ -3,7 +3,7 @@ import { FakeVoterStatus, Gender, RelationType, SurveyStatus, VoterLocationStatu
 
 export const voterQuerySchema = z.object({
   page: z.coerce.number().min(1).default(1),
-  limit: z.coerce.number().min(1).max(100).default(50),
+  limit: z.coerce.number().min(1).max(500).default(50),
   search: z.string().optional(),
   epicNumber: z.string().optional(),
   name: z.string().optional(),

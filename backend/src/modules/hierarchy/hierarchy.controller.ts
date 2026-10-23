@@ -89,7 +89,7 @@ export class HierarchyController {
   static async getBooths(req: FastifyRequest, reply: FastifyReply) {
     const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
     const query = req.query as any;
-    const items = await HierarchyService.getBooths(query?.villageId, req.user?.organisationId, isSuperAdmin);
+    const items = await HierarchyService.getBooths(query?.villageId, req.user?.organisationId, isSuperAdmin, query?.mandalId);
     return reply.send(successResponse(items));
   }
 

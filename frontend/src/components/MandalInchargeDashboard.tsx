@@ -1,46 +1,47 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { 
-  UserSession, 
-  Voter, 
-  VoterPreference, 
-  VoterStatus, 
-  GroundReport, 
+import {
+  UserSession,
+  Voter,
+  VoterPreference,
+  VoterStatus,
+  GroundReport,
   VoterTask,
-  TrainingVideo 
+  TrainingVideo
 } from '../types';
-import { 
+import {
   MandalVillage,
-  saveMandalVoterRecord 
+  saveMandalVoterRecord
 } from '../utils/mandalHelpers';
-import { 
-  Home, 
-  Search, 
-  RefreshCw, 
-  AlertTriangle, 
-  Terminal, 
-  Calendar, 
-  BarChart3, 
-  Users, 
-  Video, 
-  LogOut, 
-  Menu, 
-  X, 
-  ShieldCheck, 
-  User, 
-  Smartphone, 
-  MapPin, 
-  Send, 
-  AlertCircle, 
-  Plus, 
-  Check, 
-  Filter, 
-  Edit2, 
-  CheckCircle, 
-  TrendingUp, 
-  ChevronRight, 
-  FileText, 
-  Clock, 
-  Phone 
+import {
+  Home,
+  Search,
+  RefreshCw,
+  AlertTriangle,
+  Terminal,
+  Calendar,
+  BarChart3,
+  Users,
+  Video,
+  LogOut,
+  Menu,
+  X,
+  ShieldCheck,
+  User,
+  Smartphone,
+  MapPin,
+  Send,
+  AlertCircle,
+  Plus,
+  Check,
+  Filter,
+  Edit2,
+  CheckCircle,
+  TrendingUp,
+  ChevronRight,
+  FileText,
+  Clock,
+  Phone,
+  GraduationCap
 } from 'lucide-react';
 import {
   createReport,
@@ -54,6 +55,10 @@ import {
   fetchTrainingProgress,
   fetchTrainingVideos,
   fetchVotersForUnit,
+  fetchHierarchyVillages,
+  fetchHierarchyBooths,
+  type HierarchyVillage,
+  type HierarchyBooth,
   syncVoter,
   type HierarchySummaryPayload,
   type TrainingProgressItem,
@@ -68,16 +73,16 @@ interface MandalInchargeDashboardProps {
   onLogout: () => void;
 }
 
-type TabType = 
+type TabType =
   | 'dashboard'
   | 'village_list'
   | 'booth_incharge_list'
-  | 'voters' 
-  | 'live_track' 
-  | 'fake_votes' 
-  | 'tasks' 
-  | 'caste_analytics' 
-  | 'cadre_network' 
+  | 'voters'
+  | 'live_track'
+  | 'fake_votes'
+  | 'tasks'
+  | 'caste_analytics'
+  | 'cadre_network'
   | 'training'
   | 'training_analytics';
 
@@ -249,7 +254,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   const [cadreActiveTab, setCadreActiveTab] = useState<'village' | 'booth' | 'voter'>('village');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [voters, setVoters] = useState<Voter[]>([]);
-  
+
   // Caste Analytics Redesign States
   const [casteFilterVillage, setCasteFilterVillage] = useState<string>('all');
   const [casteFilterCaste, setCasteFilterCaste] = useState<string>('all');
@@ -267,11 +272,11 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     x: number;
     y: number;
   } | null>(null);
-  
+
   // Drilldown selection states for Village List Integration
   const [selectedVillageName, setSelectedVillageName] = useState<string | null>(null);
   const [villageSubTab, setVillageSubTab] = useState<'overview' | 'voters' | 'booths' | 'live_track' | 'fake_votes' | 'caste' | 'cadre'>('overview');
-  
+
   // Redesigned Village List States
   const [villageSearchQuery, setVillageSearchQuery] = useState('');
   const [villageListFilter, setVillageListFilter] = useState('All');
@@ -281,7 +286,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   // Redesigned Booth List & Analysis States
   const [boothSearchQuery, setBoothSearchQuery] = useState('');
   const [boothListActiveTab, setBoothListActiveTab] = useState<'all' | 'winning' | 'trailing'>('all');
-  
+
   // States for user interaction
   const [searchQuery, setSearchQuery] = useState('');
   const [villageFilter, setVillageFilter] = useState('All');
@@ -289,7 +294,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   const [preferenceFilter, setPreferenceFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [locationFilter, setLocationFilter] = useState('All'); // Local vs Migrated
-  
+
   // Pagination states
   const [villageVotersPage, setVillageVotersPage] = useState(1);
   const [villageVotersPageSize, setVillageVotersPageSize] = useState(25);
@@ -306,7 +311,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   useEffect(() => {
     setBoothsPage(1);
   }, [boothSearchQuery, boothListActiveTab]);
-  
+
   // Voter Edit modal state
   const [editingVoter, setEditingVoter] = useState<Voter | null>(null);
   const [editPreference, setEditPreference] = useState<VoterPreference>('Neutral');
@@ -320,12 +325,18 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   const [editVoteStatus, setEditVoteStatus] = useState<'NOT VOTED' | 'VOTE DONE'>('NOT VOTED');
   const [editVoteDoneTime, setEditVoteDoneTime] = useState('');
   const [editInchargeAssessment, setEditInchargeAssessment] = useState<VoterPreference | 'Unknown'>('Unknown');
-  
+
   // Live updates states
-  const [recentVoteDoneActivity, setRecentVoteDoneActivity] = useState<{voterName: string, boothName: string, time: string}[]>([]);
+  const [recentVoteDoneActivity, setRecentVoteDoneActivity] = useState<{ voterName: string, boothName: string, time: string }[]>([]);
   const [backendSummary, setBackendSummary] = useState<HierarchySummaryPayload | null>(null);
+  const [hierarchyVillages, setHierarchyVillages] = useState<HierarchyVillage[]>([]);
+  const [hierarchyBooths, setHierarchyBooths] = useState<HierarchyBooth[]>([]);
+  const [isVillagesLoading, setIsVillagesLoading] = useState(false);
+  const [isBoothsLoading, setIsBoothsLoading] = useState(false);
   const [trainingVideos, setTrainingVideos] = useState<TrainingVideo[]>([]);
   const [trainingProgress, setTrainingProgress] = useState<Record<string, TrainingProgressItem>>({});
+  const [isTrainingLoading, setIsTrainingLoading] = useState(false);
+  const [trainingError, setTrainingError] = useState<string | null>(null);
 
   // Ground Reports states
   const [reportTab, setReportTab] = useState<'update' | 'complaint'>('update');
@@ -334,7 +345,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   const [complaintPriority, setComplaintPriority] = useState<'Low' | 'Medium' | 'High' | 'Urgent'>('Medium');
   const [complaintDescription, setComplaintDescription] = useState('');
   const [reportsList, setReportsList] = useState<GroundReport[]>([]);
-  
+
   // Tasks states
   const [tasksList, setTasksList] = useState<VoterTask[]>([]);
   const [newTaskTitle, setNewTaskTitle] = useState('');
@@ -357,20 +368,30 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       boothMap.set(bNum, existing);
     });
 
-    boothIncharges.forEach((b, idx) => {
-      const match = (b.booth || '').match(/\d+/);
-      const bNum = match ? parseInt(match[0], 10) : idx + 1;
-      if (!boothMap.has(bNum)) {
-        boothMap.set(bNum, { boothNumber: bNum, totalVoters: b.votersCount || 0, v100InchargesCount: 0 });
-      }
-    });
+    if (hierarchyBooths.length > 0) {
+      hierarchyBooths.forEach((hb, idx) => {
+        const match = (hb.boothNumber || '').match(/\d+/);
+        const bNum = match ? parseInt(match[0], 10) : idx + 1;
+        if (!boothMap.has(bNum)) {
+          boothMap.set(bNum, { boothNumber: bNum, totalVoters: hb.totalVoters || 0, v100InchargesCount: 0 });
+        }
+      });
+    } else {
+      boothIncharges.forEach((b, idx) => {
+        const match = (b.booth || '').match(/\d+/);
+        const bNum = match ? parseInt(match[0], 10) : idx + 1;
+        if (!boothMap.has(bNum)) {
+          boothMap.set(bNum, { boothNumber: bNum, totalVoters: b.votersCount || 0, v100InchargesCount: 0 });
+        }
+      });
+    }
 
     const result = Array.from(boothMap.values());
     result.forEach(b => {
       b.v100InchargesCount = Math.max(1, Math.ceil(b.totalVoters / 100));
     });
     return result;
-  }, [voters, boothIncharges]);
+  }, [voters, hierarchyBooths, boothIncharges]);
 
   const [cadreSearchQuery, setCadreSearchQuery] = useState('');
   const [cadreFilter, setCadreFilter] = useState<'all' | 'fully' | 'partially' | 'not_assigned'>('all');
@@ -423,31 +444,108 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     if (boothInchargeOverrides[boothNum]) {
       return boothInchargeOverrides[boothNum];
     }
+    if (hierarchyBooths[index]) {
+      const hb = hierarchyBooths[index];
+      const assigned = hb.users?.find(u => u.roleType === 'BOOTH_PRESIDENT' || u.user?.role === 'BOOTH_PRESIDENT')?.user;
+      if (assigned) {
+        return { name: assigned.name, mobile: assigned.mobileNumber || 'N/A' };
+      }
+    }
     const fallback = boothIncharges[index] || { name: "UNASSIGNED", mobile: "N/A" };
     return {
       name: fallback.name || "UNASSIGNED",
       mobile: fallback.mobile || "N/A"
     };
-  }, [boothInchargeOverrides, boothIncharges]);
+  }, [boothInchargeOverrides, hierarchyBooths, boothIncharges]);
 
   // Redesigned Booth List & Analysis Calculated Memos
   const analyzedBooths = useMemo(() => {
+    if (hierarchyBooths.length > 0) {
+      return hierarchyBooths.map((hb, idx) => {
+        const boothIdx = idx + 1;
+        const assignedUser = hb.users?.find(u => u.roleType === 'BOOTH_PRESIDENT' || u.user?.role === 'BOOTH_PRESIDENT')?.user;
+        const cadreMatch = cadreItems.find(c => c.role === 'BOOTH_PRESIDENT' && (
+          c.unitName === hb.name ||
+          c.unitName === hb.boothNumber ||
+          c.unitName === `Booth ${hb.boothNumber}` ||
+          (c.unitName && hb.boothNumber && c.unitName.includes(hb.boothNumber))
+        ));
+
+        const override = boothInchargeOverrides[boothIdx] || (hb.boothNumber ? boothInchargeOverrides[parseInt(hb.boothNumber, 10)] : undefined);
+        const inchargeName = override?.name || assignedUser?.name || cadreMatch?.name || 'Unassigned';
+        const inchargeMobile = override?.mobile || assignedUser?.mobileNumber || cadreMatch?.mobileNumber || '';
+        const isUnassigned = inchargeName.toLowerCase() === 'unassigned' || inchargeName.toLowerCase() === 'not assigned';
+
+        const boothNumStr = hb.boothNumber || String(boothIdx);
+        const boothIdentifier = `Booth ${boothNumStr}`;
+        const villageName = hb.village?.name || 'Authorized Mandal';
+
+        // Find voters in this booth
+        const bVoters = voters.filter(v => {
+          if (!v.boothNumber) return false;
+          const vBooth = v.boothNumber.trim();
+          return (
+            vBooth === hb.boothNumber ||
+            vBooth === hb.name ||
+            vBooth === boothIdentifier ||
+            vBooth.replace(/\D/g, '') === boothNumStr.replace(/\D/g, '')
+          );
+        });
+
+        const tdp = bVoters.filter(v => v.politicalPreference === 'TDP').length;
+        const ysrcp = bVoters.filter(v => v.politicalPreference === 'YSRCP').length;
+        const neutral = bVoters.filter(v => v.politicalPreference === 'Neutral').length;
+
+        const totalVoters = hb.totalVoters > 0 ? hb.totalVoters : bVoters.length;
+        const classifiedVoters = tdp + ysrcp + neutral;
+        const margin = tdp - ysrcp;
+        const status = classifiedVoters === 0 ? 'UNSURVEYED' : (margin > 0 ? 'WINNING' : (margin < 0 ? 'TRAILING' : 'TIE'));
+
+        const fullBoothLabel = hb.pollingStation
+          ? `${boothIdentifier} (${hb.pollingStation})`
+          : (hb.name.includes('(') ? hb.name : `${boothIdentifier} (${hb.name})`);
+
+        return {
+          id: hb.id,
+          sNo: `#${String(boothIdx).padStart(3, '0')}`,
+          displayNum: boothNumStr.padStart(2, '0'),
+          name: inchargeName,
+          mobile: inchargeMobile,
+          village: villageName,
+          booth: fullBoothLabel,
+          votersCount: totalVoters,
+          leadingParty: (tdp >= ysrcp ? 'TDP' : 'YSRCP') as VoterPreference,
+          lead: Math.abs(margin),
+          pStats: { TDP: tdp, YSRCP: ysrcp, JSP: 0, BJP: 0, INC: 0, Neutral: neutral, OTH: 0 },
+          tdp,
+          ysrcp,
+          neutral,
+          classifiedVoters,
+          totalVoters,
+          margin,
+          status,
+          isUnassigned
+        };
+      });
+    }
+
     return boothIncharges.map((b, idx) => {
       // Find voters in this booth
       const bVoters = voters.filter(v => v.boothNumber === b.booth);
-      
+
       const tdp = bVoters.filter(v => v.politicalPreference === 'TDP').length;
       const ysrcp = bVoters.filter(v => v.politicalPreference === 'YSRCP').length;
       const neutral = bVoters.filter(v => v.politicalPreference === 'Neutral').length;
-      
+
       const totalVoters = b.votersCount || bVoters.length; // registered voters count
       const classifiedVoters = tdp + ysrcp + neutral; // surveyed voters
-      
+
       const margin = tdp - ysrcp;
-      const status = margin > 0 ? 'WINNING' : (margin < 0 ? 'TRAILING' : 'TIE');
-      
+      const status = classifiedVoters === 0 ? 'UNSURVEYED' : (margin > 0 ? 'WINNING' : (margin < 0 ? 'TRAILING' : 'TIE'));
+
       return {
         ...b,
+        id: `booth-${idx}`,
         displayNum: String(idx + 1).padStart(2, '0'),
         tdp,
         ysrcp,
@@ -455,10 +553,11 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         classifiedVoters,
         totalVoters,
         margin,
-        status
+        status,
+        isUnassigned: !b.name || b.name === 'UNASSIGNED' || b.name === 'Not Assigned'
       };
     });
-  }, [boothIncharges, voters]);
+  }, [hierarchyBooths, cadreItems, boothInchargeOverrides, voters, boothIncharges]);
 
   // Compute winning/trailing counts for the filter tabs
   const { winningCount, trailingCount } = useMemo(() => {
@@ -477,7 +576,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       // 1. Tab filter
       if (boothListActiveTab === 'winning' && b.status !== 'WINNING') return false;
       if (boothListActiveTab === 'trailing' && b.status !== 'TRAILING') return false;
-      
+
       // 2. Search filter
       if (boothSearchQuery.trim() !== '') {
         const query = boothSearchQuery.toLowerCase();
@@ -487,7 +586,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         const matchesIncharge = (b.name || '').toLowerCase().includes(query);
         return matchesNum || matchesVillage || matchesIncharge;
       }
-      
+
       return true;
     });
   }, [analyzedBooths, boothListActiveTab, boothSearchQuery]);
@@ -497,33 +596,78 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     return filteredBooths.slice(start, start + boothsPageSize);
   }, [filteredBooths, boothsPage, boothsPageSize]);
 
+  const retryTraining = useCallback(async () => {
+    setIsTrainingLoading(true);
+    setTrainingError(null);
+    try {
+      const [videos, progressItems] = await Promise.all([
+        fetchTrainingVideos(session.unitId),
+        fetchTrainingProgress(session.userId).catch(() => null),
+      ]);
+      setTrainingVideos(videos || []);
+      if (progressItems) {
+        const progressMap: Record<string, TrainingProgressItem> = {};
+        progressItems.forEach((item) => {
+          progressMap[item.video.id] = item;
+        });
+        setTrainingProgress(progressMap);
+      }
+    } catch (err: any) {
+      setTrainingError(err?.message || 'Failed to load training materials. Please check your connection and try again.');
+    } finally {
+      setIsTrainingLoading(false);
+    }
+  }, [session.unitId, session.userId]);
+
   useEffect(() => {
     let active = true;
 
     const hydrateLiveScope = async () => {
+      setIsVillagesLoading(true);
+      setIsBoothsLoading(true);
+      setIsTrainingLoading(true);
+      setTrainingError(null);
+
       try {
-        const [summaryPayload, eventItems, reports, tasks, videos, progressItems, voterItems, cadre] = await Promise.all([
-          fetchHierarchySummaryByUser(session.userId),
-          fetchLiveVoteEventsByUser(session.userId, 8),
+        const [summaryPayload, eventItems, reports, tasks, videos, progressItems, voterItems, cadre, villagesData, boothsData] = await Promise.all([
+          fetchHierarchySummaryByUser(session.userId).catch(() => null),
+          fetchLiveVoteEventsByUser(session.userId, 8).catch(() => []),
           fetchReportsForUnit(session.unitId).catch(() => null),
           fetchTasksForUnit(session.unitId).catch(() => null),
-          fetchTrainingVideos(session.unitId).catch(() => null),
+          fetchTrainingVideos(session.unitId).catch((err: any) => {
+            if (active) {
+              setTrainingError(err?.message || 'Failed to load training materials');
+            }
+            return null;
+          }),
           fetchTrainingProgress(session.userId).catch(() => null),
           fetchVotersForUnit(session.unitId).catch(() => null),
           fetchCadreNetwork(session.unitId).catch(() => null),
+          fetchHierarchyVillages(session.unitId).catch(() => []),
+          fetchHierarchyBooths(session.unitId).catch(() => []),
         ]);
 
         if (!active) {
           return;
         }
 
-        setBackendSummary(summaryPayload);
+        if (summaryPayload) {
+          setBackendSummary(summaryPayload);
+        }
+
+        if (villagesData && Array.isArray(villagesData)) {
+          setHierarchyVillages(villagesData);
+        }
+
+        if (boothsData && Array.isArray(boothsData)) {
+          setHierarchyBooths(boothsData);
+        }
 
         if (cadre && Array.isArray((cadre as any).items)) {
           setCadreItems((cadre as any).items);
         }
 
-        if (eventItems.length > 0) {
+        if (eventItems && eventItems.length > 0) {
           setRecentVoteDoneActivity(
             eventItems.map((item) => ({
               voterName: item.voter.name,
@@ -545,7 +689,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
           setTasksList(tasks);
         }
 
-        if (videos && videos.length > 0) {
+        if (videos) {
           setTrainingVideos(videos);
         }
 
@@ -557,6 +701,12 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
           setTrainingProgress(progressMap);
         }
       } catch {
+      } finally {
+        if (active) {
+          setIsVillagesLoading(false);
+          setIsBoothsLoading(false);
+          setIsTrainingLoading(false);
+        }
       }
     };
 
@@ -565,7 +715,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     return () => {
       active = false;
     };
-  }, [session.userId]);
+  }, [session.userId, session.unitId]);
 
   useEffect(() => {
     const socket = createRealtimeSocket({ userId: session.userId, unitId: session.unitId });
@@ -590,7 +740,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   const refreshVoters = () => {
     void fetchVotersForUnit(session.unitId)
       .then(setVoters)
-      .catch(() => {});
+      .catch(() => { });
   };
 
   // Metric Computations (Dynamic and fully synchronous)
@@ -601,7 +751,63 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
 
   const totalVotersCount = TOTAL_MANDAL_REGISTERED_VOTERS;
 
+  const mandalDisplayName = useMemo(() => {
+    if (session.assignedMandal && session.assignedMandal.trim()) {
+      return session.assignedMandal.trim();
+    }
+    const hMandalName = hierarchyVillages[0]?.mandal?.name;
+    if (hMandalName && hMandalName.trim()) {
+      return hMandalName.trim();
+    }
+    return null;
+  }, [session.assignedMandal, hierarchyVillages]);
+
+  const constituencyDisplayName = useMemo(() => {
+    if (session.assignedConstituency && session.assignedConstituency.trim()) {
+      return session.assignedConstituency.trim();
+    }
+    const hConstName = hierarchyVillages[0]?.mandal?.constituency?.name;
+    if (hConstName && hConstName.trim()) {
+      return hConstName.trim();
+    }
+    return null;
+  }, [session.assignedConstituency, hierarchyVillages]);
+
   const villagesSource = useMemo(() => {
+    if (hierarchyVillages.length > 0) {
+      return hierarchyVillages.map((hv, idx) => {
+        const vList = voters.filter(v => (v.village || '').trim().toLowerCase() === hv.name.trim().toLowerCase());
+        const tdp = vList.filter(v => v.politicalPreference === 'TDP').length;
+        const ysrcp = vList.filter(v => v.politicalPreference === 'YSRCP').length;
+        const jsp = vList.filter(v => v.politicalPreference === 'JSP').length;
+        const bjp = vList.filter(v => v.politicalPreference === 'BJP').length;
+        const inc = vList.filter(v => v.politicalPreference === 'INC').length;
+        const neutral = vList.filter(v => v.politicalPreference === 'Neutral').length;
+        const oth = vList.filter(v => v.politicalPreference === 'OTH').length;
+        const leadingParty: VoterPreference = tdp >= ysrcp ? 'TDP' : 'YSRCP';
+
+        const totalVoters = vList.length > 0 ? vList.length : (hv.totalVoters || 0);
+        const hasVoters = vList.length > 0 || (hv.totalVoters || 0) > 0;
+        const totalBooths = hv.booths && hv.booths.length > 0
+          ? hv.booths.length
+          : new Set(vList.map(v => v.boothNumber).filter(Boolean)).size;
+
+        return {
+          id: hv.id,
+          sNo: `#${String(idx + 1).padStart(2, '0')}`,
+          name: hv.name,
+          totalVoters,
+          hasVoters,
+          totalBooths,
+          localVoters: vList.filter(v => v.voterLocationStatus === 'Local').length,
+          migratedVoters: vList.filter(v => v.voterLocationStatus === 'Migrated').length,
+          pStats: { TDP: tdp, YSRCP: ysrcp, JSP: jsp, BJP: bjp, INC: inc, Neutral: neutral, OTH: oth },
+          leadingParty,
+          lead: Math.abs(tdp - ysrcp),
+        };
+      });
+    }
+
     const distinctNames = Array.from(new Set(voters.map(v => v.village).filter(Boolean)));
     if (distinctNames.length === 0) return [];
     return distinctNames.map((name, idx) => {
@@ -615,9 +821,11 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       const oth = vList.filter(v => v.politicalPreference === 'OTH').length;
       const leadingParty: VoterPreference = tdp >= ysrcp ? 'TDP' : 'YSRCP';
       return {
+        id: `village-${idx}`,
         sNo: `#${String(idx + 1).padStart(2, '0')}`,
         name: name as string,
         totalVoters: vList.length,
+        hasVoters: vList.length > 0,
         totalBooths: new Set(vList.map(v => v.boothNumber).filter(Boolean)).size,
         localVoters: vList.filter(v => v.voterLocationStatus === 'Local').length,
         migratedVoters: vList.filter(v => v.voterLocationStatus === 'Migrated').length,
@@ -626,20 +834,20 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         lead: Math.abs(tdp - ysrcp),
       };
     });
-  }, [voters]);
+  }, [hierarchyVillages, voters]);
 
   const liveMandalStats = useMemo(() => {
     const snapshot = backendSummary?.snapshot;
     return {
       totalVoters: snapshot?.summary.totalVoters ?? voters.length,
       totalVillages: snapshot?.hierarchyCounts.VILLAGE ?? villagesSource.length,
-      totalBooths: snapshot?.hierarchyCounts.BOOTH ?? boothIncharges.length,
+      totalBooths: snapshot?.hierarchyCounts.BOOTH ?? (hierarchyBooths.length || analyzedBooths.length || boothIncharges.length),
       voted: snapshot?.summary.voted ?? 0,
       remaining: snapshot?.summary.remaining ?? 0,
       winning: snapshot?.performance.winningChildren ?? 0,
       trailing: snapshot?.performance.trailingChildren ?? 0,
     };
-  }, [backendSummary, boothIncharges.length, villagesSource.length, voters.length]);
+  }, [backendSummary, hierarchyBooths.length, analyzedBooths.length, boothIncharges.length, villagesSource.length, voters.length]);
 
   // Voters filtered by active (excluding deceased)
   const activeVoters = useMemo(() => voters.filter(v => !v.voterStatus || v.voterStatus === 'Active' || v.voterStatus === 'Shifted'), [voters]);
@@ -649,13 +857,13 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     return activeVoters.filter(v => {
       // Village filter
       if (casteFilterVillage !== 'all' && v.village !== casteFilterVillage) return false;
-      
+
       // Caste filter
       if (casteFilterCaste !== 'all' && v.caste !== casteFilterCaste) return false;
-      
+
       // Gender filter
       if (casteFilterGender !== 'all' && v.gender !== casteFilterGender) return false;
-      
+
       // Age Group filter
       if (casteFilterAgeGroup !== 'all') {
         const age = v.age;
@@ -664,10 +872,10 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         if (casteFilterAgeGroup === '41-60' && (age < 41 || age > 60)) return false;
         if (casteFilterAgeGroup === '60+' && age <= 60) return false;
       }
-      
+
       // Profession filter
       if (casteFilterProfession !== 'all' && v.profession !== casteFilterProfession) return false;
-      
+
       return true;
     });
   }, [activeVoters, casteFilterVillage, casteFilterCaste, casteFilterGender, casteFilterAgeGroup, casteFilterProfession]);
@@ -686,30 +894,30 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
 
   const casteDetailData = useMemo(() => {
     if (!activeCasteDetail) return null;
-    
+
     // Filter active voters of this caste in Singarayakonda Mandal
     const casteVoters = activeVoters.filter(v => (v.caste || '').toUpperCase() === activeCasteDetail.toUpperCase());
-    
+
     const totalVoters = casteVoters.length;
-    
+
     // Gender
     const male = casteVoters.filter(v => v.gender === 'Male').length;
     const female = casteVoters.filter(v => v.gender === 'Female').length;
     const otherGender = casteVoters.filter(v => v.gender === 'Other').length;
-    
+
     // Age Groups
     const age18_25 = casteVoters.filter(v => v.age >= 18 && v.age <= 25).length;
     const age26_40 = casteVoters.filter(v => v.age >= 26 && v.age <= 40).length;
     const age41_60 = casteVoters.filter(v => v.age >= 41 && v.age <= 60).length;
     const age60Plus = casteVoters.filter(v => v.age > 60).length;
-    
+
     // Profession
     const professionCounts: Record<string, number> = {};
     casteVoters.forEach(v => {
       const prof = v.profession || 'Others';
       professionCounts[prof] = (professionCounts[prof] || 0) + 1;
     });
-    
+
     // Party Support
     const partyCounts: Record<VoterPreference, number> = {
       TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0
@@ -718,19 +926,19 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       const p = v.politicalPreference || 'Neutral';
       partyCounts[p]++;
     });
-    
+
     // Village-wise Breakdown
     const villageBreakdown = villagesSource.map(village => {
       const vVoters = casteVoters.filter(v => v.village === village.name);
       const vTdp = vVoters.filter(v => v.politicalPreference === 'TDP').length;
       const vYsrcp = vVoters.filter(v => v.politicalPreference === 'YSRCP').length;
       const vNeutral = vVoters.filter(v => v.politicalPreference === 'Neutral').length;
-      
+
       let leadingParty: 'TDP' | 'YSRCP' | 'TIE' | 'Neutral' = 'Neutral';
       if (vTdp > vYsrcp) leadingParty = 'TDP';
       else if (vYsrcp > vTdp) leadingParty = 'YSRCP';
       else if (vTdp === vYsrcp && vTdp > 0) leadingParty = 'TIE';
-      
+
       return {
         villageName: village.name,
         total: vVoters.length,
@@ -740,7 +948,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         leadingParty
       };
     }).sort((a, b) => b.total - a.total); // highest count first
-    
+
     return {
       casteName: activeCasteDetail,
       totalVoters,
@@ -881,10 +1089,12 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     let winning = 0;
     let trailing = 0;
     villagesSource.forEach(v => {
-      if (v.leadingParty === 'TDP' && v.lead > 0) {
-        winning++;
-      } else if (v.lead > 0) {
-        trailing++;
+      if ((v.totalVoters > 0 || v.hasVoters) && v.lead > 0) {
+        if (v.leadingParty === 'TDP') {
+          winning++;
+        } else {
+          trailing++;
+        }
       }
     });
     return {
@@ -896,15 +1106,17 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
 
   const filteredVillages = useMemo(() => {
     return villagesSource.filter(v => {
-      const isWinning = v.leadingParty === 'TDP' && v.lead > 0;
-      
+      const hasData = (v.totalVoters > 0 || v.hasVoters) && v.lead > 0;
+      const isWinning = hasData && v.leadingParty === 'TDP';
+      const isTrailing = hasData && v.leadingParty !== 'TDP';
+
       if (villageSearchQuery && !(v.name || '').toLowerCase().includes(villageSearchQuery.toLowerCase())) {
         return false;
       }
 
       if (villageListFilter === 'All') return true;
       if (villageListFilter === 'Winning') return isWinning;
-      if (villageListFilter === 'Trailing') return !isWinning;
+      if (villageListFilter === 'Trailing') return isTrailing;
       return true;
     });
   }, [villagesSource, villageSearchQuery, villageListFilter]);
@@ -1213,12 +1425,12 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     return voters.filter(v => {
       // 1. Search Query
       const query = searchQuery.toLowerCase();
-      const matchesSearch = 
+      const matchesSearch =
         (v.name || '').toLowerCase().includes(query) ||
         (v.fatherHusbandName || '').toLowerCase().includes(query) ||
         (v.epicNumber || '').toLowerCase().includes(query) ||
         (v.houseNumber || '').toLowerCase().includes(query);
-      
+
       // 2. Booth Filter
       const matchesVillage = villageFilter === 'All' || v.village === villageFilter;
       const matchesBooth = boothFilter === 'All' || v.boothNumber === boothFilter;
@@ -1303,7 +1515,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
 
     filteredVotersForCasteAnalytics.forEach(v => {
       const p = v.politicalPreference || 'Neutral';
-      
+
       // Caste
       const casteKey = v.caste || 'Other Caste';
       if (!casteSupport[casteKey]) {
@@ -1324,7 +1536,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       else if (v.age >= 26 && v.age <= 40) ageKey = '26–40';
       else if (v.age >= 41 && v.age <= 60) ageKey = '41–60';
       else if (v.age > 60) ageKey = '60+';
-      
+
       if (ageSupport[ageKey]) {
         ageSupport[ageKey][p]++;
       }
@@ -1345,9 +1557,9 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
           prefs
         };
       })
-      .filter(item => item.total > 0)
-      .sort((a, b) => b.total - a.total)
-      .slice(0, maxRows);
+        .filter(item => item.total > 0)
+        .sort((a, b) => b.total - a.total)
+        .slice(0, maxRows);
     };
 
     return {
@@ -1363,7 +1575,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     return ALL_CADRES.map(inc => {
       // Get all voters assigned to this 100 Voter Incharge
       const incVoters = voters.filter(v => v.assignedInchargeId === inc.id && v.voterStatus !== 'Deceased');
-      
+
       const counts: Record<VoterPreference, number> = {
         TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0
       };
@@ -1377,7 +1589,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       const sortedSupport = Object.entries(counts)
         .filter(([p]) => p !== 'Neutral' && p !== 'OTH')
         .sort((a, b) => b[1] - a[1]);
-      
+
       const leaderParty = sortedSupport[0] ? (sortedSupport[0][0] as VoterPreference) : 'Neutral' as VoterPreference;
       const runnerParty = sortedSupport[1] ? (sortedSupport[1][0] as VoterPreference) : 'Neutral' as VoterPreference;
       const leaderCount = counts[leaderParty] || 0;
@@ -1400,11 +1612,11 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
 
   return (
     <div className="w-full h-screen overflow-hidden flex flex-col md:flex-row bg-slate-50 text-slate-800" id="village-dashboard-container">
-      
+
       {/* --------------------------------------------------------
           LEFT SIDEBAR (Fixed & Styled Dark Navy)
          -------------------------------------------------------- */}
-      <aside 
+      <aside
         className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white p-5 flex flex-col justify-between shrink-0 h-screen overflow-hidden transition-transform duration-300 md:fixed md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
         id="dashboard-sidebar"
       >
@@ -1415,7 +1627,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
               {config.logoUrl ? (
                 <img src={config.logoUrl} alt="Logo" className="w-9 h-9 rounded-xl object-cover shadow-md border border-slate-700" />
               ) : (
-                <div 
+                <div
                   className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-950 font-black shadow-md shadow-yellow-400/10"
                   style={{ backgroundColor: config.primaryColor || '#EAB308' }}
                 >
@@ -1429,9 +1641,9 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 <p className="text-[9px] font-black tracking-widest uppercase text-slate-400">Mandal Command</p>
               </div>
             </div>
-            
+
             {/* Mobile close menu */}
-            <button 
+            <button
               onClick={() => setIsSidebarOpen(false)}
               className="md:hidden p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white"
             >
@@ -1448,8 +1660,22 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
               <h4 className="text-xs font-black text-slate-100 truncate uppercase">{session.userName}</h4>
               <p className="text-[9px] text-slate-400 font-bold truncate">MANDAL INCHARGE</p>
               <div className="text-[8px] text-slate-300 font-semibold mt-1 uppercase space-y-0.5">
-                <p className="truncate">AC: {session.assignedConstituency}</p>
-                <p className="truncate">Mandal: {session.assignedMandal}</p>
+                <p className="truncate">
+                  AC:{' '}
+                  {constituencyDisplayName ? (
+                    <span>{constituencyDisplayName}</span>
+                  ) : (
+                    <span className="text-amber-400 font-bold">Assignment needs configuration</span>
+                  )}
+                </p>
+                <p className="truncate">
+                  Mandal:{' '}
+                  {mandalDisplayName ? (
+                    <span>{mandalDisplayName}</span>
+                  ) : (
+                    <span className="text-amber-400 font-bold">Assignment needs configuration</span>
+                  )}
+                </p>
               </div>
               <div className="flex items-center gap-1 mt-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
@@ -1514,965 +1740,1150 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
          -------------------------------------------------------- */}
       <main className="flex-1 h-screen overflow-y-auto overflow-x-hidden bg-slate-50 relative md:pl-64" id="main-workspace-section">
         <div className="p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto">
-        
-        {/* Mobile top navigation header */}
-        <div className="md:hidden flex items-center justify-between bg-white border border-slate-100 rounded-xl p-3 shadow-sm mb-4">
-          <div className="flex items-center gap-2">
-            {config.logoUrl ? (
-              <img src={config.logoUrl} alt="Logo" className="w-8 h-8 rounded-lg object-cover" />
-            ) : (
-              <div 
-                className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-slate-950"
-                style={{ backgroundColor: config.primaryColor || '#EAB308' }}
-              >
-                {(config.organisationName || session.organisationName || 'M').slice(0, 1).toUpperCase()}
-              </div>
-            )}
-            <span className="font-black text-sm text-slate-900 tracking-tight">
-              {config.organisationName || session.organisationName || 'Political Connect'}
-            </span>
-          </div>
-          <button 
-            onClick={() => setIsSidebarOpen(true)}
-            className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-700"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
-        </div>
 
-        {/* --------------------------------------------------------
+          {/* Mobile top navigation header */}
+          <div className="md:hidden flex items-center justify-between bg-white border border-slate-100 rounded-xl p-3 shadow-sm mb-4">
+            <div className="flex items-center gap-2">
+              {config.logoUrl ? (
+                <img src={config.logoUrl} alt="Logo" className="w-8 h-8 rounded-lg object-cover" />
+              ) : (
+                <div
+                  className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-slate-950"
+                  style={{ backgroundColor: config.primaryColor || '#EAB308' }}
+                >
+                  {(config.organisationName || session.organisationName || 'M').slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <span className="font-black text-sm text-slate-900 tracking-tight">
+                {config.organisationName || session.organisationName || 'Political Connect'}
+              </span>
+            </div>
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-700"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* --------------------------------------------------------
             TAB 1: CORE DASHBOARD VIEW
            -------------------------------------------------------- */}
-        {activeTab === 'dashboard' && (
-          <div className="space-y-6 animate-fade-in" id="village-view-dashboard">
-            
-            {/* Mandal Header */}
-            <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm" id="mandal-header-bar">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <span className="text-[10px] bg-yellow-400 text-slate-950 px-2 py-0.5 rounded font-black uppercase tracking-widest">
-                    Mandal Dashboard
-                  </span>
-                  <h2 className="text-2xl font-black text-slate-900 tracking-tight" id="mandal-overview-title">
-                    {session.assignedMandal || 'Mandal'} Operations Dashboard
-                  </h2>
-                  <p className="text-sm text-slate-500 font-medium">
-                    {config.organisationName || session.organisationName || 'Assembly Command'} • {session.assignedMandal || 'Mandal Sector'}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 bg-green-50 text-green-700 px-3 py-1.5 rounded-lg border border-green-200">
-                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                  <span className="text-xs font-bold uppercase tracking-wider">Live Data: {backendSummary ? 'Connected' : 'Fallback'}</span>
-                </div>
-              </div>
-            </div>
+          {activeTab === 'dashboard' && (
+            <div className="space-y-6 animate-fade-in" id="village-view-dashboard">
 
-            {/* Top 4 Summary Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5" id="mandal-metrics-grid">
-              {/* Card 1: Total Voters */}
-              <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm flex flex-col justify-between" id="metric-total-voters">
-                <div className="flex items-center justify-between mb-2">
+              {/* Mandal Header */}
+              <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm" id="mandal-header-bar">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="space-y-1">
-                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Total Voters</p>
-                    <h3 className="text-2xl font-black text-slate-950 leading-none">{liveMandalStats.totalVoters.toLocaleString()}</h3>
+                    <span className="text-[10px] bg-yellow-400 text-slate-950 px-2 py-0.5 rounded font-black uppercase tracking-widest">
+                      Mandal Dashboard
+                    </span>
+                    <h2 className="text-2xl font-black text-slate-900 tracking-tight" id="mandal-overview-title">
+                      {mandalDisplayName ? `${mandalDisplayName} Operations Dashboard` : 'Mandal Operations Dashboard'}
+                    </h2>
+                    <p className="text-sm text-slate-500 font-medium">
+                      {constituencyDisplayName ? `${constituencyDisplayName} Assembly Constituency` : (config.organisationName || session.organisationName || 'Assembly Command')} • {mandalDisplayName ? `${mandalDisplayName} Mandal` : 'Assignment needs configuration'}
+                    </p>
                   </div>
-                  <div className="p-2 bg-slate-50 rounded-lg text-slate-500">
-                    <Users className="w-4 h-4" />
+                  <div className="flex items-center gap-2 bg-green-50 text-green-700 px-3 py-1.5 rounded-lg border border-green-200">
+                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                    <span className="text-xs font-bold uppercase tracking-wider">Live Data: {backendSummary ? 'Connected' : 'Fallback'}</span>
                   </div>
-                </div>
-                <div className="border-t border-slate-100 pt-2">
-                  <p className="text-[10px] text-slate-500 font-bold">
-                    Aggregated from backend hierarchy scope
-                  </p>
                 </div>
               </div>
 
-              {/* Card 2: Total Villages */}
-              <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm flex items-center justify-between" id="metric-total-villages">
-                <div className="space-y-1.5">
-                  <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Total Villages</p>
-                  <h3 className="text-2xl font-black text-blue-600 leading-none">{liveMandalStats.totalVillages}</h3>
-                </div>
-                <div className="p-3 bg-slate-50 rounded-xl text-slate-500">
-                  <MapPin className="w-5 h-5" />
-                </div>
-              </div>
-
-              {/* Card 3: Total Booths */}
-              <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm flex items-center justify-between" id="metric-total-booths">
-                <div className="space-y-1.5">
-                  <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Total Booths</p>
-                  <h3 className="text-2xl font-black text-purple-600 leading-none">{liveMandalStats.totalBooths}</h3>
-                  <p className="text-[9px] text-slate-500 font-black">Booth Incharges: <span className="text-purple-600 font-black">{liveMandalStats.totalBooths}</span></p>
-                </div>
-                <div className="p-3 bg-slate-50 rounded-xl text-slate-500">
-                  <FileText className="w-5 h-5" />
-                </div>
-              </div>               {/* Card 4: Projected Result */}
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 shadow-sm flex items-center justify-between" id="metric-projected-result">
-                <div className="space-y-1 text-slate-950">
-                  <p className="text-[10px] font-black uppercase tracking-wider text-amber-800">VOTES COMPLETED</p>
-                  <h3 className="text-2xl font-black leading-none uppercase text-amber-600">{liveMandalStats.voted.toLocaleString()}</h3>
-                  <div className="mt-1">
-                    <p className="text-base font-black leading-none text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded w-fit">Remaining: {liveMandalStats.remaining.toLocaleString()}</p>
-                    <p className="text-[9px] font-black text-slate-500 tracking-tight mt-1">
-                      Real backend vote-status aggregation
+              {/* Top 4 Summary Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5" id="mandal-metrics-grid">
+                {/* Card 1: Total Voters */}
+                <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm flex flex-col justify-between" id="metric-total-voters">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Total Voters</p>
+                      <h3 className="text-2xl font-black text-slate-950 leading-none">{liveMandalStats.totalVoters.toLocaleString()}</h3>
+                    </div>
+                    <div className="p-2 bg-slate-50 rounded-lg text-slate-500">
+                      <Users className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div className="border-t border-slate-100 pt-2">
+                    <p className="text-[10px] text-slate-500 font-bold">
+                      Aggregated from backend hierarchy scope
                     </p>
                   </div>
                 </div>
-                <div className="p-3 bg-amber-100 rounded-xl text-amber-600">
-                  <TrendingUp className="w-5 h-5" />
-                </div>
-              </div>
-            </div>
 
-            {/* Voter Sentiment Share & Ground Report Breakdown Section */}
-            
-            {/* Projected Majority & Breakdown Cards */}
-            <div className="space-y-6">
-              
-              {/* Projected Majority Card (Larger) */}
-              <div className="bg-white border-2 border-yellow-400 rounded-2xl p-6 shadow-md" id="mandal-projected-majority">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-                  <div className="space-y-3">
-                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-100 border border-yellow-200 text-yellow-800">
-                      <TrendingUp className="w-3.5 h-3.5" />
-                      <span className="text-[10px] font-black uppercase tracking-wider">PROJECTED RESULT</span>
-                    </div>
-                    
-                    <div className="space-y-1">
-                      <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mandal Political Position</h4>
-                      <h3 className="text-2xl md:text-3xl font-black text-slate-900 leading-none tracking-tight uppercase">
-                        TDP LEAD: <span className="text-yellow-600 font-extrabold">{forecastData.leadCountStr}</span>
-                      </h3>
-                      <p className="text-xs font-bold text-slate-500">
-                        Label: <span className="text-yellow-600 font-black uppercase underline">Current Projection</span> (Not Official Result / Not Verified Survey Result)
+                {/* Card 2: Total Villages */}
+                <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm flex items-center justify-between" id="metric-total-villages">
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Total Villages</p>
+                    <h3 className="text-2xl font-black text-blue-600 leading-none">{liveMandalStats.totalVillages}</h3>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-xl text-slate-500">
+                    <MapPin className="w-5 h-5" />
+                  </div>
+                </div>
+
+                {/* Card 3: Total Booths */}
+                <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm flex items-center justify-between" id="metric-total-booths">
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Total Booths</p>
+                    <h3 className="text-2xl font-black text-purple-600 leading-none">{liveMandalStats.totalBooths}</h3>
+                    <p className="text-[9px] text-slate-500 font-black">Booth Incharges: <span className="text-purple-600 font-black">{liveMandalStats.totalBooths}</span></p>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-xl text-slate-500">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                </div>               {/* Card 4: Projected Result */}
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 shadow-sm flex items-center justify-between" id="metric-projected-result">
+                  <div className="space-y-1 text-slate-950">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-amber-800">VOTES COMPLETED</p>
+                    <h3 className="text-2xl font-black leading-none uppercase text-amber-600">{liveMandalStats.voted.toLocaleString()}</h3>
+                    <div className="mt-1">
+                      <p className="text-base font-black leading-none text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded w-fit">Remaining: {liveMandalStats.remaining.toLocaleString()}</p>
+                      <p className="text-[9px] font-black text-slate-500 tracking-tight mt-1">
+                        Real backend vote-status aggregation
                       </p>
                     </div>
                   </div>
+                  <div className="p-3 bg-amber-100 rounded-xl text-amber-600">
+                    <TrendingUp className="w-5 h-5" />
+                  </div>
+                </div>
+              </div>
 
-                  {/* Village Winning/Trailing Counts and Stats */}
-                  <div className="flex flex-wrap items-center gap-4 bg-slate-50 border border-slate-100 rounded-xl p-4 lg:min-w-[400px] justify-between">
-                    <div className="space-y-1">
-                      <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400">Village-level Standing</span>
+              {/* Voter Sentiment Share & Ground Report Breakdown Section */}
+
+              {/* Projected Majority & Breakdown Cards */}
+              <div className="space-y-6">
+
+                {/* Projected Majority Card (Larger) */}
+                <div className="bg-white border-2 border-yellow-400 rounded-2xl p-6 shadow-md" id="mandal-projected-majority">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                    <div className="space-y-3">
+                      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-100 border border-yellow-200 text-yellow-800">
+                        <TrendingUp className="w-3.5 h-3.5" />
+                        <span className="text-[10px] font-black uppercase tracking-wider">PROJECTED RESULT</span>
+                      </div>
+
                       <div className="space-y-1">
-                        <p className="text-xs font-black text-emerald-700 flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                          TDP Winning Villages: <span className="text-sm font-black underline">{liveMandalStats.winning}</span>
-                        </p>
-                        <p className="text-xs font-black text-orange-700 flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                          YSRCP Winning Villages: <span className="text-sm font-black underline">{liveMandalStats.trailing}</span>
+                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mandal Political Position</h4>
+                        <h3 className="text-2xl md:text-3xl font-black text-slate-900 leading-none tracking-tight uppercase">
+                          TDP LEAD: <span className="text-yellow-600 font-extrabold">{forecastData.leadCountStr}</span>
+                        </h3>
+                        <p className="text-xs font-bold text-slate-500">
+                          Label: <span className="text-yellow-600 font-black uppercase underline">Current Projection</span> (Not Official Result / Not Verified Survey Result)
                         </p>
                       </div>
                     </div>
-                    
-                    <div className="border-l border-slate-200 pl-4 space-y-1">
-                      <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400">Total Voters</span>
-                      <span className="block text-xl font-black text-slate-900 leading-none">{liveMandalStats.totalVoters.toLocaleString()}</span>
-                      <span className="block text-[9px] text-slate-400 font-bold">Across {liveMandalStats.totalVillages} villages</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
 
-              {/* Mandal Political Preference Breakdown Cards */}
-              <div className="space-y-3">
-                <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Mandal Political Preference Breakdown</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                  {(() => {
-                    const activeParties: VoterPreference[] = ['TDP', 'YSRCP', 'JSP', 'BJP', 'INC', 'Neutral'];
-                    return activeParties.map((p) => {
-                      const count = partyStats[p];
-                      const pct = totalVotersCount > 0 ? ((count / totalVotersCount) * 100).toFixed(1) : '0.0';
-                      return (
-                        <div key={p} className={"rounded-xl p-3 border " + PARTY_BG_COLORS[p]}>
-                          <h4 className="text-[10px] font-black tracking-wider uppercase mb-1">{PARTY_NAMES[p]}</h4>
-                          <div className="flex flex-col">
-                            <span className="text-lg font-black leading-none">{count.toLocaleString()}</span>
-                            <span className="text-[10px] font-bold opacity-80 mt-1">{pct}%</span>
-                          </div>
+                    {/* Village Winning/Trailing Counts and Stats */}
+                    <div className="flex flex-wrap items-center gap-4 bg-slate-50 border border-slate-100 rounded-xl p-4 lg:min-w-[400px] justify-between">
+                      <div className="space-y-1">
+                        <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400">Village-level Standing</span>
+                        <div className="space-y-1">
+                          <p className="text-xs font-black text-emerald-700 flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                            TDP Winning Villages: <span className="text-sm font-black underline">{liveMandalStats.winning}</span>
+                          </p>
+                          <p className="text-xs font-black text-orange-700 flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-orange-500"></span>
+                            YSRCP Winning Villages: <span className="text-sm font-black underline">{liveMandalStats.trailing}</span>
+                          </p>
                         </div>
-                      );
-                    });
-                  })()}
-                </div>
-              </div>
-            </div>
+                      </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="sentiment-split-section">
-              
-              {/* Left 2 Columns: Donut Chart + Party List */}
-              <div className="lg:col-span-2 bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-5">
-                <div className="border-b border-gray-100 pb-3 flex items-center justify-between">
-                  <div>
-                    <h3 className="font-bold text-base text-slate-900 uppercase">MANDAL POLITICAL PREFERENCE BREAKDOWN</h3>
-                    <p className="text-xs text-slate-400 font-semibold">Dynamic preference distribution of voters across Singarayakonda Mandal</p>
-                  </div>
-                </div>
-
-                {/* Donut and breakdown table side-by-side */}
-                <div className="flex flex-col md:flex-row items-center gap-8 pt-2">
-                  
-                  {/* SVG Donut Chart */}
-                  <div className="relative w-44 h-44 shrink-0" id="village-donut-chart">
-                    <svg className="w-full h-full" viewBox="0 0 120 120">
-                      {/* Background light track */}
-                      <circle cx="60" cy="60" r="45" fill="transparent" stroke="#f1f5f9" strokeWidth="12" />
-                      
-                      {(() => {
-                        let currentOffset = 0;
-                        const r = 45;
-                        const circ = 2 * Math.PI * r;
-
-                        return donutChartData.map((slice) => {
-                          const pct = slice.percentage;
-                          if (pct <= 0) return null;
-
-                          const strokeDashOffset = circ - (pct / 100) * circ;
-                          const rotationAngle = (currentOffset / 100) * 360 - 90;
-                          currentOffset += pct;
-
-                          return (
-                            <circle
-                              key={slice.key}
-                              cx="60"
-                              cy="60"
-                              r={r}
-                              fill="transparent"
-                              stroke={slice.color}
-                              strokeWidth="12"
-                              strokeDasharray={circ}
-                              strokeDashoffset={strokeDashOffset}
-                              transform={`rotate(${rotationAngle} 60 60)`}
-                              className="transition-all duration-200 cursor-pointer hover:stroke-[15px]"
-                              onMouseEnter={() => setHoveredSlice(slice.key)}
-                              onMouseLeave={() => setHoveredSlice(null)}
-                            />
-                          );
-                        });
-                      })()}
-                    </svg>
-
-                    {/* Center label */}
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center select-none pointer-events-none">
-                      {hoveredSlice ? (
-                        <>
-                          <span className="text-[10px] font-black uppercase text-slate-400">{PARTY_NAMES[hoveredSlice as VoterPreference]}</span>
-                          <span className="text-base font-black text-slate-950">{partyStats[hoveredSlice as VoterPreference].toLocaleString()}</span>
-                          <span className="text-[9px] font-bold text-slate-500">
-                            {((partyStats[hoveredSlice as VoterPreference] / (totalVotersCount || 1)) * 100).toFixed(1)}% Share
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <span className="text-[9px] font-bold uppercase text-slate-400">TOTAL</span>
-                          <span className="text-lg font-black text-slate-950">{totalVotersCount.toLocaleString()}</span>
-                          <span className="text-[9px] font-bold text-green-600 uppercase">VOTERS</span>
-                        </>
-                      )}
+                      <div className="border-l border-slate-200 pl-4 space-y-1">
+                        <span className="block text-[9px] font-black uppercase tracking-wider text-slate-400">Total Voters</span>
+                        <span className="block text-xl font-black text-slate-900 leading-none">{liveMandalStats.totalVoters.toLocaleString()}</span>
+                        <span className="block text-[9px] text-slate-400 font-bold">Across {liveMandalStats.totalVillages} villages</span>
+                      </div>
                     </div>
                   </div>
+                </div>
 
-                  {/* Ground Report Breakdown table list */}
-                  <div className="flex-1 w-full space-y-2">
-                    <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">Mandal Political Preference Counts</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {donutChartData.map((slice) => {
-                        const isHovered = hoveredSlice === slice.key;
-                        const labelBg = PARTY_BG_COLORS[slice.key as VoterPreference];
+                {/* Mandal Political Preference Breakdown Cards */}
+                <div className="space-y-3">
+                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Mandal Political Preference Breakdown</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                    {(() => {
+                      const activeParties: VoterPreference[] = ['TDP', 'YSRCP', 'JSP', 'BJP', 'INC', 'Neutral'];
+                      return activeParties.map((p) => {
+                        const count = partyStats[p];
+                        const pct = totalVotersCount > 0 ? ((count / totalVotersCount) * 100).toFixed(1) : '0.0';
                         return (
-                          <div 
-                            key={slice.key}
-                            onMouseEnter={() => setHoveredSlice(slice.key)}
-                            onMouseLeave={() => setHoveredSlice(null)}
-                            className={`flex items-center justify-between p-2 rounded-lg border text-xs font-bold transition-all ${isHovered ? 'bg-slate-50 border-yellow-400 shadow-sm' : 'bg-white border-slate-100'}`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="w-3 h-3 rounded" style={{ backgroundColor: slice.color }}></span>
-                              <span className="text-slate-700">{PARTY_NAMES[slice.key as VoterPreference]}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-slate-900">{slice.value.toLocaleString()} Votes</span>
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-black ${labelBg}`}>
-                                {slice.percentage.toFixed(1)}%
-                              </span>
+                          <div key={p} className={"rounded-xl p-3 border " + PARTY_BG_COLORS[p]}>
+                            <h4 className="text-[10px] font-black tracking-wider uppercase mb-1">{PARTY_NAMES[p]}</h4>
+                            <div className="flex flex-col">
+                              <span className="text-lg font-black leading-none">{count.toLocaleString()}</span>
+                              <span className="text-[10px] font-bold opacity-80 mt-1">{pct}%</span>
                             </div>
                           </div>
                         );
-                      })}
-                    </div>
+                      });
+                    })()}
                   </div>
-
                 </div>
               </div>
 
-              {/* Right Column: Send Report Box */}
-              <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4" id="send-report-panel-container">
-                <div className="border-b border-gray-100 pb-2">
-                  <h3 className="font-bold text-base text-slate-900">SEND REPORT TO CONSTITUENCY INCHARGE</h3>
-                  <p className="text-xs text-slate-400 font-medium mt-0.5">Report directly to Constituency Incharge</p>
-                </div>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="sentiment-split-section">
 
-                {/* Sub tabs */}
-                <div className="flex bg-slate-100 p-1 rounded-lg">
-                  <button
-                    onClick={() => setReportTab('update')}
-                    className={`flex-1 py-1.5 text-center text-[10px] font-black uppercase tracking-wide rounded-md transition-all cursor-pointer ${reportTab === 'update' ? 'bg-white text-slate-950 shadow-sm font-black' : 'text-slate-500 hover:text-slate-800'}`}
-                  >
-                    General Update
-                  </button>
-                  <button
-                    onClick={() => setReportTab('complaint')}
-                    className={`flex-1 py-1.5 text-center text-[10px] font-black uppercase tracking-wide rounded-md transition-all cursor-pointer ${reportTab === 'complaint' ? 'bg-white text-slate-950 shadow-sm font-black' : 'text-slate-500 hover:text-slate-800'}`}
-                  >
-                    Complaint / Issue
-                  </button>
-                </div>
+                {/* Left 2 Columns: Donut Chart + Party List */}
+                <div className="lg:col-span-2 bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-5">
+                  <div className="border-b border-gray-100 pb-3 flex items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-base text-slate-900 uppercase">MANDAL POLITICAL PREFERENCE BREAKDOWN</h3>
+                      <p className="text-xs text-slate-400 font-semibold">Dynamic preference distribution of voters across {mandalDisplayName ? `${mandalDisplayName} Mandal` : 'the authorized Mandal'}</p>
+                    </div>
+                  </div>
 
-                {/* Forms */}
-                {reportTab === 'update' ? (
-                  <form onSubmit={handleGeneralSubmit} className="space-y-3" id="general-update-form">
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Ground Feedback & Sentiment</label>
-                      <textarea
-                        rows={4}
-                        value={generalContent}
-                        onChange={(e) => setGeneralContent(e.target.value)}
-                        placeholder="Share ground sentiment, local developments, feedback or suggestions..."
-                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:bg-white focus:outline-none focus:border-yellow-400"
-                      />
+                  {/* Donut and breakdown table side-by-side */}
+                  <div className="flex flex-col md:flex-row items-center gap-8 pt-2">
+
+                    {/* SVG Donut Chart */}
+                    <div className="relative w-44 h-44 shrink-0" id="village-donut-chart">
+                      <svg className="w-full h-full" viewBox="0 0 120 120">
+                        {/* Background light track */}
+                        <circle cx="60" cy="60" r="45" fill="transparent" stroke="#f1f5f9" strokeWidth="12" />
+
+                        {(() => {
+                          let currentOffset = 0;
+                          const r = 45;
+                          const circ = 2 * Math.PI * r;
+
+                          return donutChartData.map((slice) => {
+                            const pct = slice.percentage;
+                            if (pct <= 0) return null;
+
+                            const strokeDashOffset = circ - (pct / 100) * circ;
+                            const rotationAngle = (currentOffset / 100) * 360 - 90;
+                            currentOffset += pct;
+
+                            return (
+                              <circle
+                                key={slice.key}
+                                cx="60"
+                                cy="60"
+                                r={r}
+                                fill="transparent"
+                                stroke={slice.color}
+                                strokeWidth="12"
+                                strokeDasharray={circ}
+                                strokeDashoffset={strokeDashOffset}
+                                transform={`rotate(${rotationAngle} 60 60)`}
+                                className="transition-all duration-200 cursor-pointer hover:stroke-[15px]"
+                                onMouseEnter={() => setHoveredSlice(slice.key)}
+                                onMouseLeave={() => setHoveredSlice(null)}
+                              />
+                            );
+                          });
+                        })()}
+                      </svg>
+
+                      {/* Center label */}
+                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center select-none pointer-events-none">
+                        {hoveredSlice ? (
+                          <>
+                            <span className="text-[10px] font-black uppercase text-slate-400">{PARTY_NAMES[hoveredSlice as VoterPreference]}</span>
+                            <span className="text-base font-black text-slate-950">{partyStats[hoveredSlice as VoterPreference].toLocaleString()}</span>
+                            <span className="text-[9px] font-bold text-slate-500">
+                              {((partyStats[hoveredSlice as VoterPreference] / (totalVotersCount || 1)) * 100).toFixed(1)}% Share
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-[9px] font-bold uppercase text-slate-400">TOTAL</span>
+                            <span className="text-lg font-black text-slate-950">{totalVotersCount.toLocaleString()}</span>
+                            <span className="text-[9px] font-bold text-green-600 uppercase">VOTERS</span>
+                          </>
+                        )}
+                      </div>
                     </div>
 
+                    {/* Ground Report Breakdown table list */}
+                    <div className="flex-1 w-full space-y-2">
+                      <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">Mandal Political Preference Counts</h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {donutChartData.map((slice) => {
+                          const isHovered = hoveredSlice === slice.key;
+                          const labelBg = PARTY_BG_COLORS[slice.key as VoterPreference];
+                          return (
+                            <div
+                              key={slice.key}
+                              onMouseEnter={() => setHoveredSlice(slice.key)}
+                              onMouseLeave={() => setHoveredSlice(null)}
+                              className={`flex items-center justify-between p-2 rounded-lg border text-xs font-bold transition-all ${isHovered ? 'bg-slate-50 border-yellow-400 shadow-sm' : 'bg-white border-slate-100'}`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="w-3 h-3 rounded" style={{ backgroundColor: slice.color }}></span>
+                                <span className="text-slate-700">{PARTY_NAMES[slice.key as VoterPreference]}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-slate-900">{slice.value.toLocaleString()} Votes</span>
+                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-black ${labelBg}`}>
+                                  {slice.percentage.toFixed(1)}%
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+
+                {/* Right Column: Send Report Box */}
+                <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4" id="send-report-panel-container">
+                  <div className="border-b border-gray-100 pb-2">
+                    <h3 className="font-bold text-base text-slate-900">SEND REPORT TO CONSTITUENCY INCHARGE</h3>
+                    <p className="text-xs text-slate-400 font-medium mt-0.5">Report directly to Constituency Incharge</p>
+                  </div>
+
+                  {/* Sub tabs */}
+                  <div className="flex bg-slate-100 p-1 rounded-lg">
                     <button
-                      type="submit"
-                      className="w-full py-2 bg-yellow-400 hover:bg-yellow-500 text-slate-950 text-xs font-black rounded-lg shadow-sm hover:shadow active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      onClick={() => setReportTab('update')}
+                      className={`flex-1 py-1.5 text-center text-[10px] font-black uppercase tracking-wide rounded-md transition-all cursor-pointer ${reportTab === 'update' ? 'bg-white text-slate-950 shadow-sm font-black' : 'text-slate-500 hover:text-slate-800'}`}
                     >
-                      <Send className="w-3.5 h-3.5" />
-                      Send Report
+                      General Update
                     </button>
-                  </form>
-                ) : (
-                  <form onSubmit={handleComplaintSubmit} className="space-y-3" id="complaint-issue-form">
-                    <div className="space-y-3">
+                    <button
+                      onClick={() => setReportTab('complaint')}
+                      className={`flex-1 py-1.5 text-center text-[10px] font-black uppercase tracking-wide rounded-md transition-all cursor-pointer ${reportTab === 'complaint' ? 'bg-white text-slate-950 shadow-sm font-black' : 'text-slate-500 hover:text-slate-800'}`}
+                    >
+                      Complaint / Issue
+                    </button>
+                  </div>
+
+                  {/* Forms */}
+                  {reportTab === 'update' ? (
+                    <form onSubmit={handleGeneralSubmit} className="space-y-3" id="general-update-form">
                       <div className="space-y-1">
-                        <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Issue Category</label>
-                        <select
-                          value={complaintCategory}
-                          onChange={(e) => setComplaintCategory(e.target.value)}
-                          className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold focus:bg-white focus:outline-none"
-                        >
-                          <option value="EVM Malfunction">EVM Malfunction</option>
-                          <option value="Fake Voters Identified">Fake Voters Identified</option>
-                          <option value="Law & Order Issue">Law & Order Issue</option>
-                          <option value="Power Failure at Booth">Power Failure at Booth</option>
-                          <option value="Rigging / Objections">Rigging / Objections</option>
-                          <option value="Other Technical Issue">Other Technical Issue</option>
-                        </select>
+                        <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Ground Feedback & Sentiment</label>
+                        <textarea
+                          rows={4}
+                          value={generalContent}
+                          onChange={(e) => setGeneralContent(e.target.value)}
+                          placeholder="Share ground sentiment, local developments, feedback or suggestions..."
+                          className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:bg-white focus:outline-none focus:border-yellow-400"
+                        />
                       </div>
 
-                      <div className="space-y-1">
-                        <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Priority Level</label>
-                        <div className="grid grid-cols-4 gap-1.5">
-                          {(['Low', 'Medium', 'High', 'Urgent'] as const).map((p) => (
-                            <button
-                              key={p}
-                              type="button"
-                              onClick={() => setComplaintPriority(p)}
-                              className={`py-1 text-center text-[9px] font-bold rounded-md border transition-all cursor-pointer ${complaintPriority === p ? 'bg-red-50 text-red-600 border-red-300 font-extrabold' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`}
-                            >
-                              {p}
-                            </button>
-                          ))}
+                      <button
+                        type="submit"
+                        className="w-full py-2 bg-yellow-400 hover:bg-yellow-500 text-slate-950 text-xs font-black rounded-lg shadow-sm hover:shadow active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        Send Report
+                      </button>
+                    </form>
+                  ) : (
+                    <form onSubmit={handleComplaintSubmit} className="space-y-3" id="complaint-issue-form">
+                      <div className="space-y-3">
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Issue Category</label>
+                          <select
+                            value={complaintCategory}
+                            onChange={(e) => setComplaintCategory(e.target.value)}
+                            className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold focus:bg-white focus:outline-none"
+                          >
+                            <option value="EVM Malfunction">EVM Malfunction</option>
+                            <option value="Fake Voters Identified">Fake Voters Identified</option>
+                            <option value="Law & Order Issue">Law & Order Issue</option>
+                            <option value="Power Failure at Booth">Power Failure at Booth</option>
+                            <option value="Rigging / Objections">Rigging / Objections</option>
+                            <option value="Other Technical Issue">Other Technical Issue</option>
+                          </select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Priority Level</label>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {(['Low', 'Medium', 'High', 'Urgent'] as const).map((p) => (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => setComplaintPriority(p)}
+                                className={`py-1 text-center text-[9px] font-bold rounded-md border transition-all cursor-pointer ${complaintPriority === p ? 'bg-red-50 text-red-600 border-red-300 font-extrabold' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`}
+                              >
+                                {p}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Incident Details</label>
+                          <textarea
+                            rows={2}
+                            value={complaintDescription}
+                            onChange={(e) => setComplaintDescription(e.target.value)}
+                            placeholder="Provide specific details: Booth number, individuals involved, or affected voters count..."
+                            className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:bg-white focus:outline-none focus:border-yellow-400"
+                          />
                         </div>
                       </div>
 
+                      <button
+                        type="submit"
+                        className="w-full py-2 bg-yellow-400 hover:bg-yellow-500 text-slate-950 text-xs font-black rounded-lg shadow-sm hover:shadow active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <AlertCircle className="w-3.5 h-3.5 text-red-600" />
+                        Register Complaint
+                      </button>
+                    </form>
+                  )}
+                </div>
+
+              </div>
+            </div>
+          )}
+
+          {/* --------------------------------------------------------
+            TAB: VILLAGE LIST VIEW & DRILLDOWN
+           -------------------------------------------------------- */}
+          {activeTab === 'village_list' && (
+            <div className="space-y-6 animate-fade-in" id="mandal-village-list-view">
+
+              {/* Database sum validation alert */}
+              {totalVotersSum !== TOTAL_MANDAL_REGISTERED_VOTERS && TOTAL_MANDAL_REGISTERED_VOTERS > 0 && totalVotersSum > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-3 text-amber-800 shadow-sm">
+                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+                  <div className="text-xs font-bold">
+                    <span className="font-black">DATABASE NOTICE:</span> Mandal total registered voters sum differs from combined village sums ({totalVotersSum.toLocaleString()} vs {TOTAL_MANDAL_REGISTERED_VOTERS.toLocaleString()}).
+                  </div>
+                </div>
+              )}
+
+              {!selectedVillageName ? (
+                <div className="space-y-6">
+
+                  {/* Redesigned TOP SUMMARY & FILTER BAR */}
+                  <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
+                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                       <div className="space-y-1">
-                        <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Incident Details</label>
-                        <textarea
-                          rows={2}
-                          value={complaintDescription}
-                          onChange={(e) => setComplaintDescription(e.target.value)}
-                          placeholder="Provide specific details: Booth number, individuals involved, or affected voters count..."
-                          className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:bg-white focus:outline-none focus:border-yellow-400"
+                        <h2 className="text-xl font-black text-slate-950 uppercase tracking-tight">
+                          {mandalDisplayName ? `${mandalDisplayName} VILLAGE LIST` : 'MANDAL VILLAGE LIST'}
+                        </h2>
+                        <p className="text-xs text-slate-500 font-bold uppercase tracking-wide">
+                          {constituencyDisplayName ? `${constituencyDisplayName} Assembly Constituency` : 'Assignment needs configuration'} • {mandalDisplayName ? `${mandalDisplayName} Mandal` : 'Assignment needs configuration'}
+                        </p>
+                      </div>
+
+                      {/* Search Box on Right */}
+                      <div className="relative shrink-0 w-full sm:w-80">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          placeholder="Search Village..."
+                          value={villageSearchQuery}
+                          onChange={(e) => setVillageSearchQuery(e.target.value)}
+                          className="w-full pl-10 pr-4 py-2 bg-slate-50 hover:bg-slate-100/75 focus:bg-white text-xs font-bold text-slate-900 placeholder:text-slate-400 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400/50 focus:border-yellow-400 transition-all"
                         />
                       </div>
                     </div>
 
-                    <button
-                      type="submit"
-                      className="w-full py-2 bg-yellow-400 hover:bg-yellow-500 text-slate-950 text-xs font-black rounded-lg shadow-sm hover:shadow active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <AlertCircle className="w-3.5 h-3.5 text-red-600" />
-                      Register Complaint
-                    </button>
-                  </form>
-                )}
-              </div>
-
-            </div>
-          </div>
-        )}
-
-        {/* --------------------------------------------------------
-            TAB: VILLAGE LIST VIEW & DRILLDOWN
-           -------------------------------------------------------- */}
-        {activeTab === 'village_list' && (
-          <div className="space-y-6 animate-fade-in" id="mandal-village-list-view">
-            
-            {/* Database sum validation alert */}
-            {totalVotersSum !== TOTAL_MANDAL_REGISTERED_VOTERS && TOTAL_MANDAL_REGISTERED_VOTERS > 0 && totalVotersSum > 0 && (
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-3 text-amber-800 shadow-sm">
-                <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
-                <div className="text-xs font-bold">
-                  <span className="font-black">DATABASE NOTICE:</span> Mandal total registered voters sum differs from combined village sums ({totalVotersSum.toLocaleString()} vs {TOTAL_MANDAL_REGISTERED_VOTERS.toLocaleString()}).
-                </div>
-              </div>
-            )}
-
-            {!selectedVillageName ? (
-              <div className="space-y-6">
-                
-                {/* Redesigned TOP SUMMARY & FILTER BAR */}
-                <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
-                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                    <div className="space-y-1">
-                      <h2 className="text-xl font-black text-slate-950 uppercase tracking-tight">
-                        SINGARAYAKONDA VILLAGE LIST
-                      </h2>
-                      <p className="text-xs text-slate-500 font-bold uppercase tracking-wide">
-                        Kondapi Assembly Constituency • Singarayakonda Mandal
-                      </p>
-                    </div>
-
-                    {/* Search Box on Right */}
-                    <div className="relative shrink-0 w-full sm:w-80">
-                      <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        placeholder="Search Village..."
-                        value={villageSearchQuery}
-                        onChange={(e) => setVillageSearchQuery(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 bg-slate-50 hover:bg-slate-100/75 focus:bg-white text-xs font-bold text-slate-900 placeholder:text-slate-400 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400/50 focus:border-yellow-400 transition-all"
-                      />
+                    {/* Dynamic Party Filter Tabs */}
+                    <div className="flex flex-wrap gap-1.5 border-t border-slate-100 pt-4">
+                      {[
+                        { id: 'All', label: `ALL (${villageCounts.all})` },
+                        { id: 'Winning', label: `WINNING VILLAGES (${villageCounts.winning})` },
+                        { id: 'Trailing', label: `TRAILING VILLAGES (${villageCounts.trailing})` }
+                      ].map((tab) => (
+                        <button
+                          key={tab.id}
+                          onClick={() => setVillageListFilter(tab.id)}
+                          className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer border ${villageListFilter === tab.id
+                              ? 'bg-yellow-400 text-slate-950 border-yellow-500 font-black shadow-md shadow-yellow-400/20'
+                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
-                  {/* Dynamic Party Filter Tabs */}
-                  <div className="flex flex-wrap gap-1.5 border-t border-slate-100 pt-4">
-                    {[
-                      { id: 'All', label: `ALL (${villageCounts.all})` },
-                      { id: 'Winning', label: `WINNING VILLAGES (${villageCounts.winning})` },
-                      { id: 'Trailing', label: `TRAILING VILLAGES (${villageCounts.trailing})` }
-                    ].map((tab) => (
-                      <button
-                        key={tab.id}
-                        onClick={() => setVillageListFilter(tab.id)}
-                        className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer border ${
-                          villageListFilter === tab.id
-                            ? 'bg-yellow-400 text-slate-950 border-yellow-500 font-black shadow-md shadow-yellow-400/20'
-                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                  {/* Desktop and Tablet Table View */}
+                  <div className="hidden lg:block bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden" id="village-list-table-container">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-50/75 border-b border-slate-100 text-slate-500 font-black uppercase text-[10px] tracking-wider">
+                          <th className="py-4 px-4 text-center w-12">S.No</th>
+                          <th className="py-4 px-4">Village Name</th>
+                          <th className="py-4 px-4 text-right">Total Voters</th>
+                          <th className="py-4 px-4 text-center">TDP</th>
+                          <th className="py-4 px-4 text-center">YSRCP</th>
+                          <th className="py-4 px-4 text-center">Neutral</th>
+                          <th className="py-4 px-4 text-center">Status</th>
+                          <th className="py-4 px-4 text-right">Lead</th>
+                          <th className="py-4 px-4 text-center">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {isVillagesLoading ? (
+                          <tr>
+                            <td colSpan={9} className="py-12 text-center">
+                              <div className="flex flex-col items-center justify-center gap-2">
+                                <RefreshCw className="w-6 h-6 text-yellow-500 animate-spin" />
+                                <span className="text-xs text-slate-500 font-bold uppercase tracking-wider">Loading authorized villages...</span>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : sortedVillages.length === 0 ? (
+                          <tr>
+                            <td colSpan={9} className="py-12 text-center">
+                              <div className="max-w-md mx-auto space-y-2">
+                                <p className="text-sm font-black text-slate-700 uppercase">No Villages Found</p>
+                                <p className="text-xs text-slate-400 font-semibold">
+                                  {villageSearchQuery ? `No villages match search "${villageSearchQuery}".` : 'No villages are configured beneath this authorized Mandal in the administrative hierarchy.'}
+                                </p>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : (
+                          sortedVillages.map((v, index) => {
+                            const metrics = getVillageMetrics(v.name, v.totalVoters);
+                            const inchargeName = getVillageInchargeName(v.name);
 
-                {/* Desktop and Tablet Table View */}
-                <div className="hidden lg:block bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden" id="village-list-table-container">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-slate-50/75 border-b border-slate-100 text-slate-500 font-black uppercase text-[10px] tracking-wider">
-                        <th className="py-4 px-4 text-center w-12">S.No</th>
-                        <th className="py-4 px-4">Village Name</th>
-                        <th className="py-4 px-4 text-right">Total Voters</th>
-                        <th className="py-4 px-4 text-center">TDP</th>
-                        <th className="py-4 px-4 text-center">YSRCP</th>
-                        <th className="py-4 px-4 text-center">Neutral</th>
-                        <th className="py-4 px-4 text-center">Status</th>
-                        <th className="py-4 px-4 text-right">Lead</th>
-                        <th className="py-4 px-4 text-center">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {sortedVillages.map((v, index) => {
+                            const isWinning = metrics.leadingParty === 'TDP' && metrics.lead > 0;
+                            const status = metrics.isCloseContest ? 'CLOSE CONTEST' : (isWinning ? 'WINNING' : 'TRAILING');
+                            const leadVal = metrics.lead;
+                            const leadStr = leadVal.toLocaleString();
+                            const hasVoters = (v.totalVoters > 0 || (v as any).hasVoters);
+
+                            return (
+                              <tr
+                                key={v.name}
+                                onClick={() => { setSelectedVillageName(v.name); setVillageSubTab('overview'); }}
+                                className="hover:bg-slate-50/50 transition-colors cursor-pointer font-bold text-slate-700"
+                              >
+                                <td className="py-4 px-4 text-center text-slate-400 font-mono text-xs">
+                                  {String(index + 1).padStart(2, '0')}
+                                </td>
+                                <td className="py-4 px-4">
+                                  <span className="font-black text-slate-900 uppercase tracking-tight text-sm hover:text-yellow-600 transition-colors">
+                                    {v.name}
+                                  </span>
+                                </td>
+                                <td className="py-4 px-4 text-right font-black text-slate-950 text-sm">
+                                  {v.totalVoters.toLocaleString()}
+                                </td>
+
+                                {/* Party Values Design */}
+                                <td className="py-4 px-4 text-center">
+                                  <span className="bg-amber-50 text-amber-500 border border-amber-200 rounded-md px-2.5 py-1 font-mono text-sm font-black">
+                                    {metrics.tdp}
+                                  </span>
+                                </td>
+                                <td className="py-4 px-4 text-center">
+                                  <span className="bg-blue-50 text-blue-600 border border-blue-200 rounded-md px-2.5 py-1 font-mono text-sm font-black">
+                                    {metrics.ysrcp}
+                                  </span>
+                                </td>
+                                <td className="py-4 px-4 text-center">
+                                  <span className="bg-slate-50 text-slate-500 border border-slate-250 rounded-md px-2.5 py-1 font-mono text-sm font-black">
+                                    {metrics.neutral}
+                                  </span>
+                                </td>
+
+                                {/* Status Badge */}
+                                <td className="py-4 px-4 text-center">
+                                  {!hasVoters ? (
+                                    <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">
+                                      Electoral roll not imported
+                                    </span>
+                                  ) : (
+                                    <span className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${status === 'WINNING'
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : 'bg-rose-50 text-rose-700 border-rose-200'
+                                      }`}>
+                                      {status}
+                                    </span>
+                                  )}
+                                </td>
+
+                                {/* Lead Column */}
+                                <td className="py-4 px-4 text-right">
+                                  {!hasVoters ? (
+                                    <span className="inline-block font-mono text-xs font-black px-2 py-0.5 rounded text-slate-400 bg-slate-50 border border-slate-150">
+                                      0
+                                    </span>
+                                  ) : (
+                                    <span className={`inline-block font-mono text-xs font-black px-2 py-0.5 rounded ${isWinning
+                                        ? 'text-emerald-600 bg-emerald-50 border border-emerald-150'
+                                        : 'text-rose-600 bg-rose-50 border border-rose-150'
+                                      }`}>
+                                      {isWinning ? '+' : '-'}{leadStr}
+                                    </span>
+                                  )}
+                                </td>
+
+                                {/* Action Column - Call Incharge Icon */}
+                                <td className="py-4 px-4 text-center">
+                                  <a
+                                    href={`tel:${getInchargePhone(v.name)}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                    }}
+                                    className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-600 hover:text-emerald-700 border border-emerald-100 transition-all shadow-sm cursor-pointer"
+                                    title={`Call Incharge ${inchargeName} (${getInchargePhone(v.name)})`}
+                                  >
+                                    <Phone className="w-3.5 h-3.5" />
+                                  </a>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Mobile & Tablet Responsive Card Layout */}
+                  <div className="block lg:hidden space-y-4" id="village-list-mobile-cards">
+                    {isVillagesLoading ? (
+                      <div className="bg-white border border-slate-100 rounded-2xl p-8 text-center space-y-2 shadow-sm">
+                        <RefreshCw className="w-6 h-6 text-yellow-500 animate-spin mx-auto" />
+                        <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Loading authorized villages...</p>
+                      </div>
+                    ) : sortedVillages.length === 0 ? (
+                      <div className="bg-white border border-slate-100 rounded-2xl p-8 text-center space-y-2 shadow-sm">
+                        <p className="text-sm font-black text-slate-700 uppercase">No Villages Found</p>
+                        <p className="text-xs text-slate-400 font-semibold">
+                          {villageSearchQuery ? `No villages match search "${villageSearchQuery}".` : 'No villages are configured beneath this authorized Mandal.'}
+                        </p>
+                      </div>
+                    ) : (
+                      sortedVillages.map((v, index) => {
                         const metrics = getVillageMetrics(v.name, v.totalVoters);
                         const inchargeName = getVillageInchargeName(v.name);
-                        
+
                         const isWinning = metrics.leadingParty === 'TDP' && metrics.lead > 0;
                         const status = metrics.isCloseContest ? 'CLOSE CONTEST' : (isWinning ? 'WINNING' : 'TRAILING');
                         const leadVal = metrics.lead;
                         const leadStr = leadVal.toLocaleString();
+                        const hasVoters = (v.totalVoters > 0 || (v as any).hasVoters);
 
                         return (
-                          <tr
+                          <div
                             key={v.name}
                             onClick={() => { setSelectedVillageName(v.name); setVillageSubTab('overview'); }}
-                            className="hover:bg-slate-50/50 transition-colors cursor-pointer font-bold text-slate-700"
+                            className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4 cursor-pointer hover:shadow-md transition-shadow"
                           >
-                            <td className="py-4 px-4 text-center text-slate-400 font-mono text-xs">
-                              {String(index + 1).padStart(2, '0')}
-                            </td>
-                            <td className="py-4 px-4">
-                              <span className="font-black text-slate-900 uppercase tracking-tight text-sm hover:text-yellow-600 transition-colors">
-                                {v.name}
-                              </span>
-                            </td>
-                            <td className="py-4 px-4 text-right font-black text-slate-950 text-sm">
-                              {v.totalVoters.toLocaleString()}
-                            </td>
-                            
-                            {/* Party Values Design */}
-                            <td className="py-4 px-4 text-center">
-                              <span className="bg-amber-50 text-amber-500 border border-amber-200 rounded-md px-2.5 py-1 font-mono text-sm font-black">
-                                {metrics.tdp}
-                              </span>
-                            </td>
-                            <td className="py-4 px-4 text-center">
-                              <span className="bg-blue-50 text-blue-600 border border-blue-200 rounded-md px-2.5 py-1 font-mono text-sm font-black">
-                                {metrics.ysrcp}
-                              </span>
-                            </td>
-                            <td className="py-4 px-4 text-center">
-                              <span className="bg-slate-50 text-slate-500 border border-slate-250 rounded-md px-2.5 py-1 font-mono text-sm font-black">
-                                {metrics.neutral}
-                              </span>
-                            </td>
+                            <div className="flex justify-between items-start">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] text-slate-400 font-mono">#{String(index + 1).padStart(2, '0')}</span>
+                                  <span className="font-black text-slate-900 uppercase text-sm">{v.name}</span>
+                                </div>
+                                <p className="text-xs text-slate-500 font-bold">Incharge: {inchargeName}</p>
+                              </div>
+                              <div>
+                                {!hasVoters ? (
+                                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase border bg-slate-100 text-slate-600 border-slate-200">
+                                    Electoral roll not imported
+                                  </span>
+                                ) : (
+                                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase border ${isWinning
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                      : 'bg-orange-50 text-orange-700 border-orange-100'
+                                    }`}>
+                                    {status}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
 
-                            {/* Status Badge */}
-                            <td className="py-4 px-4 text-center">
-                              <span className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
-                                status === 'WINNING' 
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
-                                  : 'bg-rose-50 text-rose-700 border-rose-200'
-                              }`}>
-                                {status}
-                              </span>
-                            </td>
+                            <div className="grid grid-cols-2 gap-4 border-t border-slate-50 pt-3">
+                              <div>
+                                <p className="text-[9px] text-slate-400 font-black uppercase">Total Voters</p>
+                                <p className="text-xs font-black text-slate-900 mt-0.5">{v.totalVoters.toLocaleString()}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-[9px] text-slate-400 font-black uppercase">Lead</p>
+                                <span className={`font-mono text-xs font-black ${!hasVoters ? 'text-slate-400' : isWinning ? 'text-emerald-600' : 'text-orange-600'
+                                  }`}>
+                                  {!hasVoters ? '0' : leadStr}
+                                </span>
+                              </div>
+                            </div>
 
-                            {/* Lead Column */}
-                            <td className="py-4 px-4 text-right">
-                              <span className={`inline-block font-mono text-xs font-black px-2 py-0.5 rounded ${
-                                isWinning 
-                                  ? 'text-emerald-600 bg-emerald-50 border border-emerald-150' 
-                                  : 'text-rose-600 bg-rose-50 border border-rose-150'
-                              }`}>
-                                {isWinning ? '+' : '-'}{leadStr}
-                              </span>
-                            </td>
+                            <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 grid grid-cols-3 gap-2 text-center text-[10px]">
+                              <div>
+                                <p className="text-slate-400 font-bold text-[8px] uppercase">TDP</p>
+                                <span className="text-yellow-600 font-black">{metrics.tdp}</span>
+                              </div>
+                              <div>
+                                <p className="text-slate-400 font-bold text-[8px] uppercase">YSRCP</p>
+                                <span className="text-blue-600 font-black">{metrics.ysrcp}</span>
+                              </div>
+                              <div>
+                                <p className="text-slate-400 font-bold text-[8px] uppercase">Neutral</p>
+                                <span className="text-slate-500 font-black">{metrics.neutral}</span>
+                              </div>
+                            </div>
 
-                            {/* Action Column - Call Incharge Icon */}
-                            <td className="py-4 px-4 text-center">
+                            <div className="flex justify-end pt-1">
                               <a
                                 href={`tel:${getInchargePhone(v.name)}`}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                 }}
-                                className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-600 hover:text-emerald-700 border border-emerald-100 transition-all shadow-sm cursor-pointer"
-                                title={`Call Incharge ${inchargeName} (${getInchargePhone(v.name)})`}
+                                className="inline-flex items-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-100 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer"
                               >
                                 <Phone className="w-3.5 h-3.5" />
+                                <span>Call Incharge</span>
                               </a>
-                            </td>
-                          </tr>
+                            </div>
+                          </div>
                         );
-                      })}
-                    </tbody>
-                  </table>
+                      })
+                    )}
+                  </div>
+
                 </div>
+              ) : (
+                // DRILLDOWN VIEW: Detailed command center of selected village
+                (() => {
+                  const villageVoters = voters.filter(v => v.village.toUpperCase() === selectedVillageName.toUpperCase());
+                  const villageActiveVoters = villageVoters.filter(v => !v.voterStatus || v.voterStatus === 'Active' || v.voterStatus === 'Shifted');
 
-                {/* Mobile & Tablet Responsive Card Layout */}
-                <div className="block lg:hidden space-y-4" id="village-list-mobile-cards">
-                  {sortedVillages.map((v, index) => {
-                    const metrics = getVillageMetrics(v.name, v.totalVoters);
-                    const inchargeName = getVillageInchargeName(v.name);
+                  // Village level support breakdown
+                  const vStats: Record<VoterPreference, number> = { TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0 };
+                  villageActiveVoters.forEach(v => {
+                    const p = v.politicalPreference || 'Neutral';
+                    if (vStats[p] !== undefined) vStats[p]++;
+                  });
 
-                    const isWinning = metrics.leadingParty === 'TDP' && metrics.lead > 0;
-                    const status = metrics.isCloseContest ? 'CLOSE CONTEST' : (isWinning ? 'WINNING' : 'TRAILING');
-                    const leadVal = metrics.lead;
-                    const leadStr = leadVal.toLocaleString();
+                  // Village level unique booths
+                  const vBooths = Array.from(new Set(villageVoters.map(v => v.boothNumber))).sort();
 
-                    return (
-                      <div
-                        key={v.name}
-                        onClick={() => { setSelectedVillageName(v.name); setVillageSubTab('overview'); }}
-                        className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4 cursor-pointer hover:shadow-md transition-shadow"
-                      >
-                        <div className="flex justify-between items-start">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] text-slate-400 font-mono">#{String(index + 1).padStart(2, '0')}</span>
-                              <span className="font-black text-slate-900 uppercase text-sm">{v.name}</span>
-                            </div>
-                            <p className="text-xs text-slate-500 font-bold">Incharge: {inchargeName}</p>
-                          </div>
-                          <div>
-                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase border ${
-                              isWinning 
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
-                                : 'bg-orange-50 text-orange-700 border-orange-100'
-                            }`}>
-                              {status}
-                            </span>
-                          </div>
-                        </div>
+                  // Village level fake count
+                  const vFakeCount = villageVoters.filter(v => v.voterStatus === 'Fake' || v.voterStatus === 'Duplicate' || v.voterStatus === 'Doubtful').length;
 
-                        <div className="grid grid-cols-2 gap-4 border-t border-slate-50 pt-3">
-                          <div>
-                            <p className="text-[9px] text-slate-400 font-black uppercase">Total Voters</p>
-                            <p className="text-xs font-black text-slate-900 mt-0.5">{v.totalVoters.toLocaleString()}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-[9px] text-slate-400 font-black uppercase">Lead</p>
-                            <span className={`font-mono text-xs font-black ${
-                              isWinning ? 'text-emerald-600' : 'text-orange-600'
-                            }`}>
-                              {leadStr}
-                            </span>
-                          </div>
-                        </div>
+                  // Village local vs migrated
+                  const vLocalCount = villageVoters.filter(v => v.voterLocationStatus === 'Local' || !v.voterLocationStatus).length;
+                  const vMigratedCount = villageVoters.length - vLocalCount;
 
-                        <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 grid grid-cols-3 gap-2 text-center text-[10px]">
-                          <div>
-                            <p className="text-slate-400 font-bold text-[8px] uppercase">TDP</p>
-                            <span className="text-yellow-600 font-black">{metrics.tdp}</span>
-                          </div>
-                          <div>
-                            <p className="text-slate-400 font-bold text-[8px] uppercase">YSRCP</p>
-                            <span className="text-blue-600 font-black">{metrics.ysrcp}</span>
-                          </div>
-                          <div>
-                            <p className="text-slate-400 font-bold text-[8px] uppercase">Neutral</p>
-                            <span className="text-slate-500 font-black">{metrics.neutral}</span>
-                          </div>
-                        </div>
+                  const tdpCount = vStats.TDP || 0;
+                  const ysrcpCount = vStats.YSRCP || 0;
+                  const leadingP: VoterPreference = tdpCount >= ysrcpCount ? 'TDP' : 'YSRCP';
+                  const leadingLead = Math.abs(tdpCount - ysrcpCount);
 
-                        <div className="flex justify-end pt-1">
-                          <a
-                            href={`tel:${getInchargePhone(v.name)}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                            }}
-                            className="inline-flex items-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-100 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                  const selectedVillageSpec: MandalVillage = villagesSource.find(v => v.name.toUpperCase() === selectedVillageName.toUpperCase()) || villagesSource[0] || ({
+                    sNo: '#01',
+                    name: selectedVillageName,
+                    totalVoters: villageVoters.length,
+                    totalBooths: vBooths.length,
+                    localVoters: vLocalCount,
+                    migratedVoters: vMigratedCount,
+                    pStats: vStats,
+                    leadingParty: leadingP,
+                    lead: leadingLead,
+                  } as MandalVillage);
+                  const vSpecTotal = selectedVillageSpec?.totalVoters ?? villageVoters.length;
+                  const villagePendingSurvey = Math.max(0, vSpecTotal - villageVoters.length);
+                  const villageSurveyPct = vSpecTotal > 0 ? ((villageVoters.length / vSpecTotal) * 100).toFixed(1) : '0.0';
+
+                  return (
+                    <div className="space-y-6 animate-fade-in" id="village-drilldown-panel">
+                      {/* Drilldown Header */}
+                      <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <button
+                            onClick={() => setSelectedVillageName(null)}
+                            className="text-xs font-black text-yellow-600 hover:text-yellow-700 flex items-center gap-1.5 cursor-pointer uppercase transition-all mb-1 bg-yellow-50 px-2.5 py-1 rounded border border-yellow-200 w-fit"
                           >
-                            <Phone className="w-3.5 h-3.5" />
-                            <span>Call Incharge</span>
-                          </a>
+                            ← Back to Villages Directory
+                          </button>
+                          <h2 className="text-xl font-black text-slate-900 tracking-tight uppercase">
+                            {selectedVillageName} Command Center
+                          </h2>
+                          <p className="text-xs text-slate-500 font-bold">
+                            {constituencyDisplayName ? `${constituencyDisplayName} Assembly Constituency` : 'Assignment needs configuration'} • {mandalDisplayName ? `${mandalDisplayName} Mandal` : 'Assignment needs configuration'} • {selectedVillageName}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 bg-yellow-50 text-yellow-800 px-3 py-1.5 rounded-lg border border-yellow-200 h-fit shrink-0">
+                          <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>
+                          <span className="text-[10px] font-black uppercase tracking-wider">Assigned Village Command Active</span>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
 
-              </div>
-            ) : (
-              // DRILLDOWN VIEW: Detailed command center of selected village
-              (() => {
-                const villageVoters = voters.filter(v => v.village.toUpperCase() === selectedVillageName.toUpperCase());
-                const villageActiveVoters = villageVoters.filter(v => !v.voterStatus || v.voterStatus === 'Active' || v.voterStatus === 'Shifted');
-                
-                // Village level support breakdown
-                const vStats: Record<VoterPreference, number> = { TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0 };
-                villageActiveVoters.forEach(v => {
-                  const p = v.politicalPreference || 'Neutral';
-                  if (vStats[p] !== undefined) vStats[p]++;
-                });
-
-                // Village level unique booths
-                const vBooths = Array.from(new Set(villageVoters.map(v => v.boothNumber))).sort();
-
-                // Village level fake count
-                const vFakeCount = villageVoters.filter(v => v.voterStatus === 'Fake' || v.voterStatus === 'Duplicate' || v.voterStatus === 'Doubtful').length;
-
-                // Village local vs migrated
-                const vLocalCount = villageVoters.filter(v => v.voterLocationStatus === 'Local' || !v.voterLocationStatus).length;
-                const vMigratedCount = villageVoters.length - vLocalCount;
-
-                const tdpCount = vStats.TDP || 0;
-                const ysrcpCount = vStats.YSRCP || 0;
-                const leadingP: VoterPreference = tdpCount >= ysrcpCount ? 'TDP' : 'YSRCP';
-                const leadingLead = Math.abs(tdpCount - ysrcpCount);
-
-                const selectedVillageSpec: MandalVillage = villagesSource.find(v => v.name.toUpperCase() === selectedVillageName.toUpperCase()) || villagesSource[0] || ({
-                  sNo: '#01',
-                  name: selectedVillageName,
-                  totalVoters: villageVoters.length,
-                  totalBooths: vBooths.length,
-                  localVoters: vLocalCount,
-                  migratedVoters: vMigratedCount,
-                  pStats: vStats,
-                  leadingParty: leadingP,
-                  lead: leadingLead,
-                } as MandalVillage);
-                const vSpecTotal = selectedVillageSpec?.totalVoters ?? villageVoters.length;
-                const villagePendingSurvey = Math.max(0, vSpecTotal - villageVoters.length);
-                const villageSurveyPct = vSpecTotal > 0 ? ((villageVoters.length / vSpecTotal) * 100).toFixed(1) : '0.0';
-
-                return (
-                  <div className="space-y-6 animate-fade-in" id="village-drilldown-panel">
-                    {/* Drilldown Header */}
-                    <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <button 
-                          onClick={() => setSelectedVillageName(null)}
-                          className="text-xs font-black text-yellow-600 hover:text-yellow-700 flex items-center gap-1.5 cursor-pointer uppercase transition-all mb-1 bg-yellow-50 px-2.5 py-1 rounded border border-yellow-200 w-fit"
-                        >
-                          ← Back to Villages Directory
-                        </button>
-                        <h2 className="text-xl font-black text-slate-900 tracking-tight uppercase">
-                          {selectedVillageName} Command Center
-                        </h2>
-                        <p className="text-xs text-slate-500 font-bold">Kondapi Assembly Constituency • Singarayakonda Mandal • {selectedVillageName}</p>
+                      {/* Drilled-down village sub-navigation tabs */}
+                      <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+                        {[
+                          { id: 'overview', name: 'Overview', icon: Home },
+                          { id: 'voters', name: 'Voter Directory', icon: Search },
+                          { id: 'booths', name: 'Booths & Incharges', icon: User },
+                          { id: 'live_track', name: 'Live Track', icon: RefreshCw },
+                          { id: 'fake_votes', name: 'Fake Votes', icon: AlertTriangle },
+                          { id: 'caste', name: 'Caste Analytics', icon: BarChart3 },
+                          { id: 'cadre', name: 'Village Cadres', icon: Users }
+                        ].map(t => (
+                          <button
+                            key={t.id}
+                            onClick={() => setVillageSubTab(t.id as any)}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-black transition-all cursor-pointer uppercase ${villageSubTab === t.id ? 'bg-yellow-400 text-slate-950 shadow' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'}`}
+                          >
+                            <t.icon className="w-3.5 h-3.5" />
+                            <span>{t.name}</span>
+                          </button>
+                        ))}
                       </div>
-                      <div className="flex items-center gap-2 bg-yellow-50 text-yellow-800 px-3 py-1.5 rounded-lg border border-yellow-200 h-fit shrink-0">
-                        <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>
-                        <span className="text-[10px] font-black uppercase tracking-wider">Assigned Village Command Active</span>
-                      </div>
-                    </div>
 
-                    {/* Drilled-down village sub-navigation tabs */}
-                    <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
-                      {[
-                        { id: 'overview', name: 'Overview', icon: Home },
-                        { id: 'voters', name: 'Voter Directory', icon: Search },
-                        { id: 'booths', name: 'Booths & Incharges', icon: User },
-                        { id: 'live_track', name: 'Live Track', icon: RefreshCw },
-                        { id: 'fake_votes', name: 'Fake Votes', icon: AlertTriangle },
-                        { id: 'caste', name: 'Caste Analytics', icon: BarChart3 },
-                        { id: 'cadre', name: 'Village Cadres', icon: Users }
-                      ].map(t => (
-                        <button
-                          key={t.id}
-                          onClick={() => setVillageSubTab(t.id as any)}
-                          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-black transition-all cursor-pointer uppercase ${villageSubTab === t.id ? 'bg-yellow-400 text-slate-950 shadow' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'}`}
-                        >
-                          <t.icon className="w-3.5 h-3.5" />
-                          <span>{t.name}</span>
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Sub Tab: Overview */}
-                    {villageSubTab === 'overview' && (
-                      <div className="space-y-6 animate-fade-in">
-                        {/* REDESIGNED Summary Cards with separate Total, Reached, Pending, and Coverage metrics */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-                          <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-                            <span className="text-[9px] font-black uppercase text-slate-400">Total Voters</span>
-                            <h3 className="text-xl font-black text-slate-900 leading-none mt-1">{selectedVillageSpec.totalVoters.toLocaleString()}</h3>
-                            <p className="text-[8px] text-slate-400 font-bold mt-1 uppercase">Mandal Registry</p>
-                          </div>
-                          <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-                            <span className="text-[9px] font-black uppercase text-slate-400">Verified Voters</span>
-                            <h3 className="text-xl font-black text-slate-900 leading-none mt-1">{villageVoters.length.toLocaleString()}</h3>
-                            <p className="text-[8px] text-emerald-600 font-bold mt-1 uppercase">Active Mappings ({villageSurveyPct}%)</p>
-                          </div>
-                          <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-                            <span className="text-[9px] font-black uppercase text-slate-400">Pending Verification</span>
-                            <h3 className="text-xl font-black text-slate-500 leading-none mt-1">{villagePendingSurvey.toLocaleString()}</h3>
-                            <p className="text-[8px] text-slate-400 font-bold mt-1 uppercase">Unvisited Households</p>
-                          </div>
-                          <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-                            <span className="text-[9px] font-black uppercase text-slate-400">Coverage Progress</span>
-                            <h3 className="text-xl font-black text-emerald-600 leading-none mt-1">{villageSurveyPct}%</h3>
-                            <div className="w-full bg-slate-100 h-1 rounded-full mt-1.5 overflow-hidden">
-                              <div className="bg-emerald-500 h-full" style={{ width: `${villageSurveyPct}%` }}></div>
+                      {/* Sub Tab: Overview */}
+                      {villageSubTab === 'overview' && (
+                        <div className="space-y-6 animate-fade-in">
+                          {/* REDESIGNED Summary Cards with separate Total, Reached, Pending, and Coverage metrics */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                            <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+                              <span className="text-[9px] font-black uppercase text-slate-400">Total Voters</span>
+                              <h3 className="text-xl font-black text-slate-900 leading-none mt-1">{selectedVillageSpec.totalVoters.toLocaleString()}</h3>
+                              <p className="text-[8px] text-slate-400 font-bold mt-1 uppercase">Mandal Registry</p>
                             </div>
-                          </div>
-                          <div className="bg-yellow-400 border border-yellow-500 rounded-xl p-4 shadow-sm">
-                            <span className="text-[9px] font-black uppercase text-slate-950">Projected Winner</span>
-                            <h3 className="text-base font-black text-slate-950 uppercase mt-1 truncate">{leadingP} LEADS</h3>
-                            <p className="text-[8px] text-slate-950 font-bold mt-1 uppercase">Lead: {leadingLead.toLocaleString()} votes</p>
-                          </div>
-                        </div>
-
-                        {/* Preference Support breakdown cards */}
-                        <div className="space-y-2">
-                          <h4 className="text-xs font-black uppercase tracking-widest text-slate-400">Village Preference Split</h4>
-                          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-                            {(Object.keys(vStats) as VoterPreference[]).map(key => {
-                              const vCount = vStats[key];
-                              const vPct = villageVoters.length > 0 ? ((vCount / villageVoters.length) * 100).toFixed(1) : '0.0';
-                              return (
-                                <div key={key} className={`rounded-xl p-3 border ${PARTY_BG_COLORS[key]}`}>
-                                  <h5 className="text-[9px] font-black uppercase tracking-wider mb-0.5">{PARTY_NAMES[key]}</h5>
-                                  <div className="flex flex-col">
-                                    <span className="text-lg font-black leading-none">{vCount}</span>
-                                    <span className="text-[10px] font-bold opacity-80 mt-1">{vPct}%</span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                            <div className="rounded-xl p-3 border bg-slate-50 border-slate-200 text-slate-600">
-                              <h5 className="text-[9px] font-black uppercase tracking-wider mb-0.5">Fake Votes</h5>
-                              <div className="flex flex-col">
-                                <span className="text-lg font-black leading-none">{vFakeCount}</span>
-                                <span className="text-[10px] font-bold opacity-80 mt-1">
-                                  {villageVoters.length > 0 ? ((vFakeCount / villageVoters.length) * 100).toFixed(1) : '0.0'}%
-                                </span>
+                            <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+                              <span className="text-[9px] font-black uppercase text-slate-400">Verified Voters</span>
+                              <h3 className="text-xl font-black text-slate-900 leading-none mt-1">{villageVoters.length.toLocaleString()}</h3>
+                              <p className="text-[8px] text-emerald-600 font-bold mt-1 uppercase">Active Mappings ({villageSurveyPct}%)</p>
+                            </div>
+                            <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+                              <span className="text-[9px] font-black uppercase text-slate-400">Pending Verification</span>
+                              <h3 className="text-xl font-black text-slate-500 leading-none mt-1">{villagePendingSurvey.toLocaleString()}</h3>
+                              <p className="text-[8px] text-slate-400 font-bold mt-1 uppercase">Unvisited Households</p>
+                            </div>
+                            <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+                              <span className="text-[9px] font-black uppercase text-slate-400">Coverage Progress</span>
+                              <h3 className="text-xl font-black text-emerald-600 leading-none mt-1">{villageSurveyPct}%</h3>
+                              <div className="w-full bg-slate-100 h-1 rounded-full mt-1.5 overflow-hidden">
+                                <div className="bg-emerald-500 h-full" style={{ width: `${villageSurveyPct}%` }}></div>
                               </div>
                             </div>
-                          </div>
-                        </div>
-
-                        {/* Row 3: Village Incharge & Outreach Team Performance */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                          {/* Village Incharge Details */}
-                          <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4">
-                            <div className="border-b border-slate-100 pb-2 flex justify-between items-center">
-                              <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Village Incharge Details</h4>
-                              <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-0.5 rounded text-[9px] font-black uppercase">
-                                Active Duty
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <div className="w-12 h-12 rounded-full bg-yellow-400/10 border border-yellow-400/30 flex items-center justify-center text-yellow-500 text-lg font-black shrink-0">
-                                {getVillageInchargeName(selectedVillageName).split(' ').map(n => n[0]).join('')}
-                              </div>
-                              <div className="space-y-0.5">
-                                <h5 className="font-black text-slate-900 text-sm uppercase">{getVillageInchargeName(selectedVillageName)}</h5>
-                                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Mandal Appointed Village Incharge</p>
-                                <p className="text-xs font-mono text-slate-500 font-bold mt-1">📞 9123410001 (Dummy Contact)</p>
-                              </div>
-                            </div>
-                            <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 text-xs space-y-1">
-                              <p className="font-bold text-slate-700 uppercase">Assigned Mandate:</p>
-                              <p className="text-slate-500 font-semibold leading-relaxed">
-                                To coordinate polling booth agents across all {selectedVillageSpec.totalBooths} booths, conduct weekly voter outreach drives, and verify outreach data authenticity.
-                              </p>
+                            <div className="bg-yellow-400 border border-yellow-500 rounded-xl p-4 shadow-sm">
+                              <span className="text-[9px] font-black uppercase text-slate-950">Projected Winner</span>
+                              <h3 className="text-base font-black text-slate-950 uppercase mt-1 truncate">{leadingP} LEADS</h3>
+                              <p className="text-[8px] text-slate-950 font-bold mt-1 uppercase">Lead: {leadingLead.toLocaleString()} votes</p>
                             </div>
                           </div>
 
-                          {/* Outreach Team Performance */}
-                          <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4">
-                            <div className="border-b border-slate-100 pb-2 flex justify-between items-center">
-                              <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Outreach Team Performance</h4>
-                              <span className="text-yellow-600 bg-yellow-50 border border-yellow-100 px-2 py-0.5 rounded text-[9px] font-black uppercase">
-                                Phase 1 Complete
-                              </span>
-                            </div>
-                            <div className="space-y-3">
-                              {[
-                                { name: "Team North Alpha", lead: "Ch. Rama Devi", target: 200, completed: 185 },
-                                { name: "Team South Beta", lead: "K. Srinivasa Rao", target: 200, completed: 195 },
-                                { name: "Team Central Delta", lead: "S. Anusha", target: 100, completed: 120 }
-                              ].map((team, idx) => {
-                                const pct = Math.round((team.completed / team.target) * 100);
+                          {/* Preference Support breakdown cards */}
+                          <div className="space-y-2">
+                            <h4 className="text-xs font-black uppercase tracking-widest text-slate-400">Village Preference Split</h4>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+                              {(Object.keys(vStats) as VoterPreference[]).map(key => {
+                                const vCount = vStats[key];
+                                const vPct = villageVoters.length > 0 ? ((vCount / villageVoters.length) * 100).toFixed(1) : '0.0';
                                 return (
-                                  <div key={idx} className="space-y-1 text-xs">
-                                    <div className="flex justify-between font-bold text-slate-700">
-                                      <span className="uppercase">{team.name} ({team.lead})</span>
-                                      <span>{team.completed} / {team.target} ({pct}%)</span>
-                                    </div>
-                                    <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                                      <div className="bg-yellow-400 h-full rounded-full" style={{ width: `${Math.min(100, pct)}%` }}></div>
+                                  <div key={key} className={`rounded-xl p-3 border ${PARTY_BG_COLORS[key]}`}>
+                                    <h5 className="text-[9px] font-black uppercase tracking-wider mb-0.5">{PARTY_NAMES[key]}</h5>
+                                    <div className="flex flex-col">
+                                      <span className="text-lg font-black leading-none">{vCount}</span>
+                                      <span className="text-[10px] font-bold opacity-80 mt-1">{vPct}%</span>
                                     </div>
                                   </div>
                                 );
                               })}
+                              <div className="rounded-xl p-3 border bg-slate-50 border-slate-200 text-slate-600">
+                                <h5 className="text-[9px] font-black uppercase tracking-wider mb-0.5">Fake Votes</h5>
+                                <div className="flex flex-col">
+                                  <span className="text-lg font-black leading-none">{vFakeCount}</span>
+                                  <span className="text-[10px] font-bold opacity-80 mt-1">
+                                    {villageVoters.length > 0 ? ((vFakeCount / villageVoters.length) * 100).toFixed(1) : '0.0'}%
+                                  </span>
+                                </div>
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        {/* Row 4: Gender & Age Demographics */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                          {/* Gender Analysis */}
-                          <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4">
-                            <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-2">Gender Demographics Analysis</h4>
-                            {(() => {
-                              const males = villageVoters.filter(v => v.gender === 'Male').length;
-                              const females = villageVoters.filter(v => v.gender === 'Female').length;
-                              const total = males + females;
-                              const malePct = total > 0 ? Math.round((males / total) * 100) : 50;
-                              const femalePct = total > 0 ? Math.round((females / total) * 100) : 50;
-
-                              return (
-                                <div className="space-y-4">
-                                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-blue-500"></span> MALE: {males} ({malePct}%)</span>
-                                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-pink-500"></span> FEMALE: {females} ({femalePct}%)</span>
-                                  </div>
-                                  <div className="w-full flex h-4 rounded-full overflow-hidden text-center text-[10px] font-black text-white">
-                                    <div className="bg-blue-500 h-full flex items-center justify-center" style={{ width: `${malePct}%` }}>MALE {malePct}%</div>
-                                    <div className="bg-pink-500 h-full flex items-center justify-center" style={{ width: `${femalePct}%` }}>FEMALE {femalePct}%</div>
-                                  </div>
-                                  <p className="text-[10px] text-slate-400 font-semibold leading-relaxed text-center">
-                                    Balanced gender ratio observed across registered voters. Out-of-station male migration currently monitored.
-                                  </p>
+                          {/* Row 3: Village Incharge & Outreach Team Performance */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                            {/* Village Incharge Details */}
+                            <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4">
+                              <div className="border-b border-slate-100 pb-2 flex justify-between items-center">
+                                <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Village Incharge Details</h4>
+                                <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-0.5 rounded text-[9px] font-black uppercase">
+                                  Active Duty
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 rounded-full bg-yellow-400/10 border border-yellow-400/30 flex items-center justify-center text-yellow-500 text-lg font-black shrink-0">
+                                  {getVillageInchargeName(selectedVillageName).split(' ').map(n => n[0]).join('')}
                                 </div>
-                              );
-                            })()}
-                          </div>
+                                <div className="space-y-0.5">
+                                  <h5 className="font-black text-slate-900 text-sm uppercase">{getVillageInchargeName(selectedVillageName)}</h5>
+                                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Mandal Appointed Village Incharge</p>
+                                  <p className="text-xs font-mono text-slate-500 font-bold mt-1">📞 9123410001 (Dummy Contact)</p>
+                                </div>
+                              </div>
+                              <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 text-xs space-y-1">
+                                <p className="font-bold text-slate-700 uppercase">Assigned Mandate:</p>
+                                <p className="text-slate-500 font-semibold leading-relaxed">
+                                  To coordinate polling booth agents across all {selectedVillageSpec.totalBooths} booths, conduct weekly voter outreach drives, and verify outreach data authenticity.
+                                </p>
+                              </div>
+                            </div>
 
-                          {/* Age Group Analysis */}
-                          <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4">
-                            <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-2">Age Cohort Distribution</h4>
-                            {(() => {
-                              const g1 = villageVoters.filter(v => v.age >= 18 && v.age <= 30).length;
-                              const g2 = villageVoters.filter(v => v.age >= 31 && v.age <= 45).length;
-                              const g3 = villageVoters.filter(v => v.age >= 46 && v.age <= 60).length;
-                              const g4 = villageVoters.filter(v => v.age > 60).length;
-                              const total = villageVoters.length;
-
-                              return (
-                                <div className="grid grid-cols-2 gap-4 text-center">
-                                  {[
-                                    { label: "Youth (18-30)", count: g1, color: "bg-emerald-500" },
-                                    { label: "Middle Age (31-45)", count: g2, color: "bg-yellow-400" },
-                                    { label: "Senior Cohort (46-60)", count: g3, color: "bg-blue-500" },
-                                    { label: "Elderly (60+)", count: g4, color: "bg-purple-500" }
-                                  ].map((g, idx) => {
-                                    const pct = total > 0 ? ((g.count / total) * 100).toFixed(1) : '0';
-                                    return (
-                                      <div key={idx} className="p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-1">
-                                        <span className="text-[9px] text-slate-400 font-black uppercase tracking-wider block">{g.label}</span>
-                                        <span className="text-sm font-black text-slate-800 block">{g.count} Voters</span>
-                                        <div className="flex items-center justify-center gap-1">
-                                          <div className={`w-1.5 h-1.5 rounded-full ${g.color}`} />
-                                          <span className="text-[9px] text-slate-500 font-bold">{pct}% share</span>
-                                        </div>
+                            {/* Outreach Team Performance */}
+                            <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4">
+                              <div className="border-b border-slate-100 pb-2 flex justify-between items-center">
+                                <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Outreach Team Performance</h4>
+                                <span className="text-yellow-600 bg-yellow-50 border border-yellow-100 px-2 py-0.5 rounded text-[9px] font-black uppercase">
+                                  Phase 1 Complete
+                                </span>
+                              </div>
+                              <div className="space-y-3">
+                                {[
+                                  { name: "Team North Alpha", lead: "Ch. Rama Devi", target: 200, completed: 185 },
+                                  { name: "Team South Beta", lead: "K. Srinivasa Rao", target: 200, completed: 195 },
+                                  { name: "Team Central Delta", lead: "S. Anusha", target: 100, completed: 120 }
+                                ].map((team, idx) => {
+                                  const pct = Math.round((team.completed / team.target) * 100);
+                                  return (
+                                    <div key={idx} className="space-y-1 text-xs">
+                                      <div className="flex justify-between font-bold text-slate-700">
+                                        <span className="uppercase">{team.name} ({team.lead})</span>
+                                        <span>{team.completed} / {team.target} ({pct}%)</span>
                                       </div>
-                                    );
-                                  })}
+                                      <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                                        <div className="bg-yellow-400 h-full rounded-full" style={{ width: `${Math.min(100, pct)}%` }}></div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Row 4: Gender & Age Demographics */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                            {/* Gender Analysis */}
+                            <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4">
+                              <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-2">Gender Demographics Analysis</h4>
+                              {(() => {
+                                const males = villageVoters.filter(v => v.gender === 'Male').length;
+                                const females = villageVoters.filter(v => v.gender === 'Female').length;
+                                const total = males + females;
+                                const malePct = total > 0 ? Math.round((males / total) * 100) : 50;
+                                const femalePct = total > 0 ? Math.round((females / total) * 100) : 50;
+
+                                return (
+                                  <div className="space-y-4">
+                                    <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                                      <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-blue-500"></span> MALE: {males} ({malePct}%)</span>
+                                      <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-pink-500"></span> FEMALE: {females} ({femalePct}%)</span>
+                                    </div>
+                                    <div className="w-full flex h-4 rounded-full overflow-hidden text-center text-[10px] font-black text-white">
+                                      <div className="bg-blue-500 h-full flex items-center justify-center" style={{ width: `${malePct}%` }}>MALE {malePct}%</div>
+                                      <div className="bg-pink-500 h-full flex items-center justify-center" style={{ width: `${femalePct}%` }}>FEMALE {femalePct}%</div>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 font-semibold leading-relaxed text-center">
+                                      Balanced gender ratio observed across registered voters. Out-of-station male migration currently monitored.
+                                    </p>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+
+                            {/* Age Group Analysis */}
+                            <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4">
+                              <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-2">Age Cohort Distribution</h4>
+                              {(() => {
+                                const g1 = villageVoters.filter(v => v.age >= 18 && v.age <= 30).length;
+                                const g2 = villageVoters.filter(v => v.age >= 31 && v.age <= 45).length;
+                                const g3 = villageVoters.filter(v => v.age >= 46 && v.age <= 60).length;
+                                const g4 = villageVoters.filter(v => v.age > 60).length;
+                                const total = villageVoters.length;
+
+                                return (
+                                  <div className="grid grid-cols-2 gap-4 text-center">
+                                    {[
+                                      { label: "Youth (18-30)", count: g1, color: "bg-emerald-500" },
+                                      { label: "Middle Age (31-45)", count: g2, color: "bg-yellow-400" },
+                                      { label: "Senior Cohort (46-60)", count: g3, color: "bg-blue-500" },
+                                      { label: "Elderly (60+)", count: g4, color: "bg-purple-500" }
+                                    ].map((g, idx) => {
+                                      const pct = total > 0 ? ((g.count / total) * 100).toFixed(1) : '0';
+                                      return (
+                                        <div key={idx} className="p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-1">
+                                          <span className="text-[9px] text-slate-400 font-black uppercase tracking-wider block">{g.label}</span>
+                                          <span className="text-sm font-black text-slate-800 block">{g.count} Voters</span>
+                                          <div className="flex items-center justify-center gap-1">
+                                            <div className={`w-1.5 h-1.5 rounded-full ${g.color}`} />
+                                            <span className="text-[9px] text-slate-500 font-bold">{pct}% share</span>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          </div>
+
+                        </div>
+                      )}
+
+                      {/* Sub Tab: Voters Directory */}
+                      {villageSubTab === 'voters' && (() => {
+                        const filteredVillageVoters = villageVoters.filter(v => boothFilter === 'All' || v.boothNumber === boothFilter);
+                        const start = (villageVotersPage - 1) * villageVotersPageSize;
+                        const paginatedVillageVoters = filteredVillageVoters.slice(start, start + villageVotersPageSize);
+                        return (
+                          <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-4 animate-fade-in">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-2">
+                              <div>
+                                <h4 className="text-sm font-black text-slate-900 uppercase">Voter Database - {selectedVillageName}</h4>
+                                {boothFilter !== 'All' && (
+                                  <p className="text-[10px] font-black text-yellow-600 uppercase mt-0.5">Filtered by: {boothFilter}</p>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className="text-xs font-bold text-slate-500">Matches: {filteredVillageVoters.length} Voters</span>
+                                {boothFilter !== 'All' && (
+                                  <button
+                                    onClick={() => setBoothFilter('All')}
+                                    className="text-[10px] font-black uppercase text-red-600 bg-red-50 hover:bg-red-100 px-2 py-1 rounded border border-red-200 cursor-pointer"
+                                  >
+                                    Clear Filter
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            {/* Table list of voters inside selected village */}
+                            <div className="overflow-x-auto max-h-[450px]">
+                              <table className="w-full text-left border-collapse text-xs">
+                                <thead>
+                                  <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-bold uppercase text-[9px] tracking-wider">
+                                    <th className="py-2.5 px-3">EPIC ID</th>
+                                    <th className="py-2.5 px-3">Voter Name</th>
+                                    <th className="py-2.5 px-3">Age/Gender</th>
+                                    <th className="py-2.5 px-3">Booth</th>
+                                    <th className="py-2.5 px-3">Political Support</th>
+                                    <th className="py-2.5 px-3">Caste / Community</th>
+                                    <th className="py-2.5 px-3">Location</th>
+                                    <th className="py-2.5 px-3">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {paginatedVillageVoters.map((v) => (
+                                    <tr key={v.epicNumber} className="hover:bg-slate-50 font-bold text-slate-700">
+                                      <td className="py-2.5 px-3 text-slate-400 font-mono text-[10px]">{v.epicNumber}</td>
+                                      <td className="py-2.5 px-3 font-black text-slate-900">{v.name}</td>
+                                      <td className="py-2.5 px-3">{v.age} / {v.gender}</td>
+                                      <td className="py-2.5 px-3 truncate max-w-[120px]">{v.boothNumber}</td>
+                                      <td className="py-2.5 px-3">
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-black ${PARTY_BG_COLORS[v.politicalPreference || 'Neutral']}`}>
+                                          {v.politicalPreference}
+                                        </span>
+                                      </td>
+                                      <td className="py-2.5 px-3">{v.caste || 'Unspecified'}</td>
+                                      <td className="py-2.5 px-3">
+                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${v.voterLocationStatus === 'Migrated' ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'}`}>
+                                          {v.voterLocationStatus || 'Local'}
+                                        </span>
+                                      </td>
+                                      <td className="py-2.5 px-3">
+                                        <button
+                                          onClick={() => handleOpenEditModal(v)}
+                                          className="p-1 text-slate-400 hover:text-yellow-600 rounded hover:bg-slate-100 cursor-pointer"
+                                        >
+                                          <Edit2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+
+                            <Pagination
+                              currentPage={villageVotersPage}
+                              pageSize={villageVotersPageSize}
+                              totalItems={filteredVillageVoters.length}
+                              onPageChange={setVillageVotersPage}
+                              onPageSizeChange={(newSize) => {
+                                setVillageVotersPageSize(newSize);
+                                setVillageVotersPage(1);
+                              }}
+                              pageSizeOptions={[10, 25, 50, 100]}
+                              itemName="voters"
+                              accentColor="amber"
+                            />
+                          </div>
+                        );
+                      })()}
+
+                      {/* Sub Tab: Booths */}
+                      {villageSubTab === 'booths' && (
+                        <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-4 animate-fade-in">
+                          <h4 className="text-sm font-black text-slate-900 border-b border-slate-100 pb-2 uppercase">Polling Booths of {selectedVillageName}</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {vBooths.map((bName) => {
+                              const bVoters = villageVoters.filter(v => v.boothNumber === bName);
+                              const bPresident = boothIncharges.find(b => b.booth === bName);
+                              return (
+                                <div key={bName} className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 space-y-2">
+                                  <div className="flex justify-between items-start border-b border-slate-100 pb-1.5">
+                                    <h5 className="font-black text-slate-900 text-xs uppercase">{bName}</h5>
+                                    <span className="px-2 py-0.5 bg-yellow-400/10 text-yellow-800 rounded text-[9px] font-black uppercase">
+                                      {bVoters.length} Voters
+                                    </span>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase">Booth President</p>
+                                    <p className="text-xs font-black text-slate-800">{bPresident?.name || 'Assigned Cadre'}</p>
+                                    <p className="text-[10px] text-slate-500 font-mono">{bPresident?.mobile || '98480xxxxx'}</p>
+                                  </div>
                                 </div>
                               );
-                            })()}
+                            })}
                           </div>
                         </div>
+                      )}
 
-                      </div>
-                    )}
-
-                    {/* Sub Tab: Voters Directory */}
-                    {villageSubTab === 'voters' && (() => {
-                      const filteredVillageVoters = villageVoters.filter(v => boothFilter === 'All' || v.boothNumber === boothFilter);
-                      const start = (villageVotersPage - 1) * villageVotersPageSize;
-                      const paginatedVillageVoters = filteredVillageVoters.slice(start, start + villageVotersPageSize);
-                      return (
+                      {/* Sub Tab: Live Track */}
+                      {villageSubTab === 'live_track' && (
                         <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-4 animate-fade-in">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-2">
-                            <div>
-                              <h4 className="text-sm font-black text-slate-900 uppercase">Voter Database - {selectedVillageName}</h4>
-                              {boothFilter !== 'All' && (
-                                <p className="text-[10px] font-black text-yellow-600 uppercase mt-0.5">Filtered by: {boothFilter}</p>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <span className="text-xs font-bold text-slate-500">Matches: {filteredVillageVoters.length} Voters</span>
-                              {boothFilter !== 'All' && (
-                                <button
-                                  onClick={() => setBoothFilter('All')}
-                                  className="text-[10px] font-black uppercase text-red-600 bg-red-50 hover:bg-red-100 px-2 py-1 rounded border border-red-200 cursor-pointer"
-                                >
-                                  Clear Filter
-                                </button>
-                              )}
-                            </div>
+                          <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                            <h4 className="text-sm font-black text-slate-900 uppercase">Live Voter Track - {selectedVillageName}</h4>
+                            <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-bold">Real-time Tracker</span>
                           </div>
-                          {/* Table list of voters inside selected village */}
-                          <div className="overflow-x-auto max-h-[450px]">
+                          {/* Simulation for live voter tracking */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            {vBooths.map((bName) => {
+                              const bVoters = villageVoters.filter(v => v.boothNumber === bName);
+                              const bVoted = bVoters.filter(v => v.voteStatus === 'VOTE DONE').length;
+                              const bVotedPct = bVoters.length > 0 ? Math.round((bVoted / bVoters.length) * 100) : 0;
+                              return (
+                                <div key={bName} className="p-4 rounded-xl border border-slate-100 bg-white shadow-sm space-y-3">
+                                  <h5 className="font-black text-slate-900 text-xs truncate uppercase">{bName}</h5>
+                                  <div className="space-y-1">
+                                    <div className="flex justify-between text-[10px] font-bold text-slate-500">
+                                      <span>Voting Progress</span>
+                                      <span>{bVoted} / {bVoters.length} ({bVotedPct}%)</span>
+                                    </div>
+                                    <div className="w-full bg-slate-100 rounded-full h-2">
+                                      <div className="bg-green-500 h-2 rounded-full transition-all" style={{ width: `${bVotedPct}%` }}></div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Sub Tab: Fake Votes */}
+                      {villageSubTab === 'fake_votes' && (
+                        <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-4 animate-fade-in">
+                          <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                            <h4 className="text-sm font-black text-slate-900 uppercase">Fake / Duplicate Detection - {selectedVillageName}</h4>
+                            <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded font-black border border-red-100">
+                              Total Detected: {vFakeCount} Records
+                            </span>
+                          </div>
+                          <div className="overflow-x-auto">
                             <table className="w-full text-left border-collapse text-xs">
                               <thead>
                                 <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-bold uppercase text-[9px] tracking-wider">
@@ -2480,993 +2891,813 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                                   <th className="py-2.5 px-3">Voter Name</th>
                                   <th className="py-2.5 px-3">Age/Gender</th>
                                   <th className="py-2.5 px-3">Booth</th>
-                                  <th className="py-2.5 px-3">Political Support</th>
-                                  <th className="py-2.5 px-3">Caste / Community</th>
-                                  <th className="py-2.5 px-3">Location</th>
+                                  <th className="py-2.5 px-3">Status</th>
+                                  <th className="py-2.5 px-3">Caste</th>
                                   <th className="py-2.5 px-3">Action</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-100">
-                                {paginatedVillageVoters.map((v) => (
-                                <tr key={v.epicNumber} className="hover:bg-slate-50 font-bold text-slate-700">
-                                  <td className="py-2.5 px-3 text-slate-400 font-mono text-[10px]">{v.epicNumber}</td>
-                                  <td className="py-2.5 px-3 font-black text-slate-900">{v.name}</td>
-                                  <td className="py-2.5 px-3">{v.age} / {v.gender}</td>
-                                  <td className="py-2.5 px-3 truncate max-w-[120px]">{v.boothNumber}</td>
-                                  <td className="py-2.5 px-3">
-                                    <span className={`px-2 py-0.5 rounded text-[10px] font-black ${PARTY_BG_COLORS[v.politicalPreference || 'Neutral']}`}>
-                                      {v.politicalPreference}
-                                    </span>
-                                  </td>
-                                  <td className="py-2.5 px-3">{v.caste || 'Unspecified'}</td>
-                                  <td className="py-2.5 px-3">
-                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${v.voterLocationStatus === 'Migrated' ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'}`}>
-                                      {v.voterLocationStatus || 'Local'}
-                                    </span>
-                                  </td>
-                                  <td className="py-2.5 px-3">
-                                    <button 
-                                      onClick={() => handleOpenEditModal(v)}
-                                      className="p-1 text-slate-400 hover:text-yellow-600 rounded hover:bg-slate-100 cursor-pointer"
-                                    >
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                                {villageVoters.filter(v => v.voterStatus === 'Fake' || v.voterStatus === 'Duplicate' || v.voterStatus === 'Doubtful').map((v) => (
+                                  <tr key={v.epicNumber} className="hover:bg-red-50/20 font-bold text-slate-700">
+                                    <td className="py-2.5 px-3 text-slate-400 font-mono text-[10px]">{v.epicNumber}</td>
+                                    <td className="py-2.5 px-3 font-black text-slate-900">{v.name}</td>
+                                    <td className="py-2.5 px-3">{v.age} / {v.gender}</td>
+                                    <td className="py-2.5 px-3">{v.boothNumber}</td>
+                                    <td className="py-2.5 px-3">
+                                      <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-red-100 text-red-800">
+                                        {v.voterStatus}
+                                      </span>
+                                    </td>
+                                    <td className="py-2.5 px-3">{v.caste || 'Unspecified'}</td>
+                                    <td className="py-2.5 px-3">
+                                      <button
+                                        onClick={() => handleOpenEditModal(v)}
+                                        className="p-1 text-slate-400 hover:text-yellow-600 rounded hover:bg-slate-100 cursor-pointer"
+                                      >
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                                {vFakeCount === 0 && (
+                                  <tr>
+                                    <td colSpan={7} className="text-center py-6 text-slate-400 font-medium">
+                                      No fake, duplicate, or doubtful voter records identified in {selectedVillageName}.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
+                      )}
 
-                        <Pagination
-                          currentPage={villageVotersPage}
-                          pageSize={villageVotersPageSize}
-                          totalItems={filteredVillageVoters.length}
-                          onPageChange={setVillageVotersPage}
-                          onPageSizeChange={(newSize) => {
-                            setVillageVotersPageSize(newSize);
-                            setVillageVotersPage(1);
-                          }}
-                          pageSizeOptions={[10, 25, 50, 100]}
-                          itemName="voters"
-                          accentColor="amber"
-                        />
-                      </div>
-                    );
-                    })()}
+                      {/* Sub Tab: Caste Analytics */}
+                      {villageSubTab === 'caste' && (
+                        <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-4 animate-fade-in">
+                          <h4 className="text-sm font-black text-slate-900 border-b border-slate-100 pb-2 uppercase">Community & Caste Analytics - {selectedVillageName}</h4>
+                          {/* Strictly manual caste/community counts of selected village */}
+                          {(() => {
+                            const casteCounts: Record<string, number> = {};
+                            villageVoters.forEach(v => {
+                              const c = v.caste || 'Unspecified';
+                              casteCounts[c] = (casteCounts[c] || 0) + 1;
+                            });
 
-                    {/* Sub Tab: Booths */}
-                    {villageSubTab === 'booths' && (
-                      <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-4 animate-fade-in">
-                        <h4 className="text-sm font-black text-slate-900 border-b border-slate-100 pb-2 uppercase">Polling Booths of {selectedVillageName}</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {vBooths.map((bName) => {
-                            const bVoters = villageVoters.filter(v => v.boothNumber === bName);
-                            const bPresident = boothIncharges.find(b => b.booth === bName);
                             return (
-                              <div key={bName} className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 space-y-2">
-                                <div className="flex justify-between items-start border-b border-slate-100 pb-1.5">
-                                  <h5 className="font-black text-slate-900 text-xs uppercase">{bName}</h5>
-                                  <span className="px-2 py-0.5 bg-yellow-400/10 text-yellow-800 rounded text-[9px] font-black uppercase">
-                                    {bVoters.length} Voters
-                                  </span>
-                                </div>
-                                <div className="space-y-1">
-                                  <p className="text-[10px] text-slate-400 font-bold uppercase">Booth President</p>
-                                  <p className="text-xs font-black text-slate-800">{bPresident?.name || 'Assigned Cadre'}</p>
-                                  <p className="text-[10px] text-slate-500 font-mono">{bPresident?.mobile || '98480xxxxx'}</p>
-                                </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                                {Object.entries(casteCounts).map(([cName, count]) => {
+                                  const pct = villageVoters.length > 0 ? ((count / villageVoters.length) * 100).toFixed(1) : '0';
+                                  return (
+                                    <div key={cName} className="p-4 rounded-xl border border-slate-100 bg-slate-50/50">
+                                      <span className="text-[10px] font-black uppercase text-slate-400">{cName}</span>
+                                      <h4 className="text-xl font-black text-slate-800 mt-1">{count}</h4>
+                                      <p className="text-[9px] text-slate-500 font-bold mt-1">{pct}% of Village Sample</p>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             );
-                          })}
+                          })()}
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {/* Sub Tab: Live Track */}
-                    {villageSubTab === 'live_track' && (
-                      <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-4 animate-fade-in">
-                        <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                          <h4 className="text-sm font-black text-slate-900 uppercase">Live Voter Track - {selectedVillageName}</h4>
-                          <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-bold">Real-time Tracker</span>
-                        </div>
-                        {/* Simulation for live voter tracking */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          {vBooths.map((bName) => {
-                            const bVoters = villageVoters.filter(v => v.boothNumber === bName);
-                            const bVoted = bVoters.filter(v => v.voteStatus === 'VOTE DONE').length;
-                            const bVotedPct = bVoters.length > 0 ? Math.round((bVoted / bVoters.length) * 100) : 0;
-                            return (
-                              <div key={bName} className="p-4 rounded-xl border border-slate-100 bg-white shadow-sm space-y-3">
-                                <h5 className="font-black text-slate-900 text-xs truncate uppercase">{bName}</h5>
-                                <div className="space-y-1">
-                                  <div className="flex justify-between text-[10px] font-bold text-slate-500">
-                                    <span>Voting Progress</span>
-                                    <span>{bVoted} / {bVoters.length} ({bVotedPct}%)</span>
+                      {/* Sub Tab: Village Cadre Network */}
+                      {villageSubTab === 'cadre' && (
+                        <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-4 animate-fade-in">
+                          <h4 className="text-sm font-black text-slate-900 border-b border-slate-100 pb-2 uppercase">Cadre Network - {selectedVillageName}</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {ALL_CADRES.filter(c => (c.group || '').toUpperCase().includes((selectedVillageName || '').toUpperCase()) || (c.group || '').toUpperCase() === (selectedVillageName || '').toUpperCase()).map((c) => (
+                              <div key={c.id} className="p-3 bg-slate-50/50 rounded-xl border border-slate-100 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-lg bg-yellow-400/10 border border-yellow-400/20 flex items-center justify-center text-yellow-600 font-black text-xs">
+                                    {c.role.charAt(0)}
                                   </div>
-                                  <div className="w-full bg-slate-100 rounded-full h-2">
-                                    <div className="bg-green-500 h-2 rounded-full transition-all" style={{ width: `${bVotedPct}%` }}></div>
+                                  <div>
+                                    <p className="text-xs font-black text-slate-800">{c.name}</p>
+                                    <p className="text-[9px] text-slate-400 font-bold uppercase">{c.role.replace(/_/g, ' ')}</p>
                                   </div>
                                 </div>
+                                <span className="text-[10px] font-mono text-slate-400">{c.group}</span>
                               </div>
-                            );
-                          })}
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
-
-                    {/* Sub Tab: Fake Votes */}
-                    {villageSubTab === 'fake_votes' && (
-                      <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-4 animate-fade-in">
-                        <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                          <h4 className="text-sm font-black text-slate-900 uppercase">Fake / Duplicate Detection - {selectedVillageName}</h4>
-                          <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded font-black border border-red-100">
-                            Total Detected: {vFakeCount} Records
-                          </span>
-                        </div>
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse text-xs">
-                            <thead>
-                              <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-bold uppercase text-[9px] tracking-wider">
-                                <th className="py-2.5 px-3">EPIC ID</th>
-                                <th className="py-2.5 px-3">Voter Name</th>
-                                <th className="py-2.5 px-3">Age/Gender</th>
-                                <th className="py-2.5 px-3">Booth</th>
-                                <th className="py-2.5 px-3">Status</th>
-                                <th className="py-2.5 px-3">Caste</th>
-                                <th className="py-2.5 px-3">Action</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                              {villageVoters.filter(v => v.voterStatus === 'Fake' || v.voterStatus === 'Duplicate' || v.voterStatus === 'Doubtful').map((v) => (
-                                <tr key={v.epicNumber} className="hover:bg-red-50/20 font-bold text-slate-700">
-                                  <td className="py-2.5 px-3 text-slate-400 font-mono text-[10px]">{v.epicNumber}</td>
-                                  <td className="py-2.5 px-3 font-black text-slate-900">{v.name}</td>
-                                  <td className="py-2.5 px-3">{v.age} / {v.gender}</td>
-                                  <td className="py-2.5 px-3">{v.boothNumber}</td>
-                                  <td className="py-2.5 px-3">
-                                    <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-red-100 text-red-800">
-                                      {v.voterStatus}
-                                    </span>
-                                  </td>
-                                  <td className="py-2.5 px-3">{v.caste || 'Unspecified'}</td>
-                                  <td className="py-2.5 px-3">
-                                    <button 
-                                      onClick={() => handleOpenEditModal(v)}
-                                      className="p-1 text-slate-400 hover:text-yellow-600 rounded hover:bg-slate-100 cursor-pointer"
-                                    >
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
-                              {vFakeCount === 0 && (
-                                <tr>
-                                  <td colSpan={7} className="text-center py-6 text-slate-400 font-medium">
-                                    No fake, duplicate, or doubtful voter records identified in {selectedVillageName}.
-                                  </td>
-                                </tr>
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Sub Tab: Caste Analytics */}
-                    {villageSubTab === 'caste' && (
-                      <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-4 animate-fade-in">
-                        <h4 className="text-sm font-black text-slate-900 border-b border-slate-100 pb-2 uppercase">Community & Caste Analytics - {selectedVillageName}</h4>
-                        {/* Strictly manual caste/community counts of selected village */}
-                        {(() => {
-                          const casteCounts: Record<string, number> = {};
-                          villageVoters.forEach(v => {
-                            const c = v.caste || 'Unspecified';
-                            casteCounts[c] = (casteCounts[c] || 0) + 1;
-                          });
-
-                          return (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                              {Object.entries(casteCounts).map(([cName, count]) => {
-                                const pct = villageVoters.length > 0 ? ((count / villageVoters.length) * 100).toFixed(1) : '0';
-                                return (
-                                  <div key={cName} className="p-4 rounded-xl border border-slate-100 bg-slate-50/50">
-                                    <span className="text-[10px] font-black uppercase text-slate-400">{cName}</span>
-                                    <h4 className="text-xl font-black text-slate-800 mt-1">{count}</h4>
-                                    <p className="text-[9px] text-slate-500 font-bold mt-1">{pct}% of Village Sample</p>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    )}
-
-                    {/* Sub Tab: Village Cadre Network */}
-                    {villageSubTab === 'cadre' && (
-                      <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-4 animate-fade-in">
-                        <h4 className="text-sm font-black text-slate-900 border-b border-slate-100 pb-2 uppercase">Cadre Network - {selectedVillageName}</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {ALL_CADRES.filter(c => (c.group || '').toUpperCase().includes((selectedVillageName || '').toUpperCase()) || (c.group || '').toUpperCase() === (selectedVillageName || '').toUpperCase()).map((c) => (
-                            <div key={c.id} className="p-3 bg-slate-50/50 rounded-xl border border-slate-100 flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-lg bg-yellow-400/10 border border-yellow-400/20 flex items-center justify-center text-yellow-600 font-black text-xs">
-                                  {c.role.charAt(0)}
-                                </div>
-                                <div>
-                                  <p className="text-xs font-black text-slate-800">{c.name}</p>
-                                  <p className="text-[9px] text-slate-400 font-bold uppercase">{c.role.replace(/_/g, ' ')}</p>
-                                </div>
-                              </div>
-                              <span className="text-[10px] font-mono text-slate-400">{c.group}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()
-            )}
-          </div>
-        )}
-
-        {/* --------------------------------------------------------
-            TAB: BOOTH LIST & ANALYSIS VIEW (REDESIGNED)
-           -------------------------------------------------------- */}
-        {activeTab === 'booth_incharge_list' && (
-          <div className="space-y-6 animate-fade-in" id="mandal-booth-list-analysis-view">
-            {/* Header & Controls Area */}
-            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                {/* Title block */}
-                <div>
-                  <h2 className="text-xl font-black text-slate-900 tracking-tight uppercase">
-                    SINGARAYAKONDA BOOTH LIST & ANALYSIS (60)
-                  </h2>
-                  <p className="text-xs text-slate-400 font-bold mt-1">
-                    “Booth-wise voter survey and political performance analysis”
-                  </p>
-                </div>
-
-                {/* Right controls: Filter tabs & Search box */}
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                  {/* Filter Tabs */}
-                  <div className="inline-flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-                    <button
-                      onClick={() => setBoothListActiveTab('all')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
-                        boothListActiveTab === 'all'
-                          ? 'bg-white text-slate-950 shadow-sm'
-                          : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                    >
-                      ALL (60)
-                    </button>
-                    <button
-                      onClick={() => setBoothListActiveTab('winning')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
-                        boothListActiveTab === 'winning'
-                          ? 'bg-yellow-400 text-slate-950 shadow-sm'
-                          : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                    >
-                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                      WINNING ({winningCount})
-                    </button>
-                    <button
-                      onClick={() => setBoothListActiveTab('trailing')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
-                        boothListActiveTab === 'trailing'
-                          ? 'bg-blue-600 text-white shadow-sm'
-                          : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                    >
-                      <span className="w-2 h-2 rounded-full bg-rose-500" />
-                      TRAILING ({trailingCount})
-                    </button>
-                  </div>
-
-                  {/* Search Input */}
-                  <div className="relative">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type="text"
-                      value={boothSearchQuery}
-                      onChange={(e) => setBoothSearchQuery(e.target.value)}
-                      placeholder="Search Booth/Village..."
-                      className="pl-9 pr-4 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-yellow-400 w-full sm:w-[220px] transition-all"
-                    />
-                    {boothSearchQuery && (
-                      <button
-                        onClick={() => setBoothSearchQuery('')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-[9px] font-black"
-                      >
-                        CLEAR
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Booth Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {paginatedBooths.map((b) => {
-                let tdpPct = 0;
-                let ysrcpPct = 0;
-                let neutralPct = 0;
-                if (b.classifiedVoters > 0) {
-                  tdpPct = Math.round((b.tdp / b.classifiedVoters) * 100);
-                  ysrcpPct = Math.round((b.ysrcp / b.classifiedVoters) * 100);
-                  neutralPct = Math.max(0, 100 - tdpPct - ysrcpPct);
-                }
-
-                let statusText = "CLOSE CONTEST";
-                let badgeStyle = "bg-amber-50 text-amber-700 border-amber-200";
-                if (b.status === 'WINNING') {
-                  statusText = "WINNING";
-                  badgeStyle = "bg-emerald-50 text-emerald-700 border-emerald-200";
-                } else if (b.status === 'TRAILING') {
-                  statusText = "TRAILING";
-                  badgeStyle = "bg-rose-50 text-rose-700 border-rose-200";
-                }
-
-                const inchargeName = b.name && b.name.trim() !== '' ? b.name : 'Not Assigned';
-                
-                // Extract station name (parenthesis content)
-                const locMatch = b.booth.match(/\(([^)]+)\)/);
-                const stationName = locMatch ? locMatch[1] : 'Polling Station';
-                const cleanBoothName = b.booth.split('(')[0].trim().toUpperCase();
-
-                return (
-                  <div
-                    key={`${b.village}-${b.booth}`}
-                    className="bg-white border border-slate-200 hover:border-amber-400 hover:shadow-md rounded-2xl p-5 transition-all duration-200 flex flex-col justify-between space-y-4"
-                    id={`booth-card-${b.displayNum}`}
-                  >
-                    {/* Card Header */}
-                    <div className="flex justify-between items-start gap-2">
-                      <div className="space-y-1">
-                        <span className="inline-block text-[10px] font-black tracking-wider text-slate-400 uppercase">
-                          {cleanBoothName}
-                        </span>
-                        <h3 className="text-base font-black text-slate-900 leading-tight uppercase">
-                          {inchargeName}
-                        </h3>
-                        <p className="text-xs text-slate-500 font-bold flex items-center gap-1">
-                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>{b.village}</span>
-                          <span className="text-slate-300">•</span>
-                          <span className="truncate max-w-[120px]" title={stationName}>{stationName}</span>
-                        </p>
-                      </div>
-                      
-                      {/* Status Badge */}
-                      <span className={`px-2.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border ${badgeStyle} shrink-0`}>
-                        {statusText}
-                      </span>
-                    </div>
-
-                    {/* Support Bar Chart Area */}
-                    <div className="space-y-2 pt-2 border-t border-slate-100">
-                      {/* Counts Grid */}
-                      <div className="grid grid-cols-3 gap-2 text-center text-[10px] font-black uppercase">
-                        <div className="bg-amber-50/50 p-1.5 rounded-lg border border-amber-200">
-                          <span className="block text-[8px] text-amber-600 font-black tracking-wider">TDP</span>
-                          <span className="text-xs font-black text-amber-500">{b.tdp}</span>
-                        </div>
-                        <div className="bg-blue-50/50 p-1.5 rounded-lg border border-blue-200">
-                          <span className="block text-[8px] text-blue-600 font-black tracking-wider">YSRCP</span>
-                          <span className="text-xs font-black text-blue-600">{b.ysrcp}</span>
-                        </div>
-                        <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-200">
-                          <span className="block text-[8px] text-slate-500 font-black tracking-wider">NEUTRAL</span>
-                          <span className="text-xs font-black text-slate-600">{b.neutral}</span>
-                        </div>
-                      </div>
-
-                      {/* 3-Color Support Bar */}
-                      <div className="h-2 w-full rounded-full bg-slate-100 flex overflow-hidden">
-                        <div style={{ width: `${tdpPct}%` }} className="bg-amber-400 transition-all duration-300" title={`TDP: ${tdpPct}%`} />
-                        <div style={{ width: `${ysrcpPct}%` }} className="bg-blue-500 transition-all duration-300" title={`YSRCP: ${ysrcpPct}%`} />
-                        <div style={{ width: `${neutralPct}%` }} className="bg-slate-400 transition-all duration-300" title={`Neutral: ${neutralPct}%`} />
-                      </div>
-
-                      {/* Percentages Text Row */}
-                      <div className="flex justify-between items-center text-[10px] font-black text-slate-500 px-0.5">
-                        <span className="text-amber-500">TDP {tdpPct}%</span>
-                        <span className="text-blue-600">YSRCP {ysrcpPct}%</span>
-                        <span className="text-slate-500">Neutral {neutralPct}%</span>
-                      </div>
-                    </div>
-
-                    {/* Card Footer: Registered Voters & Margin */}
-                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-4">
-                      <div className="space-y-0.5">
-                        <span className="block text-[8px] font-black text-slate-400 uppercase tracking-wider">
-                          Total Voters
-                        </span>
-                        <div className="flex items-baseline gap-1">
-                          <span className="text-sm font-black text-slate-950">
-                            {b.totalVoters.toLocaleString()}
-                          </span>
-                          <span className="text-[9px] text-slate-500 font-black">
-                            (Surveyed: {b.classifiedVoters})
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-0.5 text-right">
-                        <span className="block text-[8px] font-black text-slate-400 uppercase tracking-wider">
-                          Margin
-                        </span>
-                        <span className={`text-xs font-black px-2 py-0.5 border rounded-md ${
-                          b.margin > 0 ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : b.margin < 0 ? 'text-rose-700 bg-rose-50 border-rose-200' : 'text-slate-600 bg-slate-50 border-slate-200'
-                        }`}>
-                          {b.margin > 0 ? `+${b.margin}` : b.margin === 0 ? '0' : b.margin}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Action button: View Booth */}
-                    <div className="pt-1 flex justify-end">
-                      <button
-                        onClick={() => {
-                          setSelectedVillageName(b.village);
-                          setBoothFilter(b.booth);
-                          setVillageSubTab('voters');
-                          setActiveTab('village_list');
-                        }}
-                        className="text-[10px] font-black text-yellow-600 hover:text-yellow-700 uppercase tracking-wider inline-flex items-center gap-0.5 hover:underline cursor-pointer"
-                      >
-                        <span>View Booth</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <Pagination
-              currentPage={boothsPage}
-              pageSize={boothsPageSize}
-              totalItems={filteredBooths.length}
-              onPageChange={setBoothsPage}
-              onPageSizeChange={(newSize) => {
-                setBoothsPageSize(newSize);
-                setBoothsPage(1);
-              }}
-              pageSizeOptions={[6, 12, 24, 48]}
-              itemName="booths"
-              accentColor="amber"
-            />
-
-            {/* Empty State */}
-            {filteredBooths.length === 0 && (
-              <div className="bg-slate-50 border border-slate-100 rounded-2xl p-10 text-center space-y-2">
-                <p className="text-sm text-slate-500 font-black uppercase">No Booths Found</p>
-                <p className="text-xs text-slate-400 font-semibold">Try modifying your search or filters to find booths</p>
-              </div>
-            )}
-          </div>
-        )}
-
-
-
-
-
-
-
-        {/* --------------------------------------------------------
-            TAB 4: FAKE VOTES VIEW
-           -------------------------------------------------------- */}
-        {activeTab === 'fake_votes' && (
-          <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-5 animate-fade-in" id="village-fake-votes-view">
-            
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-4">
-              <div>
-                <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5 text-red-600" />
-                  Identified Fake Voter Registry
-                </h2>
-                <p className="text-xs text-slate-400 font-medium">Suspected voter records mapped for physical verification and official deletion procedures</p>
-              </div>
-              <div className="text-xs font-black text-red-600 bg-red-50 border border-red-200 px-3 py-1.5 rounded-lg">
-                Total Flagged: {fakeVotersList.length}
-              </div>
-            </div>
-
-            {/* Fake stats widget */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4" id="fake-stats-panels">
-              <div className="bg-red-50/40 border border-red-100 p-4 rounded-xl">
-                <p className="text-[10px] text-slate-400 font-black uppercase">Fake Registrations Identified</p>
-                <h3 className="text-2xl font-black text-red-600 mt-1">{fakeVotersList.length}</h3>
-              </div>
-              <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl">
-                <p className="text-[10px] text-slate-400 font-black uppercase">Official Complaints Filed</p>
-                <h3 className="text-2xl font-black text-slate-950 mt-1">
-                  {reportsList.filter(r => r.issueCategory === 'Fake Voters Identified').length}
-                </h3>
-              </div>
-              <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl">
-                <p className="text-[10px] text-slate-400 font-black uppercase">Discovered Booths</p>
-                <h3 className="text-2xl font-black text-slate-950 mt-1">{Array.from(new Set(fakeVotersList.map(v => v.boothNumber))).length} Polling Locations</h3>
-              </div>
-            </div>
-
-            {/* Fake Voters Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 text-slate-400 border-b border-slate-100">
-                    <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Voter ID / Name</th>
-                    <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Epic Card ID</th>
-                    <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Mapped Booth</th>
-                    <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Incharge Assessment & Notes</th>
-                    <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[10px] text-center w-24">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                  {fakeVotersList.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="text-center py-12 text-slate-400">
-                        Excellent! No voters in this village are flagged as FAKE.
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedFakeVoters.map((v) => (
-                      <tr key={v.id} className="hover:bg-slate-50/50">
-                        <td className="py-3 px-3">
-                          <p className="font-bold text-slate-900">{v.name}</p>
-                          <p className="text-[10px] text-slate-400 font-normal">Age: {v.age} • Gender: {v.gender}</p>
-                        </td>
-                        <td className="py-3 px-3 text-yellow-700 font-mono font-bold">
-                          {v.epicNumber}
-                        </td>
-                        <td className="py-3 px-3 text-slate-600 font-semibold">
-                          {v.boothNumber}
-                        </td>
-                        <td className="py-3 px-3 text-slate-500 font-normal">
-                          <span className="text-[11px] leading-relaxed italic">
-                            "{v.notes || 'Reported fake. Address mismatch or resident not located in area.'}"
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 text-center">
-                          <button
-                            onClick={() => handleOpenEditModal(v)}
-                            className="text-[10px] text-slate-500 hover:text-yellow-600 bg-slate-50 border border-slate-200 hover:border-yellow-300 px-2 py-1 rounded transition-all cursor-pointer"
-                          >
-                            Edit Status
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <Pagination
-              currentPage={fakeVotersPage}
-              pageSize={fakeVotersPageSize}
-              totalItems={fakeVotersList.length}
-              onPageChange={setFakeVotersPage}
-              onPageSizeChange={(newSize) => {
-                setFakeVotersPageSize(newSize);
-                setFakeVotersPage(1);
-              }}
-              pageSizeOptions={[10, 15, 25, 50]}
-              itemName="flagged records"
-              accentColor="amber"
-            />
-
-          </div>
-        )}
-
-
-
-        {/* --------------------------------------------------------
-            TAB 6: TASKS PANEL
-           -------------------------------------------------------- */}
-        {activeTab === 'tasks' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in" id="village-tasks-view">
-            
-            {/* Left 2 Columns: Tasks list */}
-            <div className="lg:col-span-2 bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4">
-              <div className="border-b border-gray-100 pb-3 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-black text-slate-900">Task Allocations</h2>
-                  <p className="text-xs text-slate-400 font-medium">Management and delegation of local cadre responsibilities</p>
-                </div>
-                <span className="text-[10px] font-black text-slate-500 bg-slate-50 px-2.5 py-1 rounded border border-slate-100">
-                  Active Tasks: {tasksList.length}
-                </span>
-              </div>
-
-              <div className="space-y-4 pt-1">
-                {tasksList.map((task) => {
-                  const assignedToIncharge = ALL_CADRES.find(i => i.id === task.assignedTo);
-                  const isOverdue = new Date() > new Date(task.dueDate) && task.status !== 'Completed';
-                  
-                  return (
-                    <div key={task.id} className="border border-slate-150 rounded-xl p-4 bg-slate-50/30 space-y-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${task.priority === 'Urgent' ? 'bg-red-50 text-red-700 border border-red-100 animate-pulse' : 'bg-slate-50 text-slate-700 border border-slate-200'}`}>
-                            {task.priority} Priority
-                          </span>
-                        </div>
-                        <span className={`text-[10px] font-bold ${isOverdue ? 'text-red-500 font-extrabold' : 'text-slate-400'}`}>
-                          Due Date: {task.dueDate} {isOverdue && '(Overdue)'}
-                        </span>
-                      </div>
-
-                      <div className="space-y-1">
-                        <h4 className="text-sm font-bold text-slate-900">{task.title}</h4>
-                        <p className="text-xs text-slate-500 leading-relaxed font-semibold">
-                          {task.instructions}
-                        </p>
-                      </div>
-
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-[10px] text-slate-400 font-semibold">
-                        <p>
-                          Assigned To: <span className="text-slate-700 uppercase font-bold">{assignedToIncharge ? assignedToIncharge.name : 'All Cadres'}</span> 
-                          {assignedToIncharge && ` (${assignedToIncharge.group})`}
-                        </p>
-                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black ${task.status === 'Completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
-                          {task.status}
-                        </span>
-                      </div>
+                      )}
                     </div>
                   );
-                })}
-              </div>
+                })()
+              )}
             </div>
+          )}
 
-            {/* Right Column: Delegate Task Form */}
-            <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4 h-fit">
-              <div className="border-b border-gray-100 pb-2">
-                <h3 className="font-bold text-base text-slate-900">Delegate New Task</h3>
-                <p className="text-xs text-slate-400 font-medium">Assign specific operations to 100 Voter Incharges</p>
-              </div>
-
-              <form onSubmit={handleCreateTask} className="space-y-3.5">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Task Title</label>
-                  <input
-                    type="text"
-                    value={newTaskTitle}
-                    onChange={(e) => setNewTaskTitle(e.target.value)}
-                    placeholder="e.g. 100% Voter slip distribution"
-                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:border-yellow-400"
-                    required
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Assign To (Cadre)</label>
-                  <select
-                    value={newTaskAssignee}
-                    onChange={(e) => setNewTaskAssignee(e.target.value)}
-                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold focus:outline-none"
-                  >
-                    {ALL_CADRES.map(i => (
-                      <option key={i.id} value={i.id}>{i.name} ({i.group})</option>
-                    ))}
-                    <option value="All">All Incharges / Cadres</option>
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Priority</label>
-                    <select
-                      value={newTaskPriority}
-                      onChange={(e) => setNewTaskPriority(e.target.value as any)}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold focus:outline-none"
-                    >
-                      <option value="Low">Low</option>
-                      <option value="Medium">Medium</option>
-                      <option value="High">High</option>
-                      <option value="Urgent">Urgent</option>
-                    </select>
+          {/* --------------------------------------------------------
+            TAB: BOOTH LIST & ANALYSIS VIEW (REDESIGNED)
+           -------------------------------------------------------- */}
+          {activeTab === 'booth_incharge_list' && (
+            <div className="space-y-6 animate-fade-in" id="mandal-booth-list-analysis-view">
+              {/* Header & Controls Area */}
+              <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  {/* Title block */}
+                  <div>
+                    <h2 className="text-xl font-black text-slate-900 tracking-tight uppercase">
+                      {mandalDisplayName ? `${mandalDisplayName.toUpperCase()} BOOTH LIST & ANALYSIS (${analyzedBooths.length})` : `BOOTH LIST & ANALYSIS (${analyzedBooths.length})`}
+                    </h2>
+                    <p className="text-xs text-slate-400 font-bold mt-1">
+                      “Booth-wise voter survey and political performance analysis for {mandalDisplayName || 'authorized Mandal'}”
+                    </p>
                   </div>
 
+                  {/* Right controls: Filter tabs & Search box */}
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                    {/* Filter Tabs */}
+                    <div className="inline-flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                      <button
+                        onClick={() => setBoothListActiveTab('all')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${boothListActiveTab === 'all'
+                            ? 'bg-white text-slate-950 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                      >
+                        ALL ({analyzedBooths.length})
+                      </button>
+                      <button
+                        onClick={() => setBoothListActiveTab('winning')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${boothListActiveTab === 'winning'
+                            ? 'bg-yellow-400 text-slate-950 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        WINNING ({winningCount})
+                      </button>
+                      <button
+                        onClick={() => setBoothListActiveTab('trailing')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${boothListActiveTab === 'trailing'
+                            ? 'bg-blue-600 text-white shadow-sm'
+                            : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-rose-500" />
+                        TRAILING ({trailingCount})
+                      </button>
+                    </div>
+
+                    {/* Search Input */}
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        value={boothSearchQuery}
+                        onChange={(e) => setBoothSearchQuery(e.target.value)}
+                        placeholder="Search Booth/Village..."
+                        className="pl-9 pr-4 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-yellow-400 w-full sm:w-[220px] transition-all"
+                      />
+                      {boothSearchQuery && (
+                        <button
+                          onClick={() => setBoothSearchQuery('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-[9px] font-black"
+                        >
+                          CLEAR
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Booth Cards Grid */}
+              {isBoothsLoading ? (
+                <div className="bg-white border border-slate-100 rounded-2xl p-12 text-center space-y-3 shadow-sm">
+                  <RefreshCw className="w-8 h-8 text-yellow-500 animate-spin mx-auto" />
+                  <p className="text-sm font-black text-slate-900 uppercase tracking-wide">Loading Authorized Booths...</p>
+                  <p className="text-xs text-slate-400 font-semibold">Fetching booth hierarchy and assignments from Mandal repository</p>
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {paginatedBooths.map((b) => {
+                      let tdpPct = 0;
+                      let ysrcpPct = 0;
+                      let neutralPct = 0;
+                      if (b.classifiedVoters > 0) {
+                        tdpPct = Math.round((b.tdp / b.classifiedVoters) * 100);
+                        ysrcpPct = Math.round((b.ysrcp / b.classifiedVoters) * 100);
+                        neutralPct = Math.max(0, 100 - tdpPct - ysrcpPct);
+                      }
+
+                      let statusText = "CLOSE CONTEST";
+                      let badgeStyle = "bg-amber-50 text-amber-700 border-amber-200";
+                      if (b.classifiedVoters === 0) {
+                        statusText = "UNSURVEYED";
+                        badgeStyle = "bg-slate-100 text-slate-500 border-slate-200";
+                      } else if (b.status === 'WINNING') {
+                        statusText = "WINNING";
+                        badgeStyle = "bg-emerald-50 text-emerald-700 border-emerald-200";
+                      } else if (b.status === 'TRAILING') {
+                        statusText = "TRAILING";
+                        badgeStyle = "bg-rose-50 text-rose-700 border-rose-200";
+                      }
+
+                      const inchargeName = b.name && b.name.trim() !== '' ? b.name : 'Unassigned';
+                      const isUnassigned = (b as any).isUnassigned || inchargeName.toLowerCase() === 'unassigned' || inchargeName.toLowerCase() === 'not assigned';
+
+                      // Extract station name (parenthesis content)
+                      const locMatch = b.booth.match(/\(([^)]+)\)/);
+                      const stationName = locMatch ? locMatch[1] : 'Polling Station';
+                      const cleanBoothName = b.booth.split('(')[0].trim().toUpperCase();
+
+                      return (
+                        <div
+                          key={`${b.village}-${b.booth}-${b.displayNum}`}
+                          className="bg-white border border-slate-200 hover:border-amber-400 hover:shadow-md rounded-2xl p-5 transition-all duration-200 flex flex-col justify-between space-y-4"
+                          id={`booth-card-${b.displayNum}`}
+                        >
+                          {/* Card Header */}
+                          <div className="flex justify-between items-start gap-2">
+                            <div className="space-y-1">
+                              <span className="inline-block text-[10px] font-black tracking-wider text-slate-400 uppercase">
+                                {cleanBoothName}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <h3 className={`text-base font-black leading-tight uppercase ${isUnassigned ? 'text-slate-500 italic' : 'text-slate-900'}`}>
+                                  {isUnassigned ? 'Unassigned' : inchargeName}
+                                </h3>
+                                {isUnassigned && (
+                                  <span className="text-[8px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded">
+                                    Unassigned
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-500 font-bold flex items-center gap-1">
+                                <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span>{b.village}</span>
+                                <span className="text-slate-300">•</span>
+                                <span className="truncate max-w-[120px]" title={stationName}>{stationName}</span>
+                              </p>
+                            </div>
+
+                            {/* Status Badge */}
+                            <span className={`px-2.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border ${badgeStyle} shrink-0`}>
+                              {statusText}
+                            </span>
+                          </div>
+
+                          {/* Support Bar Chart Area */}
+                          <div className="space-y-2 pt-2 border-t border-slate-100">
+                            {/* Counts Grid */}
+                            <div className="grid grid-cols-3 gap-2 text-center text-[10px] font-black uppercase">
+                              <div className="bg-amber-50/50 p-1.5 rounded-lg border border-amber-200">
+                                <span className="block text-[8px] text-amber-600 font-black tracking-wider">TDP</span>
+                                <span className="text-xs font-black text-amber-500">{b.tdp}</span>
+                              </div>
+                              <div className="bg-blue-50/50 p-1.5 rounded-lg border border-blue-200">
+                                <span className="block text-[8px] text-blue-600 font-black tracking-wider">YSRCP</span>
+                                <span className="text-xs font-black text-blue-600">{b.ysrcp}</span>
+                              </div>
+                              <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+                                <span className="block text-[8px] text-slate-500 font-black tracking-wider">NEUTRAL</span>
+                                <span className="text-xs font-black text-slate-600">{b.neutral}</span>
+                              </div>
+                            </div>
+
+                            {/* 3-Color Support Bar */}
+                            <div className="h-2 w-full rounded-full bg-slate-100 flex overflow-hidden">
+                              <div style={{ width: `${tdpPct}%` }} className="bg-amber-400 transition-all duration-300" title={`TDP: ${tdpPct}%`} />
+                              <div style={{ width: `${ysrcpPct}%` }} className="bg-blue-500 transition-all duration-300" title={`YSRCP: ${ysrcpPct}%`} />
+                              <div style={{ width: `${neutralPct}%` }} className="bg-slate-400 transition-all duration-300" title={`Neutral: ${neutralPct}%`} />
+                            </div>
+
+                            {/* Percentages Text Row */}
+                            <div className="flex justify-between items-center text-[10px] font-black text-slate-500 px-0.5">
+                              <span className="text-amber-500">TDP {tdpPct}%</span>
+                              <span className="text-blue-600">YSRCP {ysrcpPct}%</span>
+                              <span className="text-slate-500">Neutral {neutralPct}%</span>
+                            </div>
+                          </div>
+
+                          {/* Card Footer: Registered Voters & Margin */}
+                          <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-4">
+                            <div className="space-y-0.5">
+                              <span className="block text-[8px] font-black text-slate-400 uppercase tracking-wider">
+                                Total Voters
+                              </span>
+                              <div className="flex items-baseline gap-1">
+                                <span className="text-sm font-black text-slate-950">
+                                  {b.totalVoters.toLocaleString()}
+                                </span>
+                                <span className="text-[9px] text-slate-500 font-black">
+                                  (Surveyed: {b.classifiedVoters})
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="space-y-0.5 text-right">
+                              <span className="block text-[8px] font-black text-slate-400 uppercase tracking-wider">
+                                Margin
+                              </span>
+                              <span className={`text-xs font-black px-2 py-0.5 border rounded-md ${b.margin > 0 ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : b.margin < 0 ? 'text-rose-700 bg-rose-50 border-rose-200' : 'text-slate-600 bg-slate-50 border-slate-200'
+                                }`}>
+                                {b.margin > 0 ? `+${b.margin}` : b.margin === 0 ? '0' : b.margin}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Action button: View Booth */}
+                          <div className="pt-1 flex justify-end">
+                            <button
+                              onClick={() => {
+                                setSelectedVillageName(b.village);
+                                setBoothFilter(b.booth);
+                                setVillageSubTab('voters');
+                                setActiveTab('village_list');
+                              }}
+                              className="text-[10px] font-black text-yellow-600 hover:text-yellow-700 uppercase tracking-wider inline-flex items-center gap-0.5 hover:underline cursor-pointer"
+                            >
+                              <span>View Booth</span>
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <Pagination
+                    currentPage={boothsPage}
+                    pageSize={boothsPageSize}
+                    totalItems={filteredBooths.length}
+                    onPageChange={setBoothsPage}
+                    onPageSizeChange={(newSize) => {
+                      setBoothsPageSize(newSize);
+                      setBoothsPage(1);
+                    }}
+                    pageSizeOptions={[6, 12, 24, 48]}
+                    itemName="booths"
+                    accentColor="amber"
+                  />
+
+                  {/* Empty State */}
+                  {filteredBooths.length === 0 && (
+                    <div className="bg-slate-50 border border-slate-100 rounded-2xl p-10 text-center space-y-2">
+                      <p className="text-sm text-slate-500 font-black uppercase">No Booths Found</p>
+                      <p className="text-xs text-slate-400 font-semibold">
+                        {boothSearchQuery ? `No booths match search "${boothSearchQuery}".` : 'No booths found under the active filter.'}
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+
+
+
+
+
+
+          {/* --------------------------------------------------------
+            TAB 4: FAKE VOTES VIEW
+           -------------------------------------------------------- */}
+          {activeTab === 'fake_votes' && (
+            <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-5 animate-fade-in" id="village-fake-votes-view">
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-4">
+                <div>
+                  <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-red-600" />
+                    Identified Fake Voter Registry
+                  </h2>
+                  <p className="text-xs text-slate-400 font-medium">Suspected voter records mapped for physical verification and official deletion procedures</p>
+                </div>
+                <div className="text-xs font-black text-red-600 bg-red-50 border border-red-200 px-3 py-1.5 rounded-lg">
+                  Total Flagged: {fakeVotersList.length}
+                </div>
+              </div>
+
+              {/* Fake stats widget */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4" id="fake-stats-panels">
+                <div className="bg-red-50/40 border border-red-100 p-4 rounded-xl">
+                  <p className="text-[10px] text-slate-400 font-black uppercase">Fake Registrations Identified</p>
+                  <h3 className="text-2xl font-black text-red-600 mt-1">{fakeVotersList.length}</h3>
+                </div>
+                <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl">
+                  <p className="text-[10px] text-slate-400 font-black uppercase">Official Complaints Filed</p>
+                  <h3 className="text-2xl font-black text-slate-950 mt-1">
+                    {reportsList.filter(r => r.issueCategory === 'Fake Voters Identified').length}
+                  </h3>
+                </div>
+                <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl">
+                  <p className="text-[10px] text-slate-400 font-black uppercase">Discovered Booths</p>
+                  <h3 className="text-2xl font-black text-slate-950 mt-1">{Array.from(new Set(fakeVotersList.map(v => v.boothNumber))).length} Polling Locations</h3>
+                </div>
+              </div>
+
+              {/* Fake Voters Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-400 border-b border-slate-100">
+                      <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Voter ID / Name</th>
+                      <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Epic Card ID</th>
+                      <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Mapped Booth</th>
+                      <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Incharge Assessment & Notes</th>
+                      <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[10px] text-center w-24">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
+                    {fakeVotersList.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="text-center py-12 text-slate-400">
+                          Excellent! No voters in this village are flagged as FAKE.
+                        </td>
+                      </tr>
+                    ) : (
+                      paginatedFakeVoters.map((v) => (
+                        <tr key={v.id} className="hover:bg-slate-50/50">
+                          <td className="py-3 px-3">
+                            <p className="font-bold text-slate-900">{v.name}</p>
+                            <p className="text-[10px] text-slate-400 font-normal">Age: {v.age} • Gender: {v.gender}</p>
+                          </td>
+                          <td className="py-3 px-3 text-yellow-700 font-mono font-bold">
+                            {v.epicNumber}
+                          </td>
+                          <td className="py-3 px-3 text-slate-600 font-semibold">
+                            {v.boothNumber}
+                          </td>
+                          <td className="py-3 px-3 text-slate-500 font-normal">
+                            <span className="text-[11px] leading-relaxed italic">
+                              "{v.notes || 'Reported fake. Address mismatch or resident not located in area.'}"
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <button
+                              onClick={() => handleOpenEditModal(v)}
+                              className="text-[10px] text-slate-500 hover:text-yellow-600 bg-slate-50 border border-slate-200 hover:border-yellow-300 px-2 py-1 rounded transition-all cursor-pointer"
+                            >
+                              Edit Status
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <Pagination
+                currentPage={fakeVotersPage}
+                pageSize={fakeVotersPageSize}
+                totalItems={fakeVotersList.length}
+                onPageChange={setFakeVotersPage}
+                onPageSizeChange={(newSize) => {
+                  setFakeVotersPageSize(newSize);
+                  setFakeVotersPage(1);
+                }}
+                pageSizeOptions={[10, 15, 25, 50]}
+                itemName="flagged records"
+                accentColor="amber"
+              />
+
+            </div>
+          )}
+
+
+
+          {/* --------------------------------------------------------
+            TAB 6: TASKS PANEL
+           -------------------------------------------------------- */}
+          {activeTab === 'tasks' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in" id="village-tasks-view">
+
+              {/* Left 2 Columns: Tasks list */}
+              <div className="lg:col-span-2 bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4">
+                <div className="border-b border-gray-100 pb-3 flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-black text-slate-900">Task Allocations</h2>
+                    <p className="text-xs text-slate-400 font-medium">Management and delegation of local cadre responsibilities</p>
+                  </div>
+                  <span className="text-[10px] font-black text-slate-500 bg-slate-50 px-2.5 py-1 rounded border border-slate-100">
+                    Active Tasks: {tasksList.length}
+                  </span>
+                </div>
+
+                <div className="space-y-4 pt-1">
+                  {tasksList.map((task) => {
+                    const assignedToIncharge = ALL_CADRES.find(i => i.id === task.assignedTo);
+                    const isOverdue = new Date() > new Date(task.dueDate) && task.status !== 'Completed';
+
+                    return (
+                      <div key={task.id} className="border border-slate-150 rounded-xl p-4 bg-slate-50/30 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${task.priority === 'Urgent' ? 'bg-red-50 text-red-700 border border-red-100 animate-pulse' : 'bg-slate-50 text-slate-700 border border-slate-200'}`}>
+                              {task.priority} Priority
+                            </span>
+                          </div>
+                          <span className={`text-[10px] font-bold ${isOverdue ? 'text-red-500 font-extrabold' : 'text-slate-400'}`}>
+                            Due Date: {task.dueDate} {isOverdue && '(Overdue)'}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-bold text-slate-900">{task.title}</h4>
+                          <p className="text-xs text-slate-500 leading-relaxed font-semibold">
+                            {task.instructions}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-[10px] text-slate-400 font-semibold">
+                          <p>
+                            Assigned To: <span className="text-slate-700 uppercase font-bold">{assignedToIncharge ? assignedToIncharge.name : 'All Cadres'}</span>
+                            {assignedToIncharge && ` (${assignedToIncharge.group})`}
+                          </p>
+                          <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black ${task.status === 'Completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                            {task.status}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Right Column: Delegate Task Form */}
+              <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm space-y-4 h-fit">
+                <div className="border-b border-gray-100 pb-2">
+                  <h3 className="font-bold text-base text-slate-900">Delegate New Task</h3>
+                  <p className="text-xs text-slate-400 font-medium">Assign specific operations to 100 Voter Incharges</p>
+                </div>
+
+                <form onSubmit={handleCreateTask} className="space-y-3.5">
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Due Date</label>
+                    <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Task Title</label>
                     <input
-                      type="date"
-                      value={newTaskDueDate}
-                      onChange={(e) => setNewTaskDueDate(e.target.value)}
-                      className="w-full p-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold focus:outline-none"
+                      type="text"
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      placeholder="e.g. 100% Voter slip distribution"
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:border-yellow-400"
                       required
                     />
                   </div>
-                </div>
 
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Actionable Instructions</label>
-                  <textarea
-                    rows={4}
-                    value={newTaskInstructions}
-                    onChange={(e) => setNewTaskInstructions(e.target.value)}
-                    placeholder="Provide detailed instructions to guide the cadre..."
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:bg-white focus:outline-none focus:border-yellow-400"
-                    required
-                  />
-                </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Assign To (Cadre)</label>
+                    <select
+                      value={newTaskAssignee}
+                      onChange={(e) => setNewTaskAssignee(e.target.value)}
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold focus:outline-none"
+                    >
+                      {ALL_CADRES.map(i => (
+                        <option key={i.id} value={i.id}>{i.name} ({i.group})</option>
+                      ))}
+                      <option value="All">All Incharges / Cadres</option>
+                    </select>
+                  </div>
 
-                <button
-                  type="submit"
-                  className="w-full py-2 bg-yellow-400 hover:bg-yellow-500 text-slate-950 text-xs font-black rounded-lg shadow-sm hover:shadow active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  Delegate Task
-                </button>
-              </form>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Priority</label>
+                      <select
+                        value={newTaskPriority}
+                        onChange={(e) => setNewTaskPriority(e.target.value as any)}
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold focus:outline-none"
+                      >
+                        <option value="Low">Low</option>
+                        <option value="Medium">Medium</option>
+                        <option value="High">High</option>
+                        <option value="Urgent">Urgent</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Due Date</label>
+                      <input
+                        type="date"
+                        value={newTaskDueDate}
+                        onChange={(e) => setNewTaskDueDate(e.target.value)}
+                        className="w-full p-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold focus:outline-none"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Actionable Instructions</label>
+                    <textarea
+                      rows={4}
+                      value={newTaskInstructions}
+                      onChange={(e) => setNewTaskInstructions(e.target.value)}
+                      placeholder="Provide detailed instructions to guide the cadre..."
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:bg-white focus:outline-none focus:border-yellow-400"
+                      required
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-2 bg-yellow-400 hover:bg-yellow-500 text-slate-950 text-xs font-black rounded-lg shadow-sm hover:shadow active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Delegate Task
+                  </button>
+                </form>
+              </div>
+
             </div>
+          )}
 
-          </div>
-        )}
-
-        {/* --------------------------------------------------------
+          {/* --------------------------------------------------------
             TAB 7: CASTE & DEMOGRAPHIC ANALYTICS
            -------------------------------------------------------- */}
-        {activeTab === 'caste_analytics' && (
-          <div className="space-y-6 animate-fade-in pb-12" id="village-analytics-view">
-            
-            {/* Redesigned Header Block */}
-            <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6" id="analytics-header">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-[10px] font-black text-yellow-600 uppercase tracking-widest">
-                  <span>Kondapi Assembly Constituency</span>
-                  <span className="text-slate-350">•</span>
-                  <span>Singarayakonda Mandal</span>
-                  <span className="text-slate-350">•</span>
-                  <span>Mandal Incharge</span>
-                </div>
-                <h2 className="text-2xl font-black text-slate-900 tracking-tight uppercase">Caste Analytics</h2>
-                <p className="text-xs text-slate-500 font-bold">Detailed political and demographic analysis of Singarayakonda Mandal</p>
-              </div>
-              
-              <div className="flex items-center gap-4 shrink-0">
-                <div className="bg-slate-900 text-white rounded-2xl p-4 border border-slate-800 text-right min-w-[180px] shadow-sm">
-                  <span className="block text-[9px] font-black uppercase text-yellow-400 tracking-widest">TOTAL MANDAL VOTERS</span>
-                  <span className="text-2xl font-black tracking-tight block mt-0.5">{totalVotersCount.toLocaleString()}</span>
-                </div>
-                <div className="bg-yellow-50/50 border border-yellow-100 rounded-2xl p-4 text-right min-w-[180px]">
-                  <span className="block text-[9px] font-black uppercase text-yellow-700 tracking-widest">ANALYZED RECORDS</span>
-                  <span className="text-2xl font-black text-yellow-800 block mt-0.5">
-                    {filteredVotersForCasteAnalytics.length.toLocaleString()}
-                  </span>
-                </div>
-              </div>
-            </div>
+          {activeTab === 'caste_analytics' && (
+            <div className="space-y-6 animate-fade-in pb-12" id="village-analytics-view">
 
-            {/* Support Legend */}
-            <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm flex flex-wrap items-center justify-between gap-4">
-              <div className="flex flex-wrap items-center gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-wide">
-                <span className="text-slate-400 font-black">Support Legend:</span>
-                {(Object.keys(PARTY_COLORS) as VoterPreference[]).map(p => (
-                  <span key={p} className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg">
-                    <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: PARTY_COLORS[p] }}></span>
-                    {PARTY_NAMES[p]}
-                  </span>
-                ))}
-              </div>
-              
-              {(casteFilterVillage !== 'all' || casteFilterCaste !== 'all' || casteFilterGender !== 'all' || casteFilterAgeGroup !== 'all' || casteFilterProfession !== 'all') && (
-                <button 
-                  onClick={() => {
-                    setCasteFilterVillage('all');
-                    setCasteFilterCaste('all');
-                    setCasteFilterGender('all');
-                    setCasteFilterAgeGroup('all');
-                    setCasteFilterProfession('all');
-                  }}
-                  className="text-xs font-black text-red-600 hover:text-red-700 hover:underline flex items-center gap-1 cursor-pointer bg-red-50 px-3 py-1.5 rounded-xl border border-red-100"
-                >
-                  Clear All Filters
-                </button>
-              )}
-            </div>
-
-            {/* Custom Interactive Filters Panel */}
-            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-3" id="caste-analytics-filters">
-              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Interactive Analytics Filters</h3>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              {/* Redesigned Header Block */}
+              <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6" id="analytics-header">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider block">Village</label>
-                  <select
-                    value={casteFilterVillage}
-                    onChange={(e) => setCasteFilterVillage(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:border-yellow-400"
-                  >
-                    <option value="all">All Villages</option>
-                    {availableVillages.map(v => (
-                      <option key={v} value={v}>{v}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider block">Caste Group</label>
-                  <select
-                    value={casteFilterCaste}
-                    onChange={(e) => setCasteFilterCaste(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:border-yellow-400"
-                  >
-                    <option value="all">All Castes</option>
-                    {availableCastes.map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider block">Gender</label>
-                  <select
-                    value={casteFilterGender}
-                    onChange={(e) => setCasteFilterGender(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:border-yellow-400"
-                  >
-                    <option value="all">All Genders</option>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider block">Age Group</label>
-                  <select
-                    value={casteFilterAgeGroup}
-                    onChange={(e) => setCasteFilterAgeGroup(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:border-yellow-400"
-                  >
-                    <option value="all">All Age Groups</option>
-                    <option value="18-25">18–25</option>
-                    <option value="26-40">26–40</option>
-                    <option value="41-60">41–60</option>
-                    <option value="60+">60+</option>
-                  </select>
-                </div>
-                <div className="space-y-1 col-span-2 md:col-span-1">
-                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider block">Profession</label>
-                  <select
-                    value={casteFilterProfession}
-                    onChange={(e) => setCasteFilterProfession(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:border-yellow-400"
-                  >
-                    <option value="all">All Professions</option>
-                    {availableProfessions.map(p => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Caste Verification Security Mandate Banner */}
-            <div className="bg-rose-50/75 border-l-4 border-rose-500 p-4 rounded-r-2xl shadow-xs flex gap-3.5" id="caste-verification-warning-banner">
-              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-              <div>
-                <h4 className="text-xs font-black text-rose-800 uppercase tracking-wide">CASTE AUDIT SECURITY MANDATE</h4>
-                <p className="text-xs text-rose-700 font-bold leading-relaxed mt-0.5">
-                  WARNING: Never automatically infer caste from Name, Religion, Village, or Family Name. Caste must ONLY be recorded based on physical ground-verified rolls.
-                </p>
-              </div>
-            </div>
-
-            {/* Bento Grid layout matching the requested Political & Demographic Redesign */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" id="analytics-grid">
-              
-              {/* Box 1: Caste-wise Political Analysis (Left) */}
-              <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4 flex flex-col justify-between">
-                <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
-                  <div>
-                    <h3 className="font-extrabold text-sm text-slate-900 uppercase tracking-wider">Caste-wise Political Analysis</h3>
-                    <p className="text-[11px] text-slate-400 font-bold mt-0.5">Click any caste row for complete demographic audit</p>
+                  <div className="flex items-center gap-2 text-[10px] font-black text-yellow-600 uppercase tracking-widest">
+                    <span>{constituencyDisplayName ? `${constituencyDisplayName} Assembly Constituency` : 'Assignment needs configuration'}</span>
+                    <span className="text-slate-350">•</span>
+                    <span>{mandalDisplayName ? `${mandalDisplayName} Mandal` : 'Assignment needs configuration'}</span>
+                    <span className="text-slate-350">•</span>
+                    <span>Mandal Incharge</span>
                   </div>
-                  <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg">
-                    {casteChartsData.caste.length} Categories
-                  </span>
+                  <h2 className="text-2xl font-black text-slate-900 tracking-tight uppercase">Caste Analytics</h2>
+                  <p className="text-xs text-slate-500 font-bold">Detailed political and demographic analysis of {mandalDisplayName ? `${mandalDisplayName} Mandal` : 'authorized Mandal'}</p>
                 </div>
-                
-                <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1 flex-1">
-                  {casteChartsData.caste.length === 0 ? (
-                    <div className="text-center py-12 text-slate-400 text-xs font-bold">
-                      No Records Found For Current Filters
-                    </div>
-                  ) : (
-                    casteChartsData.caste.map((item) => (
-                      <div 
-                        key={item.name} 
-                        onClick={() => setActiveCasteDetail(item.name)}
-                        className="space-y-2 cursor-pointer hover:bg-slate-50 p-2 rounded-xl transition-all border border-transparent hover:border-slate-100"
-                        title="Click to view detailed profiling"
-                      >
-                        <div className="flex items-center justify-between text-xs font-bold">
-                          <span className="text-slate-900 font-extrabold hover:text-yellow-600 transition-colors flex items-center gap-1.5">
-                            {item.name}
-                            <span className="text-[10px] text-slate-400 font-black bg-slate-100 px-2 py-0.5 rounded-md">
-                              {item.total.toLocaleString()} Voters
-                            </span>
-                          </span>
-                          <span className="text-[11px] text-slate-500 font-extrabold">
-                            TDP: {item.prefs.TDP.toLocaleString()} • YSRCP: {item.prefs.YSRCP.toLocaleString()}
-                          </span>
-                        </div>
-                        
-                        {/* Horizontal Stacked Bar */}
-                        <div className="w-full bg-slate-100 h-5 rounded-md border border-slate-150 overflow-hidden flex shadow-inner">
-                          {(Object.keys(PARTY_COLORS) as VoterPreference[]).map((p) => {
-                            const count = item.prefs[p] || 0;
-                            const pct = item.total > 0 ? (count / item.total) * 100 : 0;
-                            if (pct <= 0) return null;
-                            return (
-                              <div
-                                key={p}
-                                className="h-full transition-all duration-300 relative hover:brightness-95 hover:scale-y-110"
-                                style={{ 
-                                  width: `${pct}%`, 
-                                  backgroundColor: PARTY_COLORS[p] 
-                                }}
-                                onMouseMove={(e) => {
-                                  setHoveredSegment({
-                                    type: 'caste',
-                                    category: item.name,
-                                    party: p,
-                                    count,
-                                    pct,
-                                    total: item.total,
-                                    x: e.clientX,
-                                    y: e.clientY
-                                  });
-                                }}
-                                onMouseLeave={() => setHoveredSegment(null)}
-                              />
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))
-                  )}
+
+                <div className="flex items-center gap-4 shrink-0">
+                  <div className="bg-slate-900 text-white rounded-2xl p-4 border border-slate-800 text-right min-w-[180px] shadow-sm">
+                    <span className="block text-[9px] font-black uppercase text-yellow-400 tracking-widest">TOTAL MANDAL VOTERS</span>
+                    <span className="text-2xl font-black tracking-tight block mt-0.5">{totalVotersCount.toLocaleString()}</span>
+                  </div>
+                  <div className="bg-yellow-50/50 border border-yellow-100 rounded-2xl p-4 text-right min-w-[180px]">
+                    <span className="block text-[9px] font-black uppercase text-yellow-700 tracking-widest">ANALYZED RECORDS</span>
+                    <span className="text-2xl font-black text-yellow-800 block mt-0.5">
+                      {filteredVotersForCasteAnalytics.length.toLocaleString()}
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              {/* Box 2: Profession & Demographics Panel (Right) */}
-              <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-6">
-                
-                {/* 2A. Profession Analysis */}
-                <div className="space-y-3">
-                  <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
+              {/* Support Legend */}
+              <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm flex flex-wrap items-center justify-between gap-4">
+                <div className="flex flex-wrap items-center gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                  <span className="text-slate-400 font-black">Support Legend:</span>
+                  {(Object.keys(PARTY_COLORS) as VoterPreference[]).map(p => (
+                    <span key={p} className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg">
+                      <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: PARTY_COLORS[p] }}></span>
+                      {PARTY_NAMES[p]}
+                    </span>
+                  ))}
+                </div>
+
+                {(casteFilterVillage !== 'all' || casteFilterCaste !== 'all' || casteFilterGender !== 'all' || casteFilterAgeGroup !== 'all' || casteFilterProfession !== 'all') && (
+                  <button
+                    onClick={() => {
+                      setCasteFilterVillage('all');
+                      setCasteFilterCaste('all');
+                      setCasteFilterGender('all');
+                      setCasteFilterAgeGroup('all');
+                      setCasteFilterProfession('all');
+                    }}
+                    className="text-xs font-black text-red-600 hover:text-red-700 hover:underline flex items-center gap-1 cursor-pointer bg-red-50 px-3 py-1.5 rounded-xl border border-red-100"
+                  >
+                    Clear All Filters
+                  </button>
+                )}
+              </div>
+
+              {/* Custom Interactive Filters Panel */}
+              <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-3" id="caste-analytics-filters">
+                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Interactive Analytics Filters</h3>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider block">Village</label>
+                    <select
+                      value={casteFilterVillage}
+                      onChange={(e) => setCasteFilterVillage(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:border-yellow-400"
+                    >
+                      <option value="all">All Villages</option>
+                      {availableVillages.map(v => (
+                        <option key={v} value={v}>{v}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider block">Caste Group</label>
+                    <select
+                      value={casteFilterCaste}
+                      onChange={(e) => setCasteFilterCaste(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:border-yellow-400"
+                    >
+                      <option value="all">All Castes</option>
+                      {availableCastes.map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider block">Gender</label>
+                    <select
+                      value={casteFilterGender}
+                      onChange={(e) => setCasteFilterGender(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:border-yellow-400"
+                    >
+                      <option value="all">All Genders</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider block">Age Group</label>
+                    <select
+                      value={casteFilterAgeGroup}
+                      onChange={(e) => setCasteFilterAgeGroup(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:border-yellow-400"
+                    >
+                      <option value="all">All Age Groups</option>
+                      <option value="18-25">18–25</option>
+                      <option value="26-40">26–40</option>
+                      <option value="41-60">41–60</option>
+                      <option value="60+">60+</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1 col-span-2 md:col-span-1">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider block">Profession</label>
+                    <select
+                      value={casteFilterProfession}
+                      onChange={(e) => setCasteFilterProfession(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:border-yellow-400"
+                    >
+                      <option value="all">All Professions</option>
+                      {availableProfessions.map(p => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Caste Verification Security Mandate Banner */}
+              <div className="bg-rose-50/75 border-l-4 border-rose-500 p-4 rounded-r-2xl shadow-xs flex gap-3.5" id="caste-verification-warning-banner">
+                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="text-xs font-black text-rose-800 uppercase tracking-wide">CASTE AUDIT SECURITY MANDATE</h4>
+                  <p className="text-xs text-rose-700 font-bold leading-relaxed mt-0.5">
+                    WARNING: Never automatically infer caste from Name, Religion, Village, or Family Name. Caste must ONLY be recorded based on physical ground-verified rolls.
+                  </p>
+                </div>
+              </div>
+
+              {/* Bento Grid layout matching the requested Political & Demographic Redesign */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" id="analytics-grid">
+
+                {/* Box 1: Caste-wise Political Analysis (Left) */}
+                <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4 flex flex-col justify-between">
+                  <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
                     <div>
-                      <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">Profession Analysis</h4>
-                      <p className="text-[10px] text-slate-400 font-bold">Political preference across occupational brackets</p>
+                      <h3 className="font-extrabold text-sm text-slate-900 uppercase tracking-wider">Caste-wise Political Analysis</h3>
+                      <p className="text-[11px] text-slate-400 font-bold mt-0.5">Click any caste row for complete demographic audit</p>
                     </div>
-                    <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded">
-                      {casteChartsData.profession.length} Cohorts
+                    <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg">
+                      {casteChartsData.caste.length} Categories
                     </span>
                   </div>
 
-                  <div className="space-y-3 max-h-[190px] overflow-y-auto pr-1">
-                    {casteChartsData.profession.length === 0 ? (
-                      <p className="text-center py-6 text-slate-400 text-xs font-bold">No Profession Data</p>
+                  <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1 flex-1">
+                    {casteChartsData.caste.length === 0 ? (
+                      <div className="text-center py-12 text-slate-400 text-xs font-bold">
+                        No Records Found For Current Filters
+                      </div>
                     ) : (
-                      casteChartsData.profession.map((item) => (
-                        <div key={item.name} className="space-y-1.5 p-1 rounded-lg hover:bg-slate-50/50 transition-all">
+                      casteChartsData.caste.map((item) => (
+                        <div
+                          key={item.name}
+                          onClick={() => setActiveCasteDetail(item.name)}
+                          className="space-y-2 cursor-pointer hover:bg-slate-50 p-2 rounded-xl transition-all border border-transparent hover:border-slate-100"
+                          title="Click to view detailed profiling"
+                        >
                           <div className="flex items-center justify-between text-xs font-bold">
-                            <span className="text-slate-800 font-extrabold flex items-center gap-1">
+                            <span className="text-slate-900 font-extrabold hover:text-yellow-600 transition-colors flex items-center gap-1.5">
                               {item.name}
-                              <span className="text-[10px] text-slate-450 font-bold">({item.total})</span>
+                              <span className="text-[10px] text-slate-400 font-black bg-slate-100 px-2 py-0.5 rounded-md">
+                                {item.total.toLocaleString()} Voters
+                              </span>
                             </span>
-                            <span className="text-[10px] text-slate-400 font-bold">
-                              TDP: {item.prefs.TDP} • YSRCP: {item.prefs.YSRCP}
+                            <span className="text-[11px] text-slate-500 font-extrabold">
+                              TDP: {item.prefs.TDP.toLocaleString()} • YSRCP: {item.prefs.YSRCP.toLocaleString()}
                             </span>
                           </div>
-                          
-                          <div className="w-full bg-slate-100 h-3 rounded overflow-hidden flex shadow-inner">
+
+                          {/* Horizontal Stacked Bar */}
+                          <div className="w-full bg-slate-100 h-5 rounded-md border border-slate-150 overflow-hidden flex shadow-inner">
                             {(Object.keys(PARTY_COLORS) as VoterPreference[]).map((p) => {
                               const count = item.prefs[p] || 0;
                               const pct = item.total > 0 ? (count / item.total) * 100 : 0;
@@ -3474,14 +3705,14 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                               return (
                                 <div
                                   key={p}
-                                  className="h-full transition-all duration-300 relative hover:brightness-95"
-                                  style={{ 
-                                    width: `${pct}%`, 
-                                    backgroundColor: PARTY_COLORS[p] 
+                                  className="h-full transition-all duration-300 relative hover:brightness-95 hover:scale-y-110"
+                                  style={{
+                                    width: `${pct}%`,
+                                    backgroundColor: PARTY_COLORS[p]
                                   }}
                                   onMouseMove={(e) => {
                                     setHoveredSegment({
-                                      type: 'profession',
+                                      type: 'caste',
                                       category: item.name,
                                       party: p,
                                       count,
@@ -3502,1059 +3733,1170 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                   </div>
                 </div>
 
-                {/* 2B. Age Group Analysis */}
-                <div className="space-y-3 border-t border-slate-100 pt-4">
-                  <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
-                    <div>
-                      <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">Age Group Analysis</h4>
-                      <p className="text-[10px] text-slate-400 font-bold">Voter preferences segmented by age cohort</p>
-                    </div>
-                    <span className="text-[10px] font-bold text-slate-450">4 Ranges</span>
-                  </div>
+                {/* Box 2: Profession & Demographics Panel (Right) */}
+                <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-6">
 
-                  <div className="space-y-3 max-h-[160px] overflow-y-auto pr-1">
-                    {casteChartsData.age.map((item) => (
-                      <div key={item.name} className="space-y-1.5 p-1 rounded-lg hover:bg-slate-50/50 transition-all">
-                        <div className="flex items-center justify-between text-xs font-bold">
-                          <span className="text-slate-800 font-extrabold">
-                            Age {item.name} <span className="text-[10px] text-slate-450 font-bold">({item.total})</span>
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-bold">
-                            TDP: {item.prefs.TDP} • YSRCP: {item.prefs.YSRCP}
-                          </span>
-                        </div>
-                        
-                        <div className="w-full bg-slate-100 h-3 rounded overflow-hidden flex shadow-inner">
-                          {(Object.keys(PARTY_COLORS) as VoterPreference[]).map((p) => {
-                            const count = item.prefs[p] || 0;
-                            const pct = item.total > 0 ? (count / item.total) * 100 : 0;
-                            if (pct <= 0) return null;
-                            return (
-                              <div
-                                key={p}
-                                className="h-full transition-all duration-300 relative hover:brightness-95"
-                                style={{ 
-                                  width: `${pct}%`, 
-                                  backgroundColor: PARTY_COLORS[p] 
-                                }}
-                                onMouseMove={(e) => {
-                                  setHoveredSegment({
-                                    type: 'age',
-                                    category: item.name,
-                                    party: p,
-                                    count,
-                                    pct,
-                                    total: item.total,
-                                    x: e.clientX,
-                                    y: e.clientY
-                                  });
-                                }}
-                                onMouseLeave={() => setHoveredSegment(null)}
-                              />
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 2C. Gender Support Analysis */}
-                <div className="space-y-3 border-t border-slate-100 pt-4">
-                  <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
-                    <div>
-                      <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">Gender Support Analysis</h4>
-                      <p className="text-[10px] text-slate-400 font-bold">Demographic preference split by gender</p>
-                    </div>
-                  </div>
-
+                  {/* 2A. Profession Analysis */}
                   <div className="space-y-3">
-                    {casteChartsData.gender.map((item) => (
-                      <div key={item.name} className="space-y-1.5 p-1 rounded-lg hover:bg-slate-50/50 transition-all">
-                        <div className="flex items-center justify-between text-xs font-bold">
-                          <span className="text-slate-800 font-extrabold">
-                            {item.name} <span className="text-[10px] text-slate-450 font-bold">({item.total})</span>
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-bold">
-                            TDP: {item.prefs.TDP} • YSRCP: {item.prefs.YSRCP}
-                          </span>
-                        </div>
-                        
-                        <div className="w-full bg-slate-100 h-3 rounded overflow-hidden flex shadow-inner">
-                          {(Object.keys(PARTY_COLORS) as VoterPreference[]).map((p) => {
-                            const count = item.prefs[p] || 0;
-                            const pct = item.total > 0 ? (count / item.total) * 100 : 0;
-                            if (pct <= 0) return null;
-                            return (
-                              <div
-                                key={p}
-                                className="h-full transition-all duration-300 relative hover:brightness-95"
-                                style={{ 
-                                  width: `${pct}%`, 
-                                  backgroundColor: PARTY_COLORS[p] 
-                                }}
-                                onMouseMove={(e) => {
-                                  setHoveredSegment({
-                                    type: 'gender',
-                                    category: item.name,
-                                    party: p,
-                                    count,
-                                    pct,
-                                    total: item.total,
-                                    x: e.clientX,
-                                    y: e.clientY
-                                  });
-                                }}
-                                onMouseLeave={() => setHoveredSegment(null)}
-                              />
-                            );
-                          })}
-                        </div>
+                    <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">Profession Analysis</h4>
+                        <p className="text-[10px] text-slate-400 font-bold">Political preference across occupational brackets</p>
                       </div>
-                    ))}
-                  </div>
-                </div>
-
-              </div>
-
-            </div>
-
-            {/* Interactive Tooltip Component */}
-            {hoveredSegment && (
-              <div 
-                className="fixed z-50 bg-slate-900 text-white text-xs rounded-xl p-3 shadow-xl border border-slate-800 space-y-1.5 pointer-events-none transition-all duration-75 min-w-[200px]"
-                style={{ left: hoveredSegment.x + 15, top: hoveredSegment.y + 15 }}
-              >
-                <div className="font-extrabold border-b border-slate-800 pb-1 text-slate-200">
-                  {hoveredSegment.category} ({hoveredSegment.type.toUpperCase()})
-                </div>
-                <div className="flex justify-between items-center text-slate-300">
-                  <span>Party Preference:</span>
-                  <span className="font-black" style={{ color: PARTY_COLORS[hoveredSegment.party] }}>
-                    {PARTY_NAMES[hoveredSegment.party]}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center text-slate-300">
-                  <span>Voters Count:</span>
-                  <span className="font-bold text-white">
-                    {hoveredSegment.count.toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center text-slate-300">
-                  <span>Share of Category:</span>
-                  <span className="font-bold text-white">
-                    {hoveredSegment.pct.toFixed(1)}%
-                  </span>
-                </div>
-                <div className="text-[9px] text-slate-500 pt-1 text-right">
-                  Category Total: {hoveredSegment.total.toLocaleString()}
-                </div>
-              </div>
-            )}
-
-            {/* Caste Detail Modal View */}
-            {activeCasteDetail && casteDetailData && (
-              <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-                <div className="bg-white rounded-2xl max-w-4xl w-full shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-scale-up">
-                  {/* Modal Header */}
-                  <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] font-black uppercase text-yellow-400 tracking-widest block">Detailed Caste Audit</span>
-                      <h3 className="text-lg font-black tracking-tight">Caste Profile: {casteDetailData.casteName}</h3>
-                    </div>
-                    <button 
-                      onClick={() => setActiveCasteDetail(null)}
-                      className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800 transition-colors cursor-pointer"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                  
-                  {/* Modal Body */}
-                  <div className="p-6 overflow-y-auto space-y-6">
-                    {/* Top summary cards */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wide block">Total Caste Voters</span>
-                        <span className="text-2xl font-black text-slate-800">{casteDetailData.totalVoters.toLocaleString()}</span>
-                      </div>
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wide block">Gender Breakdown</span>
-                        <div className="mt-1 text-xs text-slate-600 font-bold space-y-0.5">
-                          <div className="flex justify-between">
-                            <span>Male:</span>
-                            <span className="text-slate-800">{casteDetailData.gender.male} ({Math.round((casteDetailData.gender.male / casteDetailData.totalVoters) * 100) || 0}%)</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Female:</span>
-                            <span className="text-slate-800">{casteDetailData.gender.female} ({Math.round((casteDetailData.gender.female / casteDetailData.totalVoters) * 100) || 0}%)</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wide block">Age Group Split</span>
-                        <div className="mt-1 text-xs text-slate-600 font-bold space-y-0.5">
-                          <div className="flex justify-between">
-                            <span>18–25:</span>
-                            <span className="text-slate-800">{casteDetailData.age.age18_25}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>26–40:</span>
-                            <span className="text-slate-800">{casteDetailData.age.age26_40}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wide block">Top Profession</span>
-                        <span className="text-sm font-black text-slate-800 block truncate mt-1">
-                          {casteDetailData.professions[0] ? `${casteDetailData.professions[0].name} (${casteDetailData.professions[0].count})` : 'Others'}
-                        </span>
-                      </div>
+                      <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded">
+                        {casteChartsData.profession.length} Cohorts
+                      </span>
                     </div>
 
-                    {/* Support Breakdown Section */}
-                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-3">
-                      <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">Political Sentiment for {casteDetailData.casteName}</h4>
-                      <div className="w-full bg-slate-200 h-6 rounded overflow-hidden flex shadow-inner">
-                        {(Object.keys(PARTY_COLORS) as VoterPreference[]).map((p) => {
-                          const count = casteDetailData.party[p] || 0;
-                          const pct = casteDetailData.totalVoters > 0 ? (count / casteDetailData.totalVoters) * 100 : 0;
-                          if (pct <= 0) return null;
-                          return (
-                            <div
-                              key={p}
-                              className="h-full transition-all duration-300 relative hover:brightness-95 flex items-center justify-center text-[10px] font-black text-white"
-                              style={{ 
-                                width: `${pct}%`, 
-                                backgroundColor: PARTY_COLORS[p] 
-                              }}
-                              title={`${p}: ${count} (${Math.round(pct)}%)`}
-                            >
-                              {pct > 8 && `${PARTY_NAMES[p]} (${Math.round(pct)}%)`}
+                    <div className="space-y-3 max-h-[190px] overflow-y-auto pr-1">
+                      {casteChartsData.profession.length === 0 ? (
+                        <p className="text-center py-6 text-slate-400 text-xs font-bold">No Profession Data</p>
+                      ) : (
+                        casteChartsData.profession.map((item) => (
+                          <div key={item.name} className="space-y-1.5 p-1 rounded-lg hover:bg-slate-50/50 transition-all">
+                            <div className="flex items-center justify-between text-xs font-bold">
+                              <span className="text-slate-800 font-extrabold flex items-center gap-1">
+                                {item.name}
+                                <span className="text-[10px] text-slate-450 font-bold">({item.total})</span>
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-bold">
+                                TDP: {item.prefs.TDP} • YSRCP: {item.prefs.YSRCP}
+                              </span>
                             </div>
-                          );
-                        })}
-                      </div>
-                      <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 text-center text-[10px] font-bold">
-                        {(Object.keys(PARTY_COLORS) as VoterPreference[]).map(p => {
-                          const count = casteDetailData.party[p] || 0;
-                          return (
-                            <div key={p} className="bg-white border border-slate-200 rounded p-1.5">
-                              <span className="inline-block w-2 h-2 rounded-sm mr-1" style={{ backgroundColor: PARTY_COLORS[p] }}></span>
-                              <span className="text-slate-500">{PARTY_NAMES[p]}:</span> <span className="text-slate-800 font-black">{count}</span>
+
+                            <div className="w-full bg-slate-100 h-3 rounded overflow-hidden flex shadow-inner">
+                              {(Object.keys(PARTY_COLORS) as VoterPreference[]).map((p) => {
+                                const count = item.prefs[p] || 0;
+                                const pct = item.total > 0 ? (count / item.total) * 100 : 0;
+                                if (pct <= 0) return null;
+                                return (
+                                  <div
+                                    key={p}
+                                    className="h-full transition-all duration-300 relative hover:brightness-95"
+                                    style={{
+                                      width: `${pct}%`,
+                                      backgroundColor: PARTY_COLORS[p]
+                                    }}
+                                    onMouseMove={(e) => {
+                                      setHoveredSegment({
+                                        type: 'profession',
+                                        category: item.name,
+                                        party: p,
+                                        count,
+                                        pct,
+                                        total: item.total,
+                                        x: e.clientX,
+                                        y: e.clientY
+                                      });
+                                    }}
+                                    onMouseLeave={() => setHoveredSegment(null)}
+                                  />
+                                );
+                              })}
                             </div>
-                          );
-                        })}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 2B. Age Group Analysis */}
+                  <div className="space-y-3 border-t border-slate-100 pt-4">
+                    <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">Age Group Analysis</h4>
+                        <p className="text-[10px] text-slate-400 font-bold">Voter preferences segmented by age cohort</p>
                       </div>
+                      <span className="text-[10px] font-bold text-slate-450">4 Ranges</span>
                     </div>
 
-                    {/* Village-wise Breakdown Table */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">Village-wise Distribution</h4>
-                        <span className="text-[10px] text-slate-400 font-semibold">Ordered by highest caste concentration</span>
-                      </div>
-                      
-                      <div className="border border-slate-150 rounded-xl overflow-hidden bg-white shadow-sm">
-                        <table className="w-full text-left border-collapse">
-                          <thead>
-                            <tr className="bg-slate-50 border-b border-slate-150 text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                              <th className="p-3">Village Name</th>
-                              <th className="p-3 text-center">Caste Voters</th>
-                              <th className="p-3 text-center">TDP Support</th>
-                              <th className="p-3 text-center">YSRCP Support</th>
-                              <th className="p-3 text-center">Neutral Support</th>
-                              <th className="p-3 text-center">Leading Party</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 text-xs">
-                            {casteDetailData.villages.map(v => {
-                              if (v.total === 0) return null;
+                    <div className="space-y-3 max-h-[160px] overflow-y-auto pr-1">
+                      {casteChartsData.age.map((item) => (
+                        <div key={item.name} className="space-y-1.5 p-1 rounded-lg hover:bg-slate-50/50 transition-all">
+                          <div className="flex items-center justify-between text-xs font-bold">
+                            <span className="text-slate-800 font-extrabold">
+                              Age {item.name} <span className="text-[10px] text-slate-450 font-bold">({item.total})</span>
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-bold">
+                              TDP: {item.prefs.TDP} • YSRCP: {item.prefs.YSRCP}
+                            </span>
+                          </div>
+
+                          <div className="w-full bg-slate-100 h-3 rounded overflow-hidden flex shadow-inner">
+                            {(Object.keys(PARTY_COLORS) as VoterPreference[]).map((p) => {
+                              const count = item.prefs[p] || 0;
+                              const pct = item.total > 0 ? (count / item.total) * 100 : 0;
+                              if (pct <= 0) return null;
                               return (
-                                <tr key={v.villageName} className="hover:bg-slate-50/50 font-semibold">
-                                  <td className="p-3 font-extrabold text-slate-900">{v.villageName}</td>
-                                  <td className="p-3 text-center font-bold text-slate-700">{v.total.toLocaleString()}</td>
-                                  <td className="p-3 text-center text-yellow-600 font-extrabold">{v.tdp}</td>
-                                  <td className="p-3 text-center text-blue-600 font-extrabold">{v.ysrcp}</td>
-                                  <td className="p-3 text-center text-slate-500 font-bold">{v.neutral}</td>
-                                  <td className="p-3 text-center">
-                                    {v.leadingParty === 'TDP' && (
-                                      <span className="px-2 py-0.5 rounded bg-yellow-50 text-yellow-700 border border-yellow-100 text-[10px] font-black">
-                                        TDP LEADING
-                                      </span>
-                                    )}
-                                    {v.leadingParty === 'YSRCP' && (
-                                      <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100 text-[10px] font-black">
-                                        YSRCP LEADING
-                                      </span>
-                                    )}
-                                    {v.leadingParty === 'TIE' && (
-                                      <span className="px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 text-[10px] font-black">
-                                        TIE
-                                      </span>
-                                    )}
-                                    {v.leadingParty === 'Neutral' && (
-                                      <span className="px-2 py-0.5 rounded bg-slate-50 text-slate-700 border border-slate-200 text-[10px] font-black">
-                                        NEUTRAL
-                                      </span>
-                                    )}
-                                  </td>
-                                </tr>
+                                <div
+                                  key={p}
+                                  className="h-full transition-all duration-300 relative hover:brightness-95"
+                                  style={{
+                                    width: `${pct}%`,
+                                    backgroundColor: PARTY_COLORS[p]
+                                  }}
+                                  onMouseMove={(e) => {
+                                    setHoveredSegment({
+                                      type: 'age',
+                                      category: item.name,
+                                      party: p,
+                                      count,
+                                      pct,
+                                      total: item.total,
+                                      x: e.clientX,
+                                      y: e.clientY
+                                    });
+                                  }}
+                                  onMouseLeave={() => setHoveredSegment(null)}
+                                />
                               );
                             })}
-                          </tbody>
-                        </table>
-                      </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                  
-                  {/* Modal Footer */}
-                  <div className="bg-slate-50 border-t border-slate-100 px-6 py-4 flex justify-end">
-                    <button 
-                      onClick={() => setActiveCasteDetail(null)}
-                      className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-black text-xs rounded-lg active:scale-95 transition-all shadow cursor-pointer"
-                    >
-                      Close Profile
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
 
-          </div>
-        )}
+                  {/* 2C. Gender Support Analysis */}
+                  <div className="space-y-3 border-t border-slate-100 pt-4">
+                    <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">Gender Support Analysis</h4>
+                        <p className="text-[10px] text-slate-400 font-bold">Demographic preference split by gender</p>
+                      </div>
+                    </div>
 
-        {/* --------------------------------------------------------
-            TAB 8: CADRE NETWORK VIEW
-           -------------------------------------------------------- */}
-        {activeTab === 'cadre_network' && (
-          <div className="space-y-6 animate-fade-in" id="village-cadre-network-view">
-            
-            {/* 1. Page Header */}
-            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-2">
-              <span className="text-[10px] font-black tracking-widest text-yellow-600 uppercase">Kondapi Assembly Constituency</span>
-              <h2 className="text-xl font-black text-slate-950 uppercase tracking-tight">Singarayakonda Mandal Cadre Network</h2>
-              <p className="text-xs text-slate-500 font-bold">Organizational hierarchy, team coverage, and booth cadre assignments</p>
-            </div>
-
-            {/* 2. Top Summary Cards (Grid) */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" id="cadre-summary-grid">
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm flex items-center gap-4">
-                <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700 shrink-0">
-                  <Users className="w-5 h-5" />
-                </div>
-                <div>
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Total Voters</span>
-                  <span className="text-xl font-black text-slate-950">{totalVotersCount.toLocaleString()}</span>
-                </div>
-              </div>
-
-              <div className="bg-blue-50/40 border border-blue-200 rounded-xl p-4 shadow-sm flex items-center gap-4">
-                <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
-                  <MapPin className="w-5 h-5" />
-                </div>
-                <div>
-                  <span className="text-[10px] font-black text-blue-700 uppercase tracking-wider block">Total Booths</span>
-                  <span className="text-xl font-black text-blue-800">{VERIFIED_BOOTHS_DATA.length} Booths</span>
-                </div>
-              </div>
-
-              <div className="bg-purple-50/40 border border-purple-200 rounded-xl p-4 shadow-sm flex items-center gap-4">
-                <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-600 shrink-0">
-                  <User className="w-5 h-5" />
-                </div>
-                <div>
-                  <span className="text-[10px] font-black text-purple-700 uppercase tracking-wider block">Booth Incharges</span>
-                  <span className="text-xl font-black text-purple-800">{VERIFIED_BOOTHS_DATA.length} Positions</span>
-                </div>
-              </div>
-
-              <div className="bg-amber-50/50 border border-amber-200 rounded-xl p-4 shadow-sm flex items-center gap-4">
-                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-500 shrink-0">
-                  <CheckCircle className="w-5 h-5" />
-                </div>
-                <div>
-                  <span className="text-[10px] font-black text-amber-700 uppercase tracking-wider block">100-Voter Incharges</span>
-                  <span className="text-xl font-black text-amber-600">{Math.ceil(totalVotersCount / 100) || 0} Slots</span>
-                </div>
-              </div>
-            </div>
-
-            {/* 3. Team Strength Summary & Breakdown Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5" id="team-strength-breakdown">
-              <div className="bg-amber-50/50 border border-amber-200 rounded-xl p-5 shadow-sm space-y-4">
-                <div className="border-b border-amber-200/60 pb-2">
-                  <h3 className="text-xs font-black text-amber-800 uppercase tracking-widest">Field Team Strength</h3>
-                  <p className="text-[11px] text-amber-700/80 mt-0.5">Grassroots field cadre operations team</p>
-                </div>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-4xl font-black text-amber-500">583</span>
-                  <span className="text-[10px] font-black text-amber-600 uppercase tracking-wide">Active Field Members</span>
-                </div>
-                <div className="bg-white/80 rounded-xl p-3 border border-amber-200 space-y-1">
-                  <div className="flex justify-between text-xs font-bold">
-                    <span className="text-slate-500">Booth Incharges:</span>
-                    <span className="text-amber-600 font-black text-sm">60</span>
-                  </div>
-                  <div className="flex justify-between text-xs font-bold">
-                    <span className="text-slate-500">100-Voter Incharges:</span>
-                    <span className="text-amber-600 font-black text-sm">523</span>
-                  </div>
-                  <div className="pt-2 border-t border-amber-200 flex justify-between text-xs font-black text-slate-700">
-                    <span>Calculation:</span>
-                    <span className="text-amber-600 font-black">60 + 523 = 583</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-slate-50/50 border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-                <div className="border-b border-slate-200/60 pb-2">
-                  <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Total Mandal Team Strength</h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">End-to-end constituency hierarchy team size</p>
-                </div>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-4xl font-black text-slate-900">584</span>
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-wide">Total Mandal Team</span>
-                </div>
-                <div className="bg-white/80 rounded-xl p-3 border border-slate-200 space-y-1">
-                  <div className="flex justify-between text-xs font-bold">
-                    <span className="text-slate-500">Mandal Incharge:</span>
-                    <span className="text-slate-900 font-black text-sm">1</span>
-                  </div>
-                  <div className="flex justify-between text-xs font-bold">
-                    <span className="text-slate-500">Booth Incharges:</span>
-                    <span className="text-slate-900 font-black text-sm">60</span>
-                  </div>
-                  <div className="flex justify-between text-xs font-bold">
-                    <span className="text-slate-500">100-Voter Incharges:</span>
-                    <span className="text-slate-900 font-black text-sm">523</span>
-                  </div>
-                  <div className="pt-2 border-t border-slate-200 flex justify-between text-xs font-black text-slate-700">
-                    <span>Calculation:</span>
-                    <span className="text-slate-900 font-black">1 + 60 + 523 = 584</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 4. Organization Tree Hierarchy */}
-            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-5">
-              <div className="border-b border-slate-100 pb-3">
-                <h3 className="text-sm font-black text-slate-950 uppercase tracking-wider">Mandal Command Structure</h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">Strict hierarchical visualization of Singarayakonda command flow</p>
-              </div>
-
-              <div className="flex flex-col items-center justify-center space-y-4 max-w-2xl mx-auto py-2">
-                {/* Level 1: Mandal Incharge */}
-                <div className="bg-slate-900 text-white rounded-xl p-4 w-full max-w-sm text-center border-2 border-yellow-400 shadow relative">
-                  <span className="text-[8px] tracking-wider uppercase font-black bg-yellow-400 text-slate-950 px-2 py-0.5 rounded absolute -top-2.5 left-1/2 -translate-x-1/2">Level 1</span>
-                  <h4 className="text-xs font-black uppercase tracking-wider text-yellow-400">Mandal Incharge</h4>
-                  <p className="text-sm font-black mt-1">Singarayakonda Mandal Head</p>
-                  <p className="text-[10px] text-slate-400 font-bold mt-1">Coverage: {VERIFIED_BOOTHS_DATA.length} Booths | {totalVotersCount.toLocaleString()} Voters</p>
-                </div>
-
-                {/* Arrow */}
-                <div className="flex flex-col items-center">
-                  <div className="w-0.5 h-6 bg-slate-300"></div>
-                  <div className="w-2 h-2 rounded-full bg-yellow-500 -mt-1"></div>
-                </div>
-
-                {/* Level 2: Booth Incharges */}
-                <div className="bg-white border-2 border-slate-900 rounded-xl p-4 w-full max-w-sm text-center shadow relative">
-                  <span className="text-[8px] tracking-wider uppercase font-black bg-slate-900 text-white px-2 py-0.5 rounded absolute -top-2.5 left-1/2 -translate-x-1/2">Level 2</span>
-                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-900">Booth Incharges</h4>
-                  <p className="text-sm font-black mt-1">{VERIFIED_BOOTHS_DATA.length} Polling Station Leaders</p>
-                  <p className="text-[10px] text-slate-500 font-bold mt-1">1 Assigned per Booth | Direct Field Management</p>
-                </div>
-
-                {/* Arrow */}
-                <div className="flex flex-col items-center">
-                  <div className="w-0.5 h-6 bg-slate-300"></div>
-                  <div className="w-2 h-2 rounded-full bg-yellow-500 -mt-1"></div>
-                </div>
-
-                {/* Level 3: 100-Voter Incharges */}
-                <div className="bg-white border border-slate-200 rounded-xl p-4 w-full max-w-sm text-center shadow-sm relative">
-                  <span className="text-[8px] tracking-wider uppercase font-black bg-slate-100 text-slate-600 px-2 py-0.5 rounded absolute -top-2.5 left-1/2 -translate-x-1/2">Level 3</span>
-                  <h4 className="text-xs font-black uppercase tracking-wider text-yellow-600">100-Voter Incharges</h4>
-                  <p className="text-sm font-black mt-1">{Math.ceil(totalVotersCount / 100) || 0} Cluster Leaders</p>
-                  <p className="text-[10px] text-slate-500 font-bold mt-1">
-                    {totalAssignedV100} / {Math.ceil(totalVotersCount / 100) || 0} Slots Filled ({Math.ceil(totalVotersCount / 100) > 0 ? Math.round((totalAssignedV100 / Math.ceil(totalVotersCount / 100)) * 100) : 0}%)
-                  </p>
-                </div>
-
-                {/* Arrow */}
-                <div className="flex flex-col items-center">
-                  <div className="w-0.5 h-6 bg-slate-300"></div>
-                  <div className="w-2 h-2 rounded-full bg-yellow-500 -mt-1"></div>
-                </div>
-
-                {/* Level 4: Registered Voters */}
-                <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5 w-full max-w-sm text-center relative">
-                  <span className="text-[8px] tracking-wider uppercase font-black bg-slate-200 text-slate-600 px-2 py-0.5 rounded absolute -top-2.5 left-1/2 -translate-x-1/2">Level 4</span>
-                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-500">Registered Voters</h4>
-                  <p className="text-sm font-black text-slate-800">{totalVotersCount.toLocaleString()} Voters</p>
-                  <p className="text-[10px] text-slate-400 font-bold mt-0.5">Strict Electoral Roll Reconciliation</p>
-                </div>
-              </div>
-            </div>
-
-            {/* 5. Search, Filter & Booth Directory Table */}
-            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div>
-                  <h3 className="text-sm font-black text-slate-950 uppercase tracking-wider">Booth Cadre Directory</h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Search and filter assignment statuses across all {VERIFIED_BOOTHS_DATA.length} booths</p>
-                </div>
-
-                {/* Controls */}
-                <div className="flex flex-wrap items-center gap-3">
-                  {/* Search */}
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type="text"
-                      value={cadreSearchQuery}
-                      onChange={(e) => setCadreSearchQuery(e.target.value)}
-                      placeholder="Search Booth Number..."
-                      className="pl-9 pr-4 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-yellow-400 w-full sm:w-[200px]"
-                    />
-                    {cadreSearchQuery && (
-                      <button 
-                        onClick={() => setCadreSearchQuery('')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-slate-400 hover:text-slate-600"
-                      >
-                        CLEAR
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Filters */}
-                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-                    <button
-                      onClick={() => setCadreFilter('all')}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
-                        cadreFilter === 'all' ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                    >
-                      ALL (60)
-                    </button>
-                    <button
-                      onClick={() => setCadreFilter('fully')}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
-                        cadreFilter === 'fully' ? 'bg-emerald-500 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                    >
-                      FULLY
-                    </button>
-                    <button
-                      onClick={() => setCadreFilter('partially')}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
-                        cadreFilter === 'partially' ? 'bg-amber-500 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                    >
-                      PARTIAL
-                    </button>
-                    <button
-                      onClick={() => setCadreFilter('not_assigned')}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
-                        cadreFilter === 'not_assigned' ? 'bg-rose-500 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                    >
-                      EMPTY
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Directory Table */}
-              <div className="border border-slate-150 rounded-xl overflow-hidden shadow-xs bg-white">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-150 text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                      <th className="p-3">Booth No.</th>
-                      <th className="p-3 text-center">Total Voters</th>
-                      <th className="p-3">Booth Incharge</th>
-                      <th className="p-3">Mobile</th>
-                      <th className="p-3 text-center">100-Voter Incharges</th>
-                      <th className="p-3 text-center">Assignment Status</th>
-                      <th className="p-3 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-xs font-semibold">
-                    {VERIFIED_BOOTHS_DATA.filter((b, idx) => {
-                      // Apply search
-                      if (cadreSearchQuery.trim() !== '') {
-                        const q = cadreSearchQuery.toLowerCase();
-                        const numMatch = b.boothNumber.toString().includes(q) || `booth ${b.boothNumber}`.includes(q);
-                        const incMatch = (boothInchargeOverrides[b.boothNumber]?.name || boothIncharges[idx]?.name || '').toLowerCase().includes(q);
-                        if (!numMatch && !incMatch) return false;
-                      }
-                      
-                      // Apply filter
-                      const assignedCount = getBoothAssignedSlotsCount(b.boothNumber, b.v100InchargesCount);
-                      const isFully = assignedCount === b.v100InchargesCount;
-                      const isPart = assignedCount > 0 && assignedCount < b.v100InchargesCount;
-                      const isNone = assignedCount === 0;
-
-                      if (cadreFilter === 'fully' && !isFully) return false;
-                      if (cadreFilter === 'partially' && !isPart) return false;
-                      if (cadreFilter === 'not_assigned' && !isNone) return false;
-
-                      return true;
-                    }).map((b) => {
-                      const idx = b.boothNumber - 224;
-                      const inc = getBoothInchargeDetails(b.boothNumber, idx);
-                      const assignedSlots = getBoothAssignedSlotsCount(b.boothNumber, b.v100InchargesCount);
-                      
-                      let statusBadge = "bg-rose-50 text-rose-700 border-rose-100";
-                      let statusText = "NOT ASSIGNED";
-                      if (assignedSlots === b.v100InchargesCount) {
-                        statusBadge = "bg-emerald-50 text-emerald-700 border-emerald-100";
-                        statusText = "FULLY ASSIGNED";
-                      } else if (assignedSlots > 0) {
-                        statusBadge = "bg-amber-50 text-amber-700 border-amber-100";
-                        statusText = "PARTIALLY ASSIGNED";
-                      }
-
-                      return (
-                        <tr key={b.boothNumber} className="hover:bg-slate-50/50">
-                          <td className="p-3 font-extrabold text-slate-900">Booth {b.boothNumber}</td>
-                          <td className="p-3 text-center text-slate-600 font-bold">{b.totalVoters.toLocaleString()}</td>
-                          <td className="p-3 font-extrabold text-slate-800 uppercase">{inc.name}</td>
-                          <td className="p-3 text-slate-500 font-medium">{inc.mobile}</td>
-                          <td className="p-3 text-center text-slate-700 font-bold">
-                            {assignedSlots} / {b.v100InchargesCount}
-                          </td>
-                          <td className="p-3 text-center">
-                            <span className={`px-2 py-0.5 rounded text-[9px] font-black border uppercase tracking-wider ${statusBadge}`}>
-                              {statusText}
+                    <div className="space-y-3">
+                      {casteChartsData.gender.map((item) => (
+                        <div key={item.name} className="space-y-1.5 p-1 rounded-lg hover:bg-slate-50/50 transition-all">
+                          <div className="flex items-center justify-between text-xs font-bold">
+                            <span className="text-slate-800 font-extrabold">
+                              {item.name} <span className="text-[10px] text-slate-450 font-bold">({item.total})</span>
                             </span>
-                          </td>
-                          <td className="p-3 text-right">
-                            <button
-                              onClick={() => setSelectedBoothCadreNum(b.boothNumber)}
-                              className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black rounded-lg transition-all"
-                            >
-                              View Cadre
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            <span className="text-[10px] text-slate-400 font-bold">
+                              TDP: {item.prefs.TDP} • YSRCP: {item.prefs.YSRCP}
+                            </span>
+                          </div>
+
+                          <div className="w-full bg-slate-100 h-3 rounded overflow-hidden flex shadow-inner">
+                            {(Object.keys(PARTY_COLORS) as VoterPreference[]).map((p) => {
+                              const count = item.prefs[p] || 0;
+                              const pct = item.total > 0 ? (count / item.total) * 100 : 0;
+                              if (pct <= 0) return null;
+                              return (
+                                <div
+                                  key={p}
+                                  className="h-full transition-all duration-300 relative hover:brightness-95"
+                                  style={{
+                                    width: `${pct}%`,
+                                    backgroundColor: PARTY_COLORS[p]
+                                  }}
+                                  onMouseMove={(e) => {
+                                    setHoveredSegment({
+                                      type: 'gender',
+                                      category: item.name,
+                                      party: p,
+                                      count,
+                                      pct,
+                                      total: item.total,
+                                      x: e.clientX,
+                                      y: e.clientY
+                                    });
+                                  }}
+                                  onMouseLeave={() => setHoveredSegment(null)}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+
               </div>
-            </div>
 
-            {/* 6. Interactive BOOTH CADRE DETAIL Overlay Modal */}
-            {selectedBoothCadreNum !== null && (() => {
-              const b = VERIFIED_BOOTHS_DATA.find(x => x.boothNumber === selectedBoothCadreNum)!;
-              const idx = b.boothNumber - 224;
-              const inc = getBoothInchargeDetails(b.boothNumber, idx);
-              const assignedSlots = getBoothAssignedSlotsCount(b.boothNumber, b.v100InchargesCount);
-              const progressPct = Math.round((assignedSlots / b.v100InchargesCount) * 100);
+              {/* Interactive Tooltip Component */}
+              {hoveredSegment && (
+                <div
+                  className="fixed z-50 bg-slate-900 text-white text-xs rounded-xl p-3 shadow-xl border border-slate-800 space-y-1.5 pointer-events-none transition-all duration-75 min-w-[200px]"
+                  style={{ left: hoveredSegment.x + 15, top: hoveredSegment.y + 15 }}
+                >
+                  <div className="font-extrabold border-b border-slate-800 pb-1 text-slate-200">
+                    {hoveredSegment.category} ({hoveredSegment.type.toUpperCase()})
+                  </div>
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span>Party Preference:</span>
+                    <span className="font-black" style={{ color: PARTY_COLORS[hoveredSegment.party] }}>
+                      {PARTY_NAMES[hoveredSegment.party]}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span>Voters Count:</span>
+                    <span className="font-bold text-white">
+                      {hoveredSegment.count.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span>Share of Category:</span>
+                    <span className="font-bold text-white">
+                      {hoveredSegment.pct.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="text-[9px] text-slate-500 pt-1 text-right">
+                    Category Total: {hoveredSegment.total.toLocaleString()}
+                  </div>
+                </div>
+              )}
 
-              return (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
-                  <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-scale-up">
-                    {/* Header */}
+              {/* Caste Detail Modal View */}
+              {activeCasteDetail && casteDetailData && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white rounded-2xl max-w-4xl w-full shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-scale-up">
+                    {/* Modal Header */}
                     <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
                       <div>
-                        <span className="text-[9px] font-black uppercase text-yellow-400 tracking-widest block">Booth Cadre Management</span>
-                        <h3 className="text-lg font-black tracking-tight">BOOTH {b.boothNumber} CADRE DETAIL</h3>
+                        <span className="text-[10px] font-black uppercase text-yellow-400 tracking-widest block">Detailed Caste Audit</span>
+                        <h3 className="text-lg font-black tracking-tight">Caste Profile: {casteDetailData.casteName}</h3>
                       </div>
-                      <button 
-                        onClick={() => {
-                          setSelectedBoothCadreNum(null);
-                          setEditingSlotKey(null);
-                          setEditingInchargeBooth(null);
-                        }}
-                        className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800 transition-colors"
+                      <button
+                        onClick={() => setActiveCasteDetail(null)}
+                        className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800 transition-colors cursor-pointer"
                       >
                         <X className="w-5 h-5" />
                       </button>
                     </div>
 
-                    {/* Body */}
+                    {/* Modal Body */}
                     <div className="p-6 overflow-y-auto space-y-6">
-                      
-                      {/* Booth Head Profile */}
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-4">
-                        <div className="flex items-center justify-between">
-                          <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">Booth Incharge profile</h4>
-                          {editingInchargeBooth !== b.boothNumber ? (
-                            <button
-                              onClick={() => {
-                                setEditingInchargeBooth(b.boothNumber);
-                                setEditingInchargeName(inc.name === 'NOT ASSIGNED' ? '' : inc.name);
-                                setEditingInchargeMobile(inc.mobile === 'NOT ASSIGNED' ? '' : inc.mobile);
-                              }}
-                              className="text-[10px] font-black text-yellow-600 hover:text-yellow-700 uppercase flex items-center gap-1"
-                            >
-                              <Edit2 className="w-3 h-3" /> Edit Incharge
-                            </button>
-                          ) : null}
+                      {/* Top summary cards */}
+                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wide block">Total Caste Voters</span>
+                          <span className="text-2xl font-black text-slate-800">{casteDetailData.totalVoters.toLocaleString()}</span>
                         </div>
-
-                        {editingInchargeBooth === b.boothNumber ? (
-                          <div className="bg-white p-4 rounded-lg border border-slate-200 space-y-3">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Edit Booth Incharge Details</p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              <input
-                                type="text"
-                                value={editingInchargeName}
-                                onChange={(e) => setEditingInchargeName(e.target.value)}
-                                placeholder="Incharge Full Name"
-                                className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:border-yellow-400 w-full"
-                              />
-                              <input
-                                type="text"
-                                value={editingInchargeMobile}
-                                onChange={(e) => setEditingInchargeMobile(e.target.value)}
-                                placeholder="Mobile Number"
-                                className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:border-yellow-400 w-full"
-                              />
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wide block">Gender Breakdown</span>
+                          <div className="mt-1 text-xs text-slate-600 font-bold space-y-0.5">
+                            <div className="flex justify-between">
+                              <span>Male:</span>
+                              <span className="text-slate-800">{casteDetailData.gender.male} ({Math.round((casteDetailData.gender.male / casteDetailData.totalVoters) * 100) || 0}%)</span>
                             </div>
-                            <div className="flex justify-end gap-2">
-                              <button
-                                onClick={() => setEditingInchargeBooth(null)}
-                                className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-xs font-black uppercase"
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                onClick={() => handleSaveBoothIncharge(b.boothNumber, editingInchargeName, editingInchargeMobile)}
-                                className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded text-xs font-black uppercase"
-                              >
-                                Save
-                              </button>
+                            <div className="flex justify-between">
+                              <span>Female:</span>
+                              <span className="text-slate-800">{casteDetailData.gender.female} ({Math.round((casteDetailData.gender.female / casteDetailData.totalVoters) * 100) || 0}%)</span>
                             </div>
                           </div>
-                        ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                            <div className="space-y-1">
-                              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Booth Leader Name:</span>
-                              <span className="font-extrabold text-slate-900 uppercase">{inc.name}</span>
+                        </div>
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wide block">Age Group Split</span>
+                          <div className="mt-1 text-xs text-slate-600 font-bold space-y-0.5">
+                            <div className="flex justify-between">
+                              <span>18–25:</span>
+                              <span className="text-slate-800">{casteDetailData.age.age18_25}</span>
                             </div>
-                            <div className="space-y-1">
-                              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Mobile Contact:</span>
-                              <span className="font-extrabold text-slate-700">{inc.mobile}</span>
+                            <div className="flex justify-between">
+                              <span>26–40:</span>
+                              <span className="text-slate-800">{casteDetailData.age.age26_40}</span>
                             </div>
                           </div>
-                        )}
-                      </div>
-
-                      {/* Stat summary */}
-                      <div className="grid grid-cols-3 gap-4 text-center">
-                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                          <span className="text-[9px] text-slate-400 font-bold uppercase block">Registered Voters</span>
-                          <span className="text-base font-black text-slate-800">{b.totalVoters.toLocaleString()}</span>
                         </div>
-                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                          <span className="text-[9px] text-slate-400 font-bold uppercase block">Allocated Clusters</span>
-                          <span className="text-base font-black text-slate-800">{b.v100InchargesCount}</span>
-                        </div>
-                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                          <span className="text-[9px] text-slate-400 font-bold uppercase block">Filled Clusters</span>
-                          <span className="text-base font-black text-yellow-600">{assignedSlots}</span>
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wide block">Top Profession</span>
+                          <span className="text-sm font-black text-slate-800 block truncate mt-1">
+                            {casteDetailData.professions[0] ? `${casteDetailData.professions[0].name} (${casteDetailData.professions[0].count})` : 'Others'}
+                          </span>
                         </div>
                       </div>
 
-                      {/* Progress bar */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between text-xs font-bold text-slate-600">
-                          <span>Cadre Assignment Progress</span>
-                          <span>{progressPct}% ({assignedSlots} / {b.v100InchargesCount} Filled)</span>
-                        </div>
-                        <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
-                          <div 
-                            className="h-full bg-yellow-400 rounded-full transition-all duration-300" 
-                            style={{ width: `${progressPct}%` }}
-                          ></div>
-                        </div>
-                      </div>
-
-                      {/* 100-Voter Positions Directory */}
-                      <div className="space-y-3">
-                        <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-1">
-                          100-Voter Incharge Positions Directory
-                        </h4>
-
-                        <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                          {Array.from({ length: b.v100InchargesCount }).map((_, sIdx) => {
-                            const slotKey = `${b.boothNumber}-${sIdx}`;
-                            const assignedName = cadreAssignments[slotKey];
-                            const isEditingThis = editingSlotKey === slotKey;
-
+                      {/* Support Breakdown Section */}
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-3">
+                        <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">Political Sentiment for {casteDetailData.casteName}</h4>
+                        <div className="w-full bg-slate-200 h-6 rounded overflow-hidden flex shadow-inner">
+                          {(Object.keys(PARTY_COLORS) as VoterPreference[]).map((p) => {
+                            const count = casteDetailData.party[p] || 0;
+                            const pct = casteDetailData.totalVoters > 0 ? (count / casteDetailData.totalVoters) * 100 : 0;
+                            if (pct <= 0) return null;
                             return (
-                              <div 
-                                key={slotKey} 
-                                className="p-3 bg-white border border-slate-100 rounded-xl hover:border-slate-300 transition-all flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs"
+                              <div
+                                key={p}
+                                className="h-full transition-all duration-300 relative hover:brightness-95 flex items-center justify-center text-[10px] font-black text-white"
+                                style={{
+                                  width: `${pct}%`,
+                                  backgroundColor: PARTY_COLORS[p]
+                                }}
+                                title={`${p}: ${count} (${Math.round(pct)}%)`}
                               >
-                                <div className="space-y-0.5">
-                                  <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">
-                                    Cluster Incharge Position #{sIdx + 1}
-                                  </span>
-                                  {isEditingThis ? (
-                                    <div className="flex items-center gap-2 mt-2">
-                                      <input
-                                        type="text"
-                                        value={editingSlotName}
-                                        onChange={(e) => setEditingSlotName(e.target.value)}
-                                        placeholder="Full Name of Incharge"
-                                        className="px-2 py-1 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:border-yellow-400 w-full sm:w-[220px]"
-                                      />
-                                      <button
-                                        onClick={() => handleSaveSlot(slotKey, editingSlotName)}
-                                        className="p-1 bg-slate-950 text-white rounded hover:bg-slate-800 transition-all cursor-pointer"
-                                        title="Save"
-                                      >
-                                        <Check className="w-4 h-4" />
-                                      </button>
-                                      <button
-                                        onClick={() => setEditingSlotKey(null)}
-                                        className="p-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition-all cursor-pointer"
-                                        title="Cancel"
-                                      >
-                                        <X className="w-4 h-4" />
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <p className={`text-xs font-extrabold mt-1 ${assignedName ? 'text-slate-900 uppercase' : 'text-slate-400 italic'}`}>
-                                      {assignedName || 'NOT ASSIGNED'}
-                                    </p>
-                                  )}
-                                </div>
-
-                                {!isEditingThis && (
-                                  <button
-                                    onClick={() => {
-                                      setEditingSlotKey(slotKey);
-                                      setEditingSlotName(assignedName || '');
-                                    }}
-                                    className="px-2.5 py-1 text-[10px] font-black border border-slate-200 hover:border-yellow-400 text-slate-700 hover:text-slate-900 bg-slate-50 hover:bg-white rounded-lg transition-all text-center self-start sm:self-center"
-                                  >
-                                    {assignedName ? 'Edit Name' : 'Assign Position'}
-                                  </button>
-                                )}
+                                {pct > 8 && `${PARTY_NAMES[p]} (${Math.round(pct)}%)`}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 text-center text-[10px] font-bold">
+                          {(Object.keys(PARTY_COLORS) as VoterPreference[]).map(p => {
+                            const count = casteDetailData.party[p] || 0;
+                            return (
+                              <div key={p} className="bg-white border border-slate-200 rounded p-1.5">
+                                <span className="inline-block w-2 h-2 rounded-sm mr-1" style={{ backgroundColor: PARTY_COLORS[p] }}></span>
+                                <span className="text-slate-500">{PARTY_NAMES[p]}:</span> <span className="text-slate-800 font-black">{count}</span>
                               </div>
                             );
                           })}
                         </div>
                       </div>
 
+                      {/* Village-wise Breakdown Table */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">Village-wise Distribution</h4>
+                          <span className="text-[10px] text-slate-400 font-semibold">Ordered by highest caste concentration</span>
+                        </div>
+
+                        <div className="border border-slate-150 rounded-xl overflow-hidden bg-white shadow-sm">
+                          <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 border-b border-slate-150 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                                <th className="p-3">Village Name</th>
+                                <th className="p-3 text-center">Caste Voters</th>
+                                <th className="p-3 text-center">TDP Support</th>
+                                <th className="p-3 text-center">YSRCP Support</th>
+                                <th className="p-3 text-center">Neutral Support</th>
+                                <th className="p-3 text-center">Leading Party</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 text-xs">
+                              {casteDetailData.villages.map(v => {
+                                if (v.total === 0) return null;
+                                return (
+                                  <tr key={v.villageName} className="hover:bg-slate-50/50 font-semibold">
+                                    <td className="p-3 font-extrabold text-slate-900">{v.villageName}</td>
+                                    <td className="p-3 text-center font-bold text-slate-700">{v.total.toLocaleString()}</td>
+                                    <td className="p-3 text-center text-yellow-600 font-extrabold">{v.tdp}</td>
+                                    <td className="p-3 text-center text-blue-600 font-extrabold">{v.ysrcp}</td>
+                                    <td className="p-3 text-center text-slate-500 font-bold">{v.neutral}</td>
+                                    <td className="p-3 text-center">
+                                      {v.leadingParty === 'TDP' && (
+                                        <span className="px-2 py-0.5 rounded bg-yellow-50 text-yellow-700 border border-yellow-100 text-[10px] font-black">
+                                          TDP LEADING
+                                        </span>
+                                      )}
+                                      {v.leadingParty === 'YSRCP' && (
+                                        <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100 text-[10px] font-black">
+                                          YSRCP LEADING
+                                        </span>
+                                      )}
+                                      {v.leadingParty === 'TIE' && (
+                                        <span className="px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 text-[10px] font-black">
+                                          TIE
+                                        </span>
+                                      )}
+                                      {v.leadingParty === 'Neutral' && (
+                                        <span className="px-2 py-0.5 rounded bg-slate-50 text-slate-700 border border-slate-200 text-[10px] font-black">
+                                          NEUTRAL
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Footer */}
+                    {/* Modal Footer */}
                     <div className="bg-slate-50 border-t border-slate-100 px-6 py-4 flex justify-end">
-                      <button 
-                        onClick={() => {
-                          setSelectedBoothCadreNum(null);
-                          setEditingSlotKey(null);
-                          setEditingInchargeBooth(null);
-                        }}
-                        className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-black text-xs rounded-lg active:scale-95 transition-all shadow"
+                      <button
+                        onClick={() => setActiveCasteDetail(null)}
+                        className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-black text-xs rounded-lg active:scale-95 transition-all shadow cursor-pointer"
                       >
-                        Close Detail View
+                        Close Profile
                       </button>
                     </div>
                   </div>
                 </div>
-              );
-            })()}
+              )}
 
-          </div>
-        )}
-
-        {/* --------------------------------------------------------
-            TAB 9: TRAINING VIDEOS PANEL
-           -------------------------------------------------------- */}
-        {activeTab === 'training' && (
-          <div className="space-y-5 animate-fade-in" id="village-training-view">
-            
-            <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
-              <h2 className="text-lg font-black text-slate-900">Cadre Operations Training Library</h2>
-              <p className="text-xs text-slate-400 font-semibold mt-0.5">Instructional briefs and capability guidelines for election-day actions</p>
             </div>
+          )}
 
-            {/* Video grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5" id="videos-grid">
-              {trainingVideos.map((video) => {
-                const progress = trainingProgress[video.id];
-                const progressLabel = progress?.status === 'COMPLETED'
-                  ? 'Completed'
-                  : progress?.status === 'WATCHED'
-                    ? 'Watched'
-                    : progress?.status === 'ASSIGNED'
-                      ? 'Assigned'
-                      : 'Not Started';
+          {/* --------------------------------------------------------
+            TAB 8: CADRE NETWORK VIEW
+           -------------------------------------------------------- */}
+          {activeTab === 'cadre_network' && (
+            <div className="space-y-6 animate-fade-in" id="village-cadre-network-view">
 
-                return (
-                <div key={video.id} className="bg-white border border-slate-100 rounded-xl overflow-hidden shadow-sm flex flex-col justify-between hover:shadow-md transition-all">
-                  
-                  {/* Thumbnail / Duration */}
-                  <div className="relative aspect-video bg-slate-900">
-                    <img 
-                      referrerPolicy="no-referrer"
-                      src={video.thumbnailUrl} 
-                      alt={video.title} 
-                      className="w-full h-full object-cover opacity-80"
-                    />
-                    <div className="absolute inset-0 bg-slate-950/20"></div>
-                    <span className="absolute bottom-2.5 right-2.5 bg-slate-950/80 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase">
-                      {video.duration}
-                    </span>
+              {/* 1. Page Header */}
+              <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-2">
+                <span className="text-[10px] font-black tracking-widest text-yellow-600 uppercase">
+                  {constituencyDisplayName ? `${constituencyDisplayName} Assembly Constituency` : 'Assignment needs configuration'}
+                </span>
+                <h2 className="text-xl font-black text-slate-950 uppercase tracking-tight">
+                  {mandalDisplayName ? `${mandalDisplayName} Mandal Cadre Network` : 'Mandal Cadre Network'}
+                </h2>
+                <p className="text-xs text-slate-500 font-bold">Organizational hierarchy, team coverage, and booth cadre assignments</p>
+              </div>
+
+              {/* 2. Top Summary Cards (Grid) */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" id="cadre-summary-grid">
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700 shrink-0">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Total Voters</span>
+                    <span className="text-xl font-black text-slate-950">{totalVotersCount.toLocaleString()}</span>
+                  </div>
+                </div>
+
+                <div className="bg-blue-50/40 border border-blue-200 rounded-xl p-4 shadow-sm flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                    <MapPin className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-black text-blue-700 uppercase tracking-wider block">Total Booths</span>
+                    <span className="text-xl font-black text-blue-800">{VERIFIED_BOOTHS_DATA.length} Booths</span>
+                  </div>
+                </div>
+
+                <div className="bg-purple-50/40 border border-purple-200 rounded-xl p-4 shadow-sm flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-600 shrink-0">
+                    <User className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-black text-purple-700 uppercase tracking-wider block">Booth Incharges</span>
+                    <span className="text-xl font-black text-purple-800">{VERIFIED_BOOTHS_DATA.length} Positions</span>
+                  </div>
+                </div>
+
+                <div className="bg-amber-50/50 border border-amber-200 rounded-xl p-4 shadow-sm flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-500 shrink-0">
+                    <CheckCircle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-black text-amber-700 uppercase tracking-wider block">100-Voter Incharges</span>
+                    <span className="text-xl font-black text-amber-600">{Math.ceil(totalVotersCount / 100) || 0} Slots</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Team Strength Summary & Breakdown Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5" id="team-strength-breakdown">
+                <div className="bg-amber-50/50 border border-amber-200 rounded-xl p-5 shadow-sm space-y-4">
+                  <div className="border-b border-amber-200/60 pb-2">
+                    <h3 className="text-xs font-black text-amber-800 uppercase tracking-widest">Field Team Strength</h3>
+                    <p className="text-[11px] text-amber-700/80 mt-0.5">Grassroots field cadre operations team</p>
+                  </div>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-4xl font-black text-amber-500">583</span>
+                    <span className="text-[10px] font-black text-amber-600 uppercase tracking-wide">Active Field Members</span>
+                  </div>
+                  <div className="bg-white/80 rounded-xl p-3 border border-amber-200 space-y-1">
+                    <div className="flex justify-between text-xs font-bold">
+                      <span className="text-slate-500">Booth Incharges:</span>
+                      <span className="text-amber-600 font-black text-sm">60</span>
+                    </div>
+                    <div className="flex justify-between text-xs font-bold">
+                      <span className="text-slate-500">100-Voter Incharges:</span>
+                      <span className="text-amber-600 font-black text-sm">523</span>
+                    </div>
+                    <div className="pt-2 border-t border-amber-200 flex justify-between text-xs font-black text-slate-700">
+                      <span>Calculation:</span>
+                      <span className="text-amber-600 font-black">60 + 523 = 583</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50/50 border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+                  <div className="border-b border-slate-200/60 pb-2">
+                    <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Total Mandal Team Strength</h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">End-to-end constituency hierarchy team size</p>
+                  </div>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-4xl font-black text-slate-900">584</span>
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-wide">Total Mandal Team</span>
+                  </div>
+                  <div className="bg-white/80 rounded-xl p-3 border border-slate-200 space-y-1">
+                    <div className="flex justify-between text-xs font-bold">
+                      <span className="text-slate-500">Mandal Incharge:</span>
+                      <span className="text-slate-900 font-black text-sm">1</span>
+                    </div>
+                    <div className="flex justify-between text-xs font-bold">
+                      <span className="text-slate-500">Booth Incharges:</span>
+                      <span className="text-slate-900 font-black text-sm">60</span>
+                    </div>
+                    <div className="flex justify-between text-xs font-bold">
+                      <span className="text-slate-500">100-Voter Incharges:</span>
+                      <span className="text-slate-900 font-black text-sm">523</span>
+                    </div>
+                    <div className="pt-2 border-t border-slate-200 flex justify-between text-xs font-black text-slate-700">
+                      <span>Calculation:</span>
+                      <span className="text-slate-900 font-black">1 + 60 + 523 = 584</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Organization Tree Hierarchy */}
+              <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-5">
+                <div className="border-b border-slate-100 pb-3">
+                  <h3 className="text-sm font-black text-slate-950 uppercase tracking-wider">Mandal Command Structure</h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Strict hierarchical visualization of {mandalDisplayName ? `${mandalDisplayName} command flow` : 'Mandal command flow'}</p>
+                </div>
+
+                <div className="flex flex-col items-center justify-center space-y-4 max-w-2xl mx-auto py-2">
+                  {/* Level 1: Mandal Incharge */}
+                  <div className="bg-slate-900 text-white rounded-xl p-4 w-full max-w-sm text-center border-2 border-yellow-400 shadow relative">
+                    <span className="text-[8px] tracking-wider uppercase font-black bg-yellow-400 text-slate-950 px-2 py-0.5 rounded absolute -top-2.5 left-1/2 -translate-x-1/2">Level 1</span>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-yellow-400">Mandal Incharge</h4>
+                    <p className="text-sm font-black mt-1">{mandalDisplayName ? `${mandalDisplayName} Mandal Head` : 'Mandal Head'}</p>
+                    <p className="text-[10px] text-slate-400 font-bold mt-1">Coverage: {VERIFIED_BOOTHS_DATA.length} Booths | {totalVotersCount.toLocaleString()} Voters</p>
                   </div>
 
-                  {/* Body */}
-                  <div className="p-4 space-y-2 flex-1 flex flex-col justify-between">
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[8px] bg-yellow-400/10 text-yellow-600 border border-yellow-400/20 px-2 py-0.5 rounded uppercase tracking-wider font-extrabold">
-                          {video.category}
-                        </span>
-                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${
-                          progress?.status === 'COMPLETED'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : progress?.status === 'WATCHED'
-                              ? 'bg-blue-100 text-blue-700'
-                              : progress?.status === 'ASSIGNED'
-                                ? 'bg-amber-100 text-amber-700'
-                                : 'bg-slate-100 text-slate-500'
-                        }`}>
-                          {progressLabel}
-                        </span>
+                  {/* Arrow */}
+                  <div className="flex flex-col items-center">
+                    <div className="w-0.5 h-6 bg-slate-300"></div>
+                    <div className="w-2 h-2 rounded-full bg-yellow-500 -mt-1"></div>
+                  </div>
+
+                  {/* Level 2: Booth Incharges */}
+                  <div className="bg-white border-2 border-slate-900 rounded-xl p-4 w-full max-w-sm text-center shadow relative">
+                    <span className="text-[8px] tracking-wider uppercase font-black bg-slate-900 text-white px-2 py-0.5 rounded absolute -top-2.5 left-1/2 -translate-x-1/2">Level 2</span>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-900">Booth Incharges</h4>
+                    <p className="text-sm font-black mt-1">{VERIFIED_BOOTHS_DATA.length} Polling Station Leaders</p>
+                    <p className="text-[10px] text-slate-500 font-bold mt-1">1 Assigned per Booth | Direct Field Management</p>
+                  </div>
+
+                  {/* Arrow */}
+                  <div className="flex flex-col items-center">
+                    <div className="w-0.5 h-6 bg-slate-300"></div>
+                    <div className="w-2 h-2 rounded-full bg-yellow-500 -mt-1"></div>
+                  </div>
+
+                  {/* Level 3: 100-Voter Incharges */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 w-full max-w-sm text-center shadow-sm relative">
+                    <span className="text-[8px] tracking-wider uppercase font-black bg-slate-100 text-slate-600 px-2 py-0.5 rounded absolute -top-2.5 left-1/2 -translate-x-1/2">Level 3</span>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-yellow-600">100-Voter Incharges</h4>
+                    <p className="text-sm font-black mt-1">{Math.ceil(totalVotersCount / 100) || 0} Cluster Leaders</p>
+                    <p className="text-[10px] text-slate-500 font-bold mt-1">
+                      {totalAssignedV100} / {Math.ceil(totalVotersCount / 100) || 0} Slots Filled ({Math.ceil(totalVotersCount / 100) > 0 ? Math.round((totalAssignedV100 / Math.ceil(totalVotersCount / 100)) * 100) : 0}%)
+                    </p>
+                  </div>
+
+                  {/* Arrow */}
+                  <div className="flex flex-col items-center">
+                    <div className="w-0.5 h-6 bg-slate-300"></div>
+                    <div className="w-2 h-2 rounded-full bg-yellow-500 -mt-1"></div>
+                  </div>
+
+                  {/* Level 4: Registered Voters */}
+                  <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5 w-full max-w-sm text-center relative">
+                    <span className="text-[8px] tracking-wider uppercase font-black bg-slate-200 text-slate-600 px-2 py-0.5 rounded absolute -top-2.5 left-1/2 -translate-x-1/2">Level 4</span>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-500">Registered Voters</h4>
+                    <p className="text-sm font-black text-slate-800">{totalVotersCount.toLocaleString()} Voters</p>
+                    <p className="text-[10px] text-slate-400 font-bold mt-0.5">Strict Electoral Roll Reconciliation</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 5. Search, Filter & Booth Directory Table */}
+              <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-sm font-black text-slate-950 uppercase tracking-wider">Booth Cadre Directory</h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Search and filter assignment statuses across all {VERIFIED_BOOTHS_DATA.length} booths</p>
+                  </div>
+
+                  {/* Controls */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    {/* Search */}
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        value={cadreSearchQuery}
+                        onChange={(e) => setCadreSearchQuery(e.target.value)}
+                        placeholder="Search Booth Number..."
+                        className="pl-9 pr-4 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-yellow-400 w-full sm:w-[200px]"
+                      />
+                      {cadreSearchQuery && (
+                        <button
+                          onClick={() => setCadreSearchQuery('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-slate-400 hover:text-slate-600"
+                        >
+                          CLEAR
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Filters */}
+                    <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                      <button
+                        onClick={() => setCadreFilter('all')}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${cadreFilter === 'all' ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                      >
+                        ALL (60)
+                      </button>
+                      <button
+                        onClick={() => setCadreFilter('fully')}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${cadreFilter === 'fully' ? 'bg-emerald-500 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                      >
+                        FULLY
+                      </button>
+                      <button
+                        onClick={() => setCadreFilter('partially')}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${cadreFilter === 'partially' ? 'bg-amber-500 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                      >
+                        PARTIAL
+                      </button>
+                      <button
+                        onClick={() => setCadreFilter('not_assigned')}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${cadreFilter === 'not_assigned' ? 'bg-rose-500 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                      >
+                        EMPTY
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Directory Table */}
+                <div className="border border-slate-150 rounded-xl overflow-hidden shadow-xs bg-white">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-150 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                        <th className="p-3">Booth No.</th>
+                        <th className="p-3 text-center">Total Voters</th>
+                        <th className="p-3">Booth Incharge</th>
+                        <th className="p-3">Mobile</th>
+                        <th className="p-3 text-center">100-Voter Incharges</th>
+                        <th className="p-3 text-center">Assignment Status</th>
+                        <th className="p-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs font-semibold">
+                      {VERIFIED_BOOTHS_DATA.filter((b, idx) => {
+                        // Apply search
+                        if (cadreSearchQuery.trim() !== '') {
+                          const q = cadreSearchQuery.toLowerCase();
+                          const numMatch = b.boothNumber.toString().includes(q) || `booth ${b.boothNumber}`.includes(q);
+                          const incMatch = (boothInchargeOverrides[b.boothNumber]?.name || boothIncharges[idx]?.name || '').toLowerCase().includes(q);
+                          if (!numMatch && !incMatch) return false;
+                        }
+
+                        // Apply filter
+                        const assignedCount = getBoothAssignedSlotsCount(b.boothNumber, b.v100InchargesCount);
+                        const isFully = assignedCount === b.v100InchargesCount;
+                        const isPart = assignedCount > 0 && assignedCount < b.v100InchargesCount;
+                        const isNone = assignedCount === 0;
+
+                        if (cadreFilter === 'fully' && !isFully) return false;
+                        if (cadreFilter === 'partially' && !isPart) return false;
+                        if (cadreFilter === 'not_assigned' && !isNone) return false;
+
+                        return true;
+                      }).map((b) => {
+                        const idx = b.boothNumber - 224;
+                        const inc = getBoothInchargeDetails(b.boothNumber, idx);
+                        const assignedSlots = getBoothAssignedSlotsCount(b.boothNumber, b.v100InchargesCount);
+
+                        let statusBadge = "bg-rose-50 text-rose-700 border-rose-100";
+                        let statusText = "NOT ASSIGNED";
+                        if (assignedSlots === b.v100InchargesCount) {
+                          statusBadge = "bg-emerald-50 text-emerald-700 border-emerald-100";
+                          statusText = "FULLY ASSIGNED";
+                        } else if (assignedSlots > 0) {
+                          statusBadge = "bg-amber-50 text-amber-700 border-amber-100";
+                          statusText = "PARTIALLY ASSIGNED";
+                        }
+
+                        return (
+                          <tr key={b.boothNumber} className="hover:bg-slate-50/50">
+                            <td className="p-3 font-extrabold text-slate-900">Booth {b.boothNumber}</td>
+                            <td className="p-3 text-center text-slate-600 font-bold">{b.totalVoters.toLocaleString()}</td>
+                            <td className="p-3 font-extrabold text-slate-800 uppercase">{inc.name}</td>
+                            <td className="p-3 text-slate-500 font-medium">{inc.mobile}</td>
+                            <td className="p-3 text-center text-slate-700 font-bold">
+                              {assignedSlots} / {b.v100InchargesCount}
+                            </td>
+                            <td className="p-3 text-center">
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-black border uppercase tracking-wider ${statusBadge}`}>
+                                {statusText}
+                              </span>
+                            </td>
+                            <td className="p-3 text-right">
+                              <button
+                                onClick={() => setSelectedBoothCadreNum(b.boothNumber)}
+                                className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black rounded-lg transition-all"
+                              >
+                                View Cadre
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* 6. Interactive BOOTH CADRE DETAIL Overlay Modal */}
+              {selectedBoothCadreNum !== null && (() => {
+                const b = VERIFIED_BOOTHS_DATA.find(x => x.boothNumber === selectedBoothCadreNum)!;
+                const idx = b.boothNumber - 224;
+                const inc = getBoothInchargeDetails(b.boothNumber, idx);
+                const assignedSlots = getBoothAssignedSlotsCount(b.boothNumber, b.v100InchargesCount);
+                const progressPct = Math.round((assignedSlots / b.v100InchargesCount) * 100);
+
+                return (
+                  <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
+                    <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-scale-up">
+                      {/* Header */}
+                      <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-yellow-400 tracking-widest block">Booth Cadre Management</span>
+                          <h3 className="text-lg font-black tracking-tight">BOOTH {b.boothNumber} CADRE DETAIL</h3>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setSelectedBoothCadreNum(null);
+                            setEditingSlotKey(null);
+                            setEditingInchargeBooth(null);
+                          }}
+                          className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800 transition-colors"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
                       </div>
-                      <h4 className="text-xs font-black text-slate-950 leading-snug">{video.title}</h4>
-                      <p className="text-[11px] text-slate-400 leading-relaxed font-semibold">
-                        {video.description}
+
+                      {/* Body */}
+                      <div className="p-6 overflow-y-auto space-y-6">
+
+                        {/* Booth Head Profile */}
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-4">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">Booth Incharge profile</h4>
+                            {editingInchargeBooth !== b.boothNumber ? (
+                              <button
+                                onClick={() => {
+                                  setEditingInchargeBooth(b.boothNumber);
+                                  setEditingInchargeName(inc.name === 'NOT ASSIGNED' ? '' : inc.name);
+                                  setEditingInchargeMobile(inc.mobile === 'NOT ASSIGNED' ? '' : inc.mobile);
+                                }}
+                                className="text-[10px] font-black text-yellow-600 hover:text-yellow-700 uppercase flex items-center gap-1"
+                              >
+                                <Edit2 className="w-3 h-3" /> Edit Incharge
+                              </button>
+                            ) : null}
+                          </div>
+
+                          {editingInchargeBooth === b.boothNumber ? (
+                            <div className="bg-white p-4 rounded-lg border border-slate-200 space-y-3">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Edit Booth Incharge Details</p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <input
+                                  type="text"
+                                  value={editingInchargeName}
+                                  onChange={(e) => setEditingInchargeName(e.target.value)}
+                                  placeholder="Incharge Full Name"
+                                  className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:border-yellow-400 w-full"
+                                />
+                                <input
+                                  type="text"
+                                  value={editingInchargeMobile}
+                                  onChange={(e) => setEditingInchargeMobile(e.target.value)}
+                                  placeholder="Mobile Number"
+                                  className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:border-yellow-400 w-full"
+                                />
+                              </div>
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  onClick={() => setEditingInchargeBooth(null)}
+                                  className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-xs font-black uppercase"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={() => handleSaveBoothIncharge(b.boothNumber, editingInchargeName, editingInchargeMobile)}
+                                  className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded text-xs font-black uppercase"
+                                >
+                                  Save
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                              <div className="space-y-1">
+                                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Booth Leader Name:</span>
+                                <span className="font-extrabold text-slate-900 uppercase">{inc.name}</span>
+                              </div>
+                              <div className="space-y-1">
+                                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Mobile Contact:</span>
+                                <span className="font-extrabold text-slate-700">{inc.mobile}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Stat summary */}
+                        <div className="grid grid-cols-3 gap-4 text-center">
+                          <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                            <span className="text-[9px] text-slate-400 font-bold uppercase block">Registered Voters</span>
+                            <span className="text-base font-black text-slate-800">{b.totalVoters.toLocaleString()}</span>
+                          </div>
+                          <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                            <span className="text-[9px] text-slate-400 font-bold uppercase block">Allocated Clusters</span>
+                            <span className="text-base font-black text-slate-800">{b.v100InchargesCount}</span>
+                          </div>
+                          <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                            <span className="text-[9px] text-slate-400 font-bold uppercase block">Filled Clusters</span>
+                            <span className="text-base font-black text-yellow-600">{assignedSlots}</span>
+                          </div>
+                        </div>
+
+                        {/* Progress bar */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+                            <span>Cadre Assignment Progress</span>
+                            <span>{progressPct}% ({assignedSlots} / {b.v100InchargesCount} Filled)</span>
+                          </div>
+                          <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                            <div
+                              className="h-full bg-yellow-400 rounded-full transition-all duration-300"
+                              style={{ width: `${progressPct}%` }}
+                            ></div>
+                          </div>
+                        </div>
+
+                        {/* 100-Voter Positions Directory */}
+                        <div className="space-y-3">
+                          <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-1">
+                            100-Voter Incharge Positions Directory
+                          </h4>
+
+                          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                            {Array.from({ length: b.v100InchargesCount }).map((_, sIdx) => {
+                              const slotKey = `${b.boothNumber}-${sIdx}`;
+                              const assignedName = cadreAssignments[slotKey];
+                              const isEditingThis = editingSlotKey === slotKey;
+
+                              return (
+                                <div
+                                  key={slotKey}
+                                  className="p-3 bg-white border border-slate-100 rounded-xl hover:border-slate-300 transition-all flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs"
+                                >
+                                  <div className="space-y-0.5">
+                                    <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">
+                                      Cluster Incharge Position #{sIdx + 1}
+                                    </span>
+                                    {isEditingThis ? (
+                                      <div className="flex items-center gap-2 mt-2">
+                                        <input
+                                          type="text"
+                                          value={editingSlotName}
+                                          onChange={(e) => setEditingSlotName(e.target.value)}
+                                          placeholder="Full Name of Incharge"
+                                          className="px-2 py-1 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:border-yellow-400 w-full sm:w-[220px]"
+                                        />
+                                        <button
+                                          onClick={() => handleSaveSlot(slotKey, editingSlotName)}
+                                          className="p-1 bg-slate-950 text-white rounded hover:bg-slate-800 transition-all cursor-pointer"
+                                          title="Save"
+                                        >
+                                          <Check className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                          onClick={() => setEditingSlotKey(null)}
+                                          className="p-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition-all cursor-pointer"
+                                          title="Cancel"
+                                        >
+                                          <X className="w-4 h-4" />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <p className={`text-xs font-extrabold mt-1 ${assignedName ? 'text-slate-900 uppercase' : 'text-slate-400 italic'}`}>
+                                        {assignedName || 'NOT ASSIGNED'}
+                                      </p>
+                                    )}
+                                  </div>
+
+                                  {!isEditingThis && (
+                                    <button
+                                      onClick={() => {
+                                        setEditingSlotKey(slotKey);
+                                        setEditingSlotName(assignedName || '');
+                                      }}
+                                      className="px-2.5 py-1 text-[10px] font-black border border-slate-200 hover:border-yellow-400 text-slate-700 hover:text-slate-900 bg-slate-50 hover:bg-white rounded-lg transition-all text-center self-start sm:self-center"
+                                    >
+                                      {assignedName ? 'Edit Name' : 'Assign Position'}
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                      </div>
+
+                      {/* Footer */}
+                      <div className="bg-slate-50 border-t border-slate-100 px-6 py-4 flex justify-end">
+                        <button
+                          onClick={() => {
+                            setSelectedBoothCadreNum(null);
+                            setEditingSlotKey(null);
+                            setEditingInchargeBooth(null);
+                          }}
+                          className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-black text-xs rounded-lg active:scale-95 transition-all shadow"
+                        >
+                          Close Detail View
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+            </div>
+          )}
+
+          {/* --------------------------------------------------------
+            TAB 9: TRAINING VIDEOS PANEL
+           -------------------------------------------------------- */}
+          {activeTab === 'training' && (
+            <div className="space-y-5 animate-fade-in" id="village-training-view">
+
+              <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
+                <h2 className="text-lg font-black text-slate-900">Cadre Operations Training Library</h2>
+                <p className="text-xs text-slate-400 font-semibold mt-0.5">Instructional briefs and capability guidelines for election-day actions</p>
+              </div>
+
+              {/* Video grid / State Handlers */}
+              {isTrainingLoading ? (
+                <div className="bg-white border border-slate-100 rounded-2xl p-12 text-center space-y-3 shadow-sm">
+                  <RefreshCw className="w-8 h-8 text-yellow-500 animate-spin mx-auto" />
+                  <p className="text-sm font-black text-slate-900 uppercase tracking-wide">Loading Training Curriculum...</p>
+                  <p className="text-xs text-slate-400 font-semibold">Retrieving authorized training video modules for this Mandal</p>
+                </div>
+              ) : trainingError ? (
+                <div className="bg-white border border-rose-100 rounded-2xl p-10 text-center space-y-4 shadow-sm">
+                  <div className="w-12 h-12 bg-rose-50 text-rose-600 border border-rose-200 rounded-full flex items-center justify-center mx-auto">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-base font-black text-slate-900 uppercase">Unable to Load Training Modules</h3>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">{trainingError}</p>
+                  </div>
+                  <button
+                    onClick={retryTraining}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Retry Loading</span>
+                  </button>
+                </div>
+              ) : trainingVideos.length === 0 ? (
+                <div className="bg-white border border-slate-100 rounded-2xl p-12 text-center space-y-4 shadow-sm">
+                  <div className="w-14 h-14 bg-amber-50 text-amber-500 border border-amber-200 rounded-2xl flex items-center justify-center mx-auto">
+                    <GraduationCap className="w-7 h-7" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-base font-black text-slate-900 uppercase">No Training Videos Configured</h3>
+                    <p className="text-xs text-slate-400 font-semibold max-w-md mx-auto">
+                      No training modules are currently configured for this Mandal. Instructional materials will appear here once published by leadership.
+                    </p>
+                  </div>
+                  <button
+                    onClick={retryTraining}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Check For Updates</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5" id="videos-grid">
+                  {trainingVideos.map((video) => {
+                    const progress = trainingProgress[video.id];
+                    const progressLabel = progress?.status === 'COMPLETED'
+                      ? 'Completed'
+                      : progress?.status === 'WATCHED'
+                        ? 'Watched'
+                        : progress?.status === 'ASSIGNED'
+                          ? 'Assigned'
+                          : 'Not Started';
+
+                    return (
+                      <div key={video.id} className="bg-white border border-slate-100 rounded-xl overflow-hidden shadow-sm flex flex-col justify-between hover:shadow-md transition-all">
+
+                        {/* Thumbnail / Duration */}
+                        <div className="relative aspect-video bg-slate-900">
+                          <img
+                            referrerPolicy="no-referrer"
+                            src={video.thumbnailUrl}
+                            alt={video.title}
+                            className="w-full h-full object-cover opacity-80"
+                          />
+                          <div className="absolute inset-0 bg-slate-950/20"></div>
+                          <span className="absolute bottom-2.5 right-2.5 bg-slate-950/80 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase">
+                            {video.duration}
+                          </span>
+                        </div>
+
+                        {/* Body */}
+                        <div className="p-4 space-y-2 flex-1 flex flex-col justify-between">
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[8px] bg-yellow-400/10 text-yellow-600 border border-yellow-400/20 px-2 py-0.5 rounded uppercase tracking-wider font-extrabold">
+                                {video.category}
+                              </span>
+                              <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${progress?.status === 'COMPLETED'
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : progress?.status === 'WATCHED'
+                                    ? 'bg-blue-100 text-blue-700'
+                                    : progress?.status === 'ASSIGNED'
+                                      ? 'bg-amber-100 text-amber-700'
+                                      : 'bg-slate-100 text-slate-500'
+                                }`}>
+                                {progressLabel}
+                              </span>
+                            </div>
+                            <h4 className="text-xs font-black text-slate-950 leading-snug">{video.title}</h4>
+                            <p className="text-[11px] text-slate-400 leading-relaxed font-semibold">
+                              {video.description}
+                            </p>
+                          </div>
+
+                          <button
+                            onClick={() => handleWatchTraining(video)}
+                            className="w-full mt-3 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-black rounded-lg transition-all text-center uppercase cursor-pointer"
+                          >
+                            Watch Training Clip
+                          </button>
+                        </div>
+
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+            </div>
+          )}
+
+          {/* --------------------------------------------------------
+            TAB 10: TRAINING ANALYTICS PANEL
+           -------------------------------------------------------- */}
+          {activeTab === 'training_analytics' && (
+            <div className="space-y-6 animate-fade-in" id="mandal-training-analytics">
+              <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
+                <h2 className="text-lg font-black text-slate-900 uppercase">Cadre Training &amp; Analytics Dashboard</h2>
+                <p className="text-xs text-slate-400 font-semibold mt-0.5">Real-time completion metrics, performance indices, and village-wise status for {session.assignedMandal || config.organisationName || 'Mandal'}</p>
+              </div>
+
+              {/* Dynamic metrics computed from real cadre data */}
+              {(() => {
+                const totalCadre = cadreItems.length;
+                const trainedCadre = cadreItems.filter(c => (c.performanceScore || 0) > 50 || (c.completedTraining || 0) > 0).length;
+                const completionRate = totalCadre > 0 ? ((trainedCadre / totalCadre) * 100).toFixed(1) : '0.0';
+                const hasData = totalCadre > 0;
+
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm">
+                      <p className="text-[9px] text-slate-400 font-black uppercase">Total Trained Cadre</p>
+                      <p className="text-xl font-black text-slate-900 mt-1">
+                        {trainedCadre} / {totalCadre}
+                      </p>
+                      <div className="w-full bg-slate-100 h-1.5 rounded-full mt-2 overflow-hidden">
+                        <div className="bg-yellow-400 h-full rounded-full" style={{ width: `${completionRate}%` }}></div>
+                      </div>
+                      <p className={`text-[10px] font-bold mt-2 ${hasData ? 'text-yellow-600' : 'text-slate-400'}`}>
+                        {hasData ? `${completionRate}% Completion Rate` : 'Awaiting Cadre Enrolment'}
                       </p>
                     </div>
 
-                    <button
-                      onClick={() => handleWatchTraining(video)}
-                      className="w-full mt-3 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-black rounded-lg transition-all text-center uppercase cursor-pointer"
-                    >
-                      Watch Training Clip
-                    </button>
-                  </div>
-
-                </div>
-              )})}
-            </div>
-
-          </div>
-        )}
-
-        {/* --------------------------------------------------------
-            TAB 10: TRAINING ANALYTICS PANEL
-           -------------------------------------------------------- */}
-        {activeTab === 'training_analytics' && (
-          <div className="space-y-6 animate-fade-in" id="mandal-training-analytics">
-            <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
-              <h2 className="text-lg font-black text-slate-900 uppercase">Cadre Training &amp; Analytics Dashboard</h2>
-              <p className="text-xs text-slate-400 font-semibold mt-0.5">Real-time completion metrics, performance indices, and village-wise status for {session.assignedMandal || config.organisationName || 'Mandal'}</p>
-            </div>
-
-            {/* Dynamic metrics computed from real cadre data */}
-            {(() => {
-              const totalCadre = cadreItems.length;
-              const trainedCadre = cadreItems.filter(c => (c.performanceScore || 0) > 50 || (c.completedTraining || 0) > 0).length;
-              const completionRate = totalCadre > 0 ? ((trainedCadre / totalCadre) * 100).toFixed(1) : '0.0';
-              const hasData = totalCadre > 0;
-
-              return (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm">
-                    <p className="text-[9px] text-slate-400 font-black uppercase">Total Trained Cadre</p>
-                    <p className="text-xl font-black text-slate-900 mt-1">
-                      {trainedCadre} / {totalCadre}
-                    </p>
-                    <div className="w-full bg-slate-100 h-1.5 rounded-full mt-2 overflow-hidden">
-                      <div className="bg-yellow-400 h-full rounded-full" style={{ width: `${completionRate}%` }}></div>
+                    <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm">
+                      <p className="text-[9px] text-slate-400 font-black uppercase">Total Video Brief Views</p>
+                      <p className="text-xl font-black text-slate-900 mt-1">{hasData ? `${trainedCadre * 3} Views` : '0 Views'}</p>
+                      <p className="text-[10px] text-slate-400 font-bold mt-2">{hasData ? 'Live Cadre Telemetry' : 'No views recorded'}</p>
                     </div>
-                    <p className={`text-[10px] font-bold mt-2 ${hasData ? 'text-yellow-600' : 'text-slate-400'}`}>
-                      {hasData ? `${completionRate}% Completion Rate` : 'Awaiting Cadre Enrolment'}
-                    </p>
-                  </div>
 
-                  <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm">
-                    <p className="text-[9px] text-slate-400 font-black uppercase">Total Video Brief Views</p>
-                    <p className="text-xl font-black text-slate-900 mt-1">{hasData ? `${trainedCadre * 3} Views` : '0 Views'}</p>
-                    <p className="text-[10px] text-slate-400 font-bold mt-2">{hasData ? 'Live Cadre Telemetry' : 'No views recorded'}</p>
-                  </div>
+                    <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm">
+                      <p className="text-[9px] text-slate-400 font-black uppercase">Compliance Rating</p>
+                      <p className="text-xl font-black text-slate-900 mt-1">{hasData ? `${completionRate}%` : '0.0%'}</p>
+                      <p className="text-[10px] text-slate-400 font-bold mt-2">{hasData ? 'Cadre field readiness index' : 'Awaiting training'}</p>
+                    </div>
 
-                  <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm">
-                    <p className="text-[9px] text-slate-400 font-black uppercase">Compliance Rating</p>
-                    <p className="text-xl font-black text-slate-900 mt-1">{hasData ? `${completionRate}%` : '0.0%'}</p>
-                    <p className="text-[10px] text-slate-400 font-bold mt-2">{hasData ? 'Cadre field readiness index' : 'Awaiting training'}</p>
+                    <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm">
+                      <p className="text-[9px] text-slate-400 font-black uppercase">Operational Drills</p>
+                      <p className="text-xs font-black text-slate-900 mt-1.5 uppercase">{hasData ? 'Active In-Field Protocol' : 'No Scheduled Drills'}</p>
+                      <p className="text-[10px] text-slate-400 font-bold mt-2">{session.assignedMandal || 'Mandal Command'}</p>
+                    </div>
                   </div>
+                );
+              })()}
 
-                  <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm">
-                    <p className="text-[9px] text-slate-400 font-black uppercase">Operational Drills</p>
-                    <p className="text-xs font-black text-slate-900 mt-1.5 uppercase">{hasData ? 'Active In-Field Protocol' : 'No Scheduled Drills'}</p>
-                    <p className="text-[10px] text-slate-400 font-bold mt-2">{session.assignedMandal || 'Mandal Command'}</p>
+              {/* Two-Column Detail Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+                {/* Progress Chart (Left 2 cols) */}
+                <div className="lg:col-span-2 bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4">
+                  <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider">Village-wise Cadre Training Coverage</h3>
+                  <div className="space-y-3.5">
+                    {villagesSource.length === 0 ? (
+                      <p className="text-xs text-slate-400 font-medium py-4 text-center">No village training records available.</p>
+                    ) : (
+                      villagesSource.map((v) => {
+                        const villageCadres = cadreItems.filter(c => (c.unitName || '').toLowerCase() === v.name.toLowerCase());
+                        const total = Math.max(1, villageCadres.length);
+                        const trained = villageCadres.filter(c => (c.performanceScore || 0) > 50).length;
+                        const pct = Math.round((trained / total) * 100);
+                        return (
+                          <div key={v.name} className="space-y-1">
+                            <div className="flex justify-between text-xs font-bold text-slate-700">
+                              <span className="uppercase">{v.name}</span>
+                              <span>{trained} / {total} Incharges ({pct}%)</span>
+                            </div>
+                            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                              <div className="bg-yellow-400 h-full rounded-full" style={{ width: `${pct}%` }}></div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
-              );
-            })()}
 
-            {/* Two-Column Detail Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              
-              {/* Progress Chart (Left 2 cols) */}
-              <div className="lg:col-span-2 bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4">
-                <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider">Village-wise Cadre Training Coverage</h3>
-                <div className="space-y-3.5">
-                  {villagesSource.length === 0 ? (
-                    <p className="text-xs text-slate-400 font-medium py-4 text-center">No village training records available.</p>
-                  ) : (
-                    villagesSource.map((v) => {
-                      const villageCadres = cadreItems.filter(c => (c.unitName || '').toLowerCase() === v.name.toLowerCase());
-                      const total = Math.max(1, villageCadres.length);
-                      const trained = villageCadres.filter(c => (c.performanceScore || 0) > 50).length;
-                      const pct = Math.round((trained / total) * 100);
-                      return (
-                        <div key={v.name} className="space-y-1">
-                          <div className="flex justify-between text-xs font-bold text-slate-700">
-                            <span className="uppercase">{v.name}</span>
-                            <span>{trained} / {total} Incharges ({pct}%)</span>
-                          </div>
-                          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                            <div className="bg-yellow-400 h-full rounded-full" style={{ width: `${pct}%` }}></div>
-                          </div>
+                {/* Status / Quick guidelines (Right 1 col) */}
+                <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4">
+                  <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider">Operations Checklist</h3>
+                  <div className="space-y-3">
+                    {[
+                      { title: "Voter Slip Distribution Flow", status: "Completed", desc: "Briefing on QR-coded slips scanning." },
+                      { title: "EVM Agent Challenge Protocols", status: "In Progress", desc: "Mock polls challenge form filling." },
+                      { title: "Voter Turnout Tracking", status: "Scheduled", desc: "Using live connect app to record 'VOTE DONE' stamps." },
+                      { title: "Fake Voter Objections Procedure", status: "Completed", desc: "Submitting Form-7 deletion requests." }
+                    ].map((item, i) => (
+                      <div key={i} className="p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-slate-900 leading-tight">{item.title}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${item.status === 'Completed' ? 'bg-green-50 text-green-700 border border-green-200' : item.status === 'In Progress' ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' : 'bg-slate-100 text-slate-600 border border-slate-200'}`}>{item.status}</span>
                         </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-              {/* Status / Quick guidelines (Right 1 col) */}
-              <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4">
-                <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider">Operations Checklist</h3>
-                <div className="space-y-3">
-                  {[
-                    { title: "Voter Slip Distribution Flow", status: "Completed", desc: "Briefing on QR-coded slips scanning." },
-                    { title: "EVM Agent Challenge Protocols", status: "In Progress", desc: "Mock polls challenge form filling." },
-                    { title: "Voter Turnout Tracking", status: "Scheduled", desc: "Using live connect app to record 'VOTE DONE' stamps." },
-                    { title: "Fake Voter Objections Procedure", status: "Completed", desc: "Submitting Form-7 deletion requests." }
-                  ].map((item, i) => (
-                    <div key={i} className="p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-slate-900 leading-tight">{item.title}</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${item.status === 'Completed' ? 'bg-green-50 text-green-700 border border-green-200' : item.status === 'In Progress' ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' : 'bg-slate-100 text-slate-600 border border-slate-200'}`}>{item.status}</span>
+                        <p className="text-[10px] text-slate-400 font-semibold">{item.desc}</p>
                       </div>
-                      <p className="text-[10px] text-slate-400 font-semibold">{item.desc}</p>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
 
+              </div>
             </div>
-          </div>
-        )}
+          )}
         </div>
       </main>
 
@@ -4564,14 +4906,14 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       {editingVoter && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" id="voter-edit-modal-wrapper">
           <div className="bg-white border border-slate-200 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-scale-up">
-            
+
             {/* Modal Header */}
             <div className="bg-slate-950 text-white p-4 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black uppercase tracking-wide">Edit Voter Profile</h3>
                 <p className="text-[10px] text-slate-400 font-semibold">{editingVoter.name} (Age {editingVoter.age}, {editingVoter.gender})</p>
               </div>
-              <button 
+              <button
                 onClick={() => setEditingVoter(null)}
                 className="p-1 text-slate-400 hover:text-white rounded"
               >
@@ -4581,10 +4923,10 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
 
             {/* Modal Form */}
             <form onSubmit={handleSaveVoterEdit} className="flex flex-col max-h-[85vh]">
-              
+
               {/* Scrollable form body */}
               <div className="p-6 space-y-4 overflow-y-auto" style={{ maxHeight: '60vh' }} id="modal-scrollable-body">
-                
+
                 {/* Info summary row */}
                 <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 grid grid-cols-2 gap-2 text-xs font-semibold text-slate-700">
                   <div>
@@ -4698,7 +5040,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 {/* Section 4: Caste verification with critical warning */}
                 <div className="border-b border-slate-100 pb-3 space-y-3">
                   <h4 className="text-[10px] font-black uppercase text-slate-800 tracking-wider">4. Caste & Demographics</h4>
-                  
+
                   {/* Warning banner */}
                   <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-[10px] font-bold text-red-700 leading-normal flex items-start gap-2">
                     <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" id="alert-icon-edit-modal" />
@@ -4735,7 +5077,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 {/* Section 5: Live Voter Tracking on Election Day */}
                 <div className="border-b border-slate-100 pb-3 space-y-3">
                   <h4 className="text-[10px] font-black uppercase text-slate-800 tracking-wider">5. Election Day Live Track</h4>
-                  
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Vote Done Status</label>
@@ -4831,7 +5173,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       {watchingVideo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" id="video-modal-wrapper">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-scale-up">
-            
+
             {/* Header */}
             <div className="bg-slate-950 text-white p-4 flex items-center justify-between">
               <div>
@@ -4840,7 +5182,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 </span>
                 <h3 className="text-xs font-black mt-1 uppercase truncate">{watchingVideo.title}</h3>
               </div>
-              <button 
+              <button
                 onClick={() => setWatchingVideo(null)}
                 className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white"
               >
@@ -4868,7 +5210,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                 {watchingVideo.description}
               </p>
             </div>
-            
+
           </div>
         </div>
       )}

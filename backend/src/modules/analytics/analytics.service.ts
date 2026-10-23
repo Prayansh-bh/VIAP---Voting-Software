@@ -28,38 +28,176 @@ export class AnalyticsService {
 
     const currentUnit = allUnits.find((u) => u.id === unitId);
 
-    // Fetch only needed scalar fields for voters in this hierarchy subtree (avoids fetching large unneeded columns)
-    const voters = await prisma.voter.findMany({
-      where: { unitId: { in: descendantUnitIds } },
-      select: {
-        unitId: true,
-        voteStatus: true,
-        voterStatus: true,
-        voterLocationStatus: true,
-        politicalPreference: true,
-        caste: true,
-        profession: true,
-        age: true,
-        gender: true,
-      },
-    });
+    // Push aggregations into PostgreSQL directly; do NOT fetch 250,000 voter records into Node.js memory
+    if (descendantUnitIds.length === 0) {
+      return {
+        unit: currentUnit,
+        summary: {
+          totalVoters: 0,
+          voted: 0,
+          notVoted: 0,
+          turnoutPercentage: 0,
+          fakeVoters: 0,
+          doubtfulVoters: 0,
+          shiftedVoters: 0,
+          deceasedVoters: 0,
+          activeVoters: 0,
+          migratedVoters: 0,
+          localVoters: 0,
+        },
+        demographics: {
+          caste: {},
+          profession: {},
+          age: { '18-25': 0, '26-40': 0, '41-60': 0, '60+': 0 },
+          gender: { Male: 0, Female: 0, Other: 0 },
+        },
+        partyPreference: { TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, NEUTRAL: 0, OTH: 0 },
+        projections: {
+          winningAreasCount: 0,
+          trailingAreasCount: 0,
+          closeContestAreasCount: 0,
+          winningAreas: [],
+          trailingAreas: [],
+          closeContestAreas: [],
+        },
+        operations: {
+          teamStrength: 0,
+          cadrePerformance: { totalCadres: 0, averageScore: 0 },
+          taskPerformance: { totalTasks: 0, completed: 0, pending: 0, inProgress: 0, completionRate: 0 },
+          trainingPerformance: { totalAssigned: 0, completed: 0, completionRate: 0 },
+        },
+      };
+    }
 
-    // Counts
-    const totalVoters = voters.length;
-    const voted = voters.filter((v) => v.voteStatus === VoteStatus.VOTE_DONE).length;
+    const unitSqlList = descendantUnitIds.map((id) => Prisma.sql`${id}::uuid`);
+
+    // Execute PostgreSQL-level pushdown aggregations in parallel without loading voter objects into memory
+    const [
+      summaryRows,
+      partyRows,
+      casteRows,
+      professionRows,
+      unitAggregateRows,
+      cadres,
+      taskCounts,
+      trainingCounts,
+    ] = await Promise.all([
+      prisma.$queryRaw<Array<{
+        totalVoters: number;
+        voted: number;
+        fakeVoters: number;
+        doubtfulVoters: number;
+        shiftedVoters: number;
+        deceasedVoters: number;
+        activeVoters: number;
+        migratedVoters: number;
+        localVoters: number;
+        age_18_25: number;
+        age_26_40: number;
+        age_41_60: number;
+        age_60_plus: number;
+        gender_male: number;
+        gender_female: number;
+        gender_other: number;
+      }>>`
+        SELECT
+          COUNT(*)::int AS "totalVoters",
+          COUNT(*) FILTER (WHERE "voteStatus" = 'VOTE_DONE')::int AS "voted",
+          COUNT(*) FILTER (WHERE "voterStatus" = 'FAKE')::int AS "fakeVoters",
+          COUNT(*) FILTER (WHERE "voterStatus" = 'DOUBTFUL')::int AS "doubtfulVoters",
+          COUNT(*) FILTER (WHERE "voterStatus" = 'SHIFTED')::int AS "shiftedVoters",
+          COUNT(*) FILTER (WHERE "voterStatus" = 'DECEASED')::int AS "deceasedVoters",
+          COUNT(*) FILTER (WHERE "voterStatus" = 'ACTIVE')::int AS "activeVoters",
+          COUNT(*) FILTER (WHERE "voterLocationStatus" = 'MIGRATED')::int AS "migratedVoters",
+          COUNT(*) FILTER (WHERE "voterLocationStatus" = 'LOCAL')::int AS "localVoters",
+          COUNT(*) FILTER (WHERE "age" <= 25)::int AS "age_18_25",
+          COUNT(*) FILTER (WHERE "age" >= 26 AND "age" <= 40)::int AS "age_26_40",
+          COUNT(*) FILTER (WHERE "age" >= 41 AND "age" <= 60)::int AS "age_41_60",
+          COUNT(*) FILTER (WHERE "age" > 60)::int AS "age_60_plus",
+          COUNT(*) FILTER (WHERE "gender" = 'MALE')::int AS "gender_male",
+          COUNT(*) FILTER (WHERE "gender" = 'FEMALE')::int AS "gender_female",
+          COUNT(*) FILTER (WHERE "gender" = 'OTHER')::int AS "gender_other"
+        FROM "Voter"
+        WHERE "unitId" IN (${Prisma.join(unitSqlList)})
+      `,
+      prisma.$queryRaw<Array<{ politicalPreference: string | null; count: number }>>`
+        SELECT COALESCE("politicalPreference", 'NEUTRAL') AS "politicalPreference", COUNT(*)::int AS count
+        FROM "Voter"
+        WHERE "unitId" IN (${Prisma.join(unitSqlList)})
+        GROUP BY "politicalPreference"
+      `,
+      prisma.$queryRaw<Array<{ caste: string | null; count: number }>>`
+        SELECT COALESCE(NULLIF(TRIM("caste"), ''), 'Unknown') AS caste, COUNT(*)::int AS count
+        FROM "Voter"
+        WHERE "unitId" IN (${Prisma.join(unitSqlList)})
+        GROUP BY COALESCE(NULLIF(TRIM("caste"), ''), 'Unknown')
+      `,
+      prisma.$queryRaw<Array<{ profession: string | null; count: number }>>`
+        SELECT COALESCE(NULLIF(TRIM("profession"), ''), 'Other') AS profession, COUNT(*)::int AS count
+        FROM "Voter"
+        WHERE "unitId" IN (${Prisma.join(unitSqlList)})
+        GROUP BY COALESCE(NULLIF(TRIM("profession"), ''), 'Other')
+      `,
+      prisma.$queryRaw<Array<{ unitId: string; total: number; tdp: number; ysrcp: number }>>`
+        SELECT
+          "unitId",
+          COUNT(*)::int AS "total",
+          COUNT(*) FILTER (WHERE "politicalPreference" = 'TDP')::int AS "tdp",
+          COUNT(*) FILTER (WHERE "politicalPreference" = 'YSRCP')::int AS "ysrcp"
+        FROM "Voter"
+        WHERE "unitId" IN (${Prisma.join(unitSqlList)})
+        GROUP BY "unitId"
+      `,
+      prisma.user.findMany({
+        where: { unitId: { in: descendantUnitIds } },
+        select: {
+          id: true,
+          cadreProfile: { select: { performanceScore: true } },
+        },
+      }),
+      prisma.task.groupBy({
+        by: ['status'],
+        where: { unitId: { in: descendantUnitIds } },
+        _count: { _all: true },
+      }),
+      prisma.trainingProgress.groupBy({
+        by: ['status'],
+        where: { user: { unitId: { in: descendantUnitIds } } },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const s = summaryRows[0] || {
+      totalVoters: 0,
+      voted: 0,
+      fakeVoters: 0,
+      doubtfulVoters: 0,
+      shiftedVoters: 0,
+      deceasedVoters: 0,
+      activeVoters: 0,
+      migratedVoters: 0,
+      localVoters: 0,
+      age_18_25: 0,
+      age_26_40: 0,
+      age_41_60: 0,
+      age_60_plus: 0,
+      gender_male: 0,
+      gender_female: 0,
+      gender_other: 0,
+    };
+
+    const totalVoters = Number(s.totalVoters || 0);
+    const voted = Number(s.voted || 0);
     const notVoted = totalVoters - voted;
     const turnoutPct = totalVoters > 0 ? Math.round((voted / totalVoters) * 1000) / 10 : 0;
+    const fakeVoters = Number(s.fakeVoters || 0);
+    const doubtfulVoters = Number(s.doubtfulVoters || 0);
+    const shiftedVoters = Number(s.shiftedVoters || 0);
+    const deceasedVoters = Number(s.deceasedVoters || 0);
+    const activeVoters = Number(s.activeVoters || 0);
+    const migratedVoters = Number(s.migratedVoters || 0);
+    const localVoters = Number(s.localVoters || 0);
 
-    const fakeVoters = voters.filter((v) => v.voterStatus === VoterStatus.FAKE).length;
-    const doubtfulVoters = voters.filter((v) => v.voterStatus === VoterStatus.DOUBTFUL).length;
-    const shiftedVoters = voters.filter((v) => v.voterStatus === VoterStatus.SHIFTED).length;
-    const deceasedVoters = voters.filter((v) => v.voterStatus === VoterStatus.DECEASED).length;
-    const activeVoters = voters.filter((v) => v.voterStatus === VoterStatus.ACTIVE).length;
-
-    const migratedVoters = voters.filter((v) => v.voterLocationStatus === VoterLocationStatus.MIGRATED).length;
-    const localVoters = voters.filter((v) => v.voterLocationStatus === VoterLocationStatus.LOCAL).length;
-
-    // Party Preference
     const partyPreference: Record<string, number> = {
       TDP: 0,
       YSRCP: 0,
@@ -69,45 +207,44 @@ export class AnalyticsService {
       NEUTRAL: 0,
       OTH: 0,
     };
-    voters.forEach((v) => {
-      const pref = v.politicalPreference || 'NEUTRAL';
-      partyPreference[pref] = (partyPreference[pref] ?? 0) + 1;
+    partyRows.forEach((r) => {
+      const pref = r.politicalPreference || 'NEUTRAL';
+      partyPreference[pref] = (partyPreference[pref] ?? 0) + Number(r.count || 0);
     });
 
-    // Caste Breakdown
     const caste: Record<string, number> = {};
-    voters.forEach((v) => {
-      const c = v.caste || 'Unknown';
-      caste[c] = (caste[c] ?? 0) + 1;
+    casteRows.forEach((r) => {
+      const c = r.caste || 'Unknown';
+      caste[c] = (caste[c] ?? 0) + Number(r.count || 0);
     });
 
-    // Profession Breakdown
     const profession: Record<string, number> = {};
-    voters.forEach((v) => {
-      const p = v.profession || 'Other';
-      profession[p] = (profession[p] ?? 0) + 1;
+    professionRows.forEach((r) => {
+      const p = r.profession || 'Other';
+      profession[p] = (profession[p] ?? 0) + Number(r.count || 0);
     });
 
-    // Age Brackets
     const age = {
-      '18-25': 0,
-      '26-40': 0,
-      '41-60': 0,
-      '60+': 0,
+      '18-25': Number(s.age_18_25 || 0),
+      '26-40': Number(s.age_26_40 || 0),
+      '41-60': Number(s.age_41_60 || 0),
+      '60+': Number(s.age_60_plus || 0),
     };
-    voters.forEach((v) => {
-      if (v.age <= 25) age['18-25'] += 1;
-      else if (v.age <= 40) age['26-40'] += 1;
-      else if (v.age <= 60) age['41-60'] += 1;
-      else age['60+'] += 1;
-    });
 
-    // Gender Split
     const gender = {
-      Male: voters.filter((v) => v.gender === 'MALE').length,
-      Female: voters.filter((v) => v.gender === 'FEMALE').length,
-      Other: voters.filter((v) => v.gender === 'OTHER').length,
+      Male: Number(s.gender_male || 0),
+      Female: Number(s.gender_female || 0),
+      Other: Number(s.gender_other || 0),
     };
+
+    const unitMap = new Map<string, { total: number; tdp: number; ysrcp: number }>();
+    unitAggregateRows.forEach((row) => {
+      unitMap.set(row.unitId, {
+        total: Number(row.total || 0),
+        tdp: Number(row.tdp || 0),
+        ysrcp: Number(row.ysrcp || 0),
+      });
+    });
 
     // Child Areas Winning/Trailing Rollup
     const directChildren = allUnits.filter((u) => u.parentId === unitId);
@@ -122,10 +259,18 @@ export class AnalyticsService {
         });
       }
 
-      const childVoters = voters.filter((v) => v.unitId && childDescendants.has(v.unitId));
-      const tdp = childVoters.filter((v) => v.politicalPreference === 'TDP').length;
-      const ysrcp = childVoters.filter((v) => v.politicalPreference === 'YSRCP').length;
-      const total = childVoters.length;
+      let total = 0;
+      let tdp = 0;
+      let ysrcp = 0;
+      for (const uid of childDescendants) {
+        const stats = unitMap.get(uid);
+        if (stats) {
+          total += stats.total;
+          tdp += stats.tdp;
+          ysrcp += stats.ysrcp;
+        }
+      }
+
       const diff = tdp - ysrcp;
       const diffPct = total > 0 ? Math.abs(diff / total) * 100 : 0;
       const status = diffPct < 4 ? 'CLOSE_CONTEST' : tdp > ysrcp ? 'WINNING' : 'TRAILING';
@@ -148,45 +293,44 @@ export class AnalyticsService {
     const closeContestAreas = childrenStats.filter((c) => c.status === 'CLOSE_CONTEST');
 
     // Cadre & Team Performance
-    const cadres = await prisma.user.findMany({
-      where: { unitId: { in: descendantUnitIds } },
-      include: {
-        cadreProfile: true,
-        assignedTasks: true,
-        trainingProgress: true,
-      },
-    });
-
     const teamStrength = cadres.length;
     const cadrePerformance = {
       totalCadres: teamStrength,
       averageScore: cadres.length > 0
-        ? Math.round(cadres.reduce((s, c) => s + (c.cadreProfile?.performanceScore ?? 80), 0) / cadres.length)
+        ? Math.round(cadres.reduce((sum, c) => sum + (c.cadreProfile?.performanceScore ?? 80), 0) / cadres.length)
         : 0,
     };
 
-    const taskRecords = await prisma.task.findMany({
-      where: { unitId: { in: descendantUnitIds } },
+    let totalTasks = 0;
+    let completedTasks = 0;
+    let pendingTasks = 0;
+    let inProgressTasks = 0;
+    taskCounts.forEach((t) => {
+      const c = Number(t._count._all || 0);
+      totalTasks += c;
+      if (t.status === TaskStatus.COMPLETED) completedTasks += c;
+      else if (t.status === TaskStatus.PENDING) pendingTasks += c;
+      else if (t.status === TaskStatus.IN_PROGRESS) inProgressTasks += c;
     });
     const taskPerformance = {
-      totalTasks: taskRecords.length,
-      completed: taskRecords.filter((t) => t.status === TaskStatus.COMPLETED).length,
-      pending: taskRecords.filter((t) => t.status === TaskStatus.PENDING).length,
-      inProgress: taskRecords.filter((t) => t.status === TaskStatus.IN_PROGRESS).length,
-      completionRate: taskRecords.length > 0
-        ? Math.round((taskRecords.filter((t) => t.status === TaskStatus.COMPLETED).length / taskRecords.length) * 100)
-        : 0,
+      totalTasks,
+      completed: completedTasks,
+      pending: pendingTasks,
+      inProgress: inProgressTasks,
+      completionRate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
     };
 
-    const trainingRecords = await prisma.trainingProgress.findMany({
-      where: { user: { unitId: { in: descendantUnitIds } } },
+    let totalTrainingAssigned = 0;
+    let completedTraining = 0;
+    trainingCounts.forEach((tr) => {
+      const c = Number(tr._count._all || 0);
+      totalTrainingAssigned += c;
+      if (tr.status === TrainingStatus.COMPLETED) completedTraining += c;
     });
     const trainingPerformance = {
-      totalAssigned: trainingRecords.length,
-      completed: trainingRecords.filter((t) => t.status === TrainingStatus.COMPLETED).length,
-      completionRate: trainingRecords.length > 0
-        ? Math.round((trainingRecords.filter((t) => t.status === TrainingStatus.COMPLETED).length / trainingRecords.length) * 100)
-        : 0,
+      totalAssigned: totalTrainingAssigned,
+      completed: completedTraining,
+      completionRate: totalTrainingAssigned > 0 ? Math.round((completedTraining / totalTrainingAssigned) * 100) : 0,
     };
 
     return {

@@ -44,6 +44,44 @@ const envSchema = z.object({
   // AI & Analytics
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default('gemini-2.5-flash'),
+}).superRefine((data, ctx) => {
+  // In production, enforce strict secrets to avoid token forgery with default dev keys
+  if (data.NODE_ENV === 'production') {
+    const defaultJwt = 'kondapi-production-jwt-secret-key-change-in-env-2026';
+    if (data.JWT_SECRET === defaultJwt || data.JWT_SECRET.length < 32) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['JWT_SECRET'],
+        message: 'In production, JWT_SECRET must be explicitly set to a cryptographically random string (min 32 chars).',
+      });
+    }
+
+    const defaultCookie = 'kondapi-secure-cookie-secret-key-2026-production';
+    if (data.COOKIE_SECRET === defaultCookie || data.COOKIE_SECRET.length < 32) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['COOKIE_SECRET'],
+        message: 'In production, COOKIE_SECRET must be explicitly set to a secure string (min 32 chars).',
+      });
+    }
+
+    const defaultOtp = 'dev-super-secure-otp-secret-key-at-least-32-chars-long';
+    if (data.OTP_SECRET === defaultOtp || data.OTP_SECRET.length < 32) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['OTP_SECRET'],
+        message: 'In production, OTP_SECRET must be explicitly set to a secure string (min 32 chars).',
+      });
+    }
+
+    if (data.REDIS_URL && !data.REDIS_URL.startsWith('redis://') && !data.REDIS_URL.startsWith('rediss://')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['REDIS_URL'],
+        message: 'REDIS_URL must use redis:// or rediss:// protocol.',
+      });
+    }
+  }
 });
 
 export { envSchema };
@@ -51,7 +89,9 @@ export { envSchema };
 const parsed = envSchema.safeParse(process.env);
 
 if (!parsed.success) {
-  console.error('❌ Invalid environment variables:', JSON.stringify(parsed.error.format(), null, 2));
+  // Output validation errors cleanly without revealing secret values
+  const formatted = parsed.error.format();
+  console.error('❌ Invalid environment variables:', JSON.stringify(formatted, null, 2));
   process.exit(1);
 }
 

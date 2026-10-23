@@ -38,7 +38,8 @@ import {
   TrendingUp, 
   ChevronRight, 
   FileText,
-  Clock
+  Clock,
+  Loader2
 } from 'lucide-react';
 import {
   createReport,
@@ -50,6 +51,7 @@ import {
   fetchTasksForUnit,
   fetchTrainingProgress,
   fetchTrainingVideos,
+  fetchVoters,
   fetchVotersForUnit,
   fetchCadreNetwork,
   syncVoter,
@@ -180,6 +182,14 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
   };
   const [cadreActiveTab, setCadreActiveTab] = useState<'booth' | 'voter'>('booth');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsSidebarOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
   const [voters, setVoters] = useState<Voter[]>([]);
   
   // States for user interaction
@@ -347,14 +357,26 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
       .catch(() => {});
   };
 
-  // Metric Computations (Dynamic and fully synchronous)
-  const totalVotersCount = voters.length;
+  // Metric Computations (Dynamic and authoritative)
+  const totalVotersCount = backendSummary?.snapshot?.summary?.totalVoters ?? voters.length;
   
   // Voters filtered by active (excluding deceased)
   const activeVoters = useMemo(() => voters.filter(v => v.voterStatus !== 'Deceased'), [voters]);
 
   // Party support breakdown
   const partyStats = useMemo(() => {
+    if (backendSummary?.snapshot?.politicalPreference) {
+      const pref = backendSummary.snapshot.politicalPreference;
+      return {
+        TDP: pref['TDP'] || 0,
+        YSRCP: pref['YSRCP'] || 0,
+        JSP: pref['JSP'] || 0,
+        BJP: pref['BJP'] || 0,
+        INC: pref['INC'] || 0,
+        Neutral: pref['Neutral'] || pref['NEUTRAL'] || 0,
+        OTH: pref['OTH'] || pref['OTHER'] || 0,
+      } as Record<VoterPreference, number>;
+    }
     const stats: Record<VoterPreference, number> = {
       TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0
     };
@@ -363,12 +385,12 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
       if (stats[pref] !== undefined) stats[pref]++;
     });
     return stats;
-  }, [activeVoters]);
+  }, [backendSummary, activeVoters]);
 
   // Fake votes count (Fake, Duplicate, Doubtful)
   const fakeVotesCount = useMemo(() => {
-    return voters.filter(v => v.voterStatus === 'Fake' || v.voterStatus === 'Duplicate' || v.voterStatus === 'Doubtful').length;
-  }, [voters]);
+    return backendSummary?.snapshot?.summary?.fakeVoters ?? voters.filter(v => v.voterStatus === 'Fake' || v.voterStatus === 'Duplicate' || v.voterStatus === 'Doubtful').length;
+  }, [backendSummary, voters]);
 
   // Dynamic Election Forecast computation
   const forecastData = useMemo(() => {
@@ -662,43 +684,70 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
     notify.success(`Task assigned successfully to ${assigneeName}!`, 'Task Delegated');
   };
 
-  // Filtered Voters for Voter List View
-  const filteredVoters = useMemo(() => {
-    return voters.filter(v => {
-      // 1. Search Query
-      const query = searchQuery.toLowerCase();
-      const matchesSearch = 
-        (v.name || '').toLowerCase().includes(query) ||
-        (v.fatherHusbandName || '').toLowerCase().includes(query) ||
-        (v.epicNumber || '').toLowerCase().includes(query) ||
-        (v.houseNumber || '').toLowerCase().includes(query);
-      
-      // 2. Booth Filter
-      const matchesBooth = boothFilter === 'All' || v.boothNumber === boothFilter;
+  // Server-side query state for Village Voter Directory
+  const [registryVoters, setRegistryVoters] = useState<Voter[]>([]);
+  const [registryTotal, setRegistryTotal] = useState<number>(0);
+  const [isRegistryLoading, setIsRegistryLoading] = useState<boolean>(false);
+  const [registryError, setRegistryError] = useState<string | null>(null);
 
-      // 3. Preference Filter
-      const matchesPref = preferenceFilter === 'All' || v.politicalPreference === preferenceFilter;
+  useEffect(() => {
+    let active = true;
+    setIsRegistryLoading(true);
+    setRegistryError(null);
 
-      // 4. Status Filter
-      const matchesStatus = statusFilter === 'All' || v.voterStatus === statusFilter;
+    const queryParams: any = {
+      unitId: session.unitId,
+      page: voterCurrentPage,
+      limit: voterPageSize,
+    };
+    if (searchQuery.trim()) {
+      queryParams.search = searchQuery.trim();
+    }
+    if (preferenceFilter !== 'All') {
+      queryParams.politicalPreference = preferenceFilter;
+    }
+    if (statusFilter !== 'All') {
+      queryParams.voterStatus = statusFilter.toUpperCase();
+    }
+    if (locationFilter !== 'All') {
+      queryParams.voterLocationStatus = locationFilter.toUpperCase();
+    }
 
-      // 5. Local/Migrated Filter
-      let matchesLocation = true;
-      if (locationFilter === 'Local') {
-        matchesLocation = v.voterLocationStatus === 'Local' || !v.voterLocationStatus;
-      } else if (locationFilter === 'Migrated') {
-        matchesLocation = v.voterLocationStatus === 'Migrated';
-      }
+    fetchVoters(queryParams)
+      .then((res) => {
+        if (!active) return;
+        setRegistryVoters(res.items);
+        setRegistryTotal(res.total);
+        setIsRegistryLoading(false);
+      })
+      .catch((err) => {
+        if (!active) return;
+        console.error('Failed to load village voters:', err);
+        setRegistryError('Failed to load voters. Please try again.');
+        setIsRegistryLoading(false);
+      });
 
-      return matchesSearch && matchesBooth && matchesPref && matchesStatus && matchesLocation;
-    });
-  }, [voters, searchQuery, boothFilter, preferenceFilter, statusFilter, locationFilter]);
+    return () => {
+      active = false;
+    };
+  }, [
+    session.unitId,
+    voterCurrentPage,
+    voterPageSize,
+    searchQuery,
+    preferenceFilter,
+    statusFilter,
+    locationFilter,
+  ]);
 
-  // Paginated Voters for Table
   const paginatedVoters = useMemo(() => {
-    const start = (voterCurrentPage - 1) * voterPageSize;
-    return filteredVoters.slice(start, start + voterPageSize);
-  }, [filteredVoters, voterCurrentPage, voterPageSize]);
+    if (boothFilter === 'All') return registryVoters;
+    return registryVoters.filter((v) => v.boothNumber === boothFilter);
+  }, [registryVoters, boothFilter]);
+
+  useEffect(() => {
+    setVoterCurrentPage(1);
+  }, [searchQuery, boothFilter, preferenceFilter, statusFilter, locationFilter, voterPageSize]);
 
   // Live Voter Tracking metrics
   const liveTrackStats = useMemo(() => {
@@ -1016,6 +1065,15 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
           </button>
         </div>
       </aside>
+
+      {/* Mobile Drawer Backdrop */}
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
 
       {/* --------------------------------------------------------
           MAIN SCROLLABLE WORKSPACE
@@ -1412,7 +1470,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                 <p className="text-xs text-slate-400 font-medium">Consolidated directory representing all combined polling booths</p>
               </div>
               <div className="text-xs font-black text-slate-500 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg">
-                Total Matches: <span className="text-yellow-600 font-black">{filteredVoters.length}</span> / {totalVotersCount} Voters
+                Total Matches: <span className="text-yellow-600 font-black">{registryTotal}</span> / {totalVotersCount} Voters
               </div>
             </div>
 
@@ -1522,7 +1580,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
 
             {/* Voter Grid Table */}
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+              <table className="w-full min-w-[700px] text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-slate-50 text-slate-400 border-b border-slate-100">
                     <th className="py-3 px-3 font-bold uppercase tracking-wider text-[10px] text-center w-12">S.No</th>
@@ -1535,7 +1593,20 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                  {filteredVoters.length === 0 ? (
+                  {isRegistryLoading ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-12 text-slate-500 font-bold">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-yellow-500" />
+                        Loading voter records...
+                      </td>
+                    </tr>
+                  ) : registryError ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-12 text-red-500 font-bold">
+                        {registryError}
+                      </td>
+                    </tr>
+                  ) : paginatedVoters.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="text-center py-12 text-slate-400">
                         No voters found matching the current search filters.
@@ -1607,7 +1678,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
             <Pagination
               currentPage={voterCurrentPage}
               pageSize={voterPageSize}
-              totalItems={filteredVoters.length}
+              totalItems={registryTotal}
               onPageChange={setVoterCurrentPage}
               onPageSizeChange={(newSize) => {
                 setVoterPageSize(newSize);
@@ -1772,7 +1843,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
 
             {/* Fake Voters Table */}
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+              <table className="w-full min-w-[700px] text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-slate-50 text-slate-400 border-b border-slate-100">
                     <th className="py-2.5 px-3 font-bold uppercase tracking-wider text-[10px]">Voter ID / Name</th>

@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Server,
   KeyRound,
+  X,
 } from 'lucide-react';
 import { AdminUser } from '../types';
 
@@ -24,6 +25,8 @@ interface AdminSidebarProps {
   adminUser: AdminUser | null;
   onLogout: () => void;
   pendingApprovalsCount?: number;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 export default function AdminSidebar({
@@ -32,7 +35,19 @@ export default function AdminSidebar({
   adminUser,
   onLogout,
   pendingApprovalsCount = 4,
+  isOpen = false,
+  onClose,
 }: AdminSidebarProps) {
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen && onClose) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   const navItems = [
     {
       id: 'dashboard',
@@ -95,55 +110,84 @@ export default function AdminSidebar({
   ];
 
   return (
-    <aside className="w-72 bg-slate-950 border-r border-slate-800/80 flex flex-col justify-between h-screen sticky top-0 select-none z-30 shrink-0">
-      {/* Top Brand & Telemetry Header */}
-      <div>
-        <div className="p-5 border-b border-slate-800/80 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-amber-500/20">
-              <Shield className="w-5 h-5 text-slate-950 fill-slate-950" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-black text-white tracking-wider uppercase">
-                  CMS CONSOLE
-                </span>
-                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-amber-400/20 text-amber-300 border border-amber-400/30">
-                  APEX
-                </span>
+    <>
+      {/* Mobile Backdrop */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 md:hidden transition-opacity"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        className={`w-72 bg-slate-950 border-r border-slate-800/80 flex flex-col justify-between h-screen select-none shrink-0 transition-transform duration-300 ease-in-out
+          fixed inset-y-0 left-0 z-50 md:sticky md:top-0 md:translate-x-0
+          ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        `}
+      >
+        {/* Top Brand & Telemetry Header */}
+        <div>
+          <div className="p-5 border-b border-slate-800/80 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-amber-500/20">
+                <Shield className="w-5 h-5 text-slate-950 fill-slate-950" />
               </div>
-              <p className="text-[11px] text-slate-400 font-medium">Platform Administration</p>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm font-black text-white tracking-wider uppercase">
+                    CMS CONSOLE
+                  </span>
+                  <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                    APEX
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 font-medium">Platform Administration</p>
+              </div>
+            </div>
+
+            {/* Mobile Close Toggle */}
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 transition"
+                aria-label="Close navigation"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+
+          {/* Database Health Pill */}
+          <div className="mx-4 mt-3 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-[11px]">
+            <div className="flex items-center gap-2 text-slate-300">
+              <Server className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="font-semibold">Postgres DB</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Online</span>
             </div>
           </div>
-        </div>
 
-        {/* Database Health Pill */}
-        <div className="mx-4 mt-3 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-[11px]">
-          <div className="flex items-center gap-2 text-slate-300">
-            <Server className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="font-semibold">Postgres DB</span>
-          </div>
-          <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Online</span>
-          </div>
-        </div>
-
-        {/* Navigation Items */}
-        <nav className="p-3 space-y-1 mt-2">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => onSelectTab(item.id)}
-                className={`w-full flex items-center justify-between p-3 rounded-xl text-left transition-all duration-200 cursor-pointer ${
-                  isActive
-                    ? 'bg-gradient-to-r from-amber-500/20 to-amber-500/5 text-amber-400 border border-amber-500/30 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/80 border border-transparent'
-                }`}
-              >
+          {/* Navigation Items */}
+          <nav className="p-3 space-y-1 mt-2">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    onSelectTab(item.id);
+                    if (onClose) onClose();
+                  }}
+                  className={`w-full flex items-center justify-between p-3 rounded-xl text-left transition-all duration-200 cursor-pointer ${
+                    isActive
+                      ? 'bg-gradient-to-r from-amber-500/20 to-amber-500/5 text-amber-400 border border-amber-500/30 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/80 border border-transparent'
+                  }`}
+                >
                 <div className="flex items-center gap-3">
                   <Icon className={`w-5 h-5 ${isActive ? 'text-amber-400' : 'text-slate-400'}`} />
                   <div>
@@ -206,5 +250,6 @@ export default function AdminSidebar({
         </div>
       </div>
     </aside>
+    </>
   );
 }
