@@ -1051,37 +1051,34 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50 text-slate-800" id="constituency-dashboard-root">
+    <div className="flex h-full overflow-hidden bg-slate-50 text-slate-800" id="constituency-dashboard-root">
       
-      {/* --------------------------------------------------------
-          MOBILE SIDEBAR MENU BAR
-         -------------------------------------------------------- */}
-      <div className="md:hidden fixed top-3 left-4 z-50">
-        <button 
-          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          className="p-2 bg-slate-900 text-white rounded-lg shadow-md cursor-pointer"
-        >
-          {isSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
-      </div>
-
       {/* --------------------------------------------------------
           SIDEBAR: DARK NAVY WITH YELLOW HIGH LIGHT
          -------------------------------------------------------- */}
       <aside className={`
-        fixed inset-y-0 left-0 z-40 w-64 h-screen bg-slate-950 text-slate-300 flex flex-col justify-between border-r border-slate-900 transition-transform duration-200 ease-in-out
+        fixed inset-y-0 left-0 z-40 w-64 h-full bg-slate-950 text-slate-300 flex flex-col justify-between border-r border-slate-900 transition-transform duration-200 ease-in-out
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} md:fixed shrink-0 select-none
       `}>
         {/* Brand Block */}
         <div className="p-5 border-b border-slate-900/90 space-y-2.5">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 flex items-center justify-center text-slate-950 shrink-0 font-black text-sm shadow-md shadow-amber-400/20">
-              <Crown className="w-5 h-5 text-slate-950" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 flex items-center justify-center text-slate-950 shrink-0 font-black text-sm shadow-md shadow-amber-400/20">
+                <Crown className="w-5 h-5 text-slate-950" />
+              </div>
+              <div>
+                <h1 className="text-sm font-black text-white tracking-tight">{session.organisationName || 'Kondapi Connect'}</h1>
+                <p className="text-[10px] text-amber-400 font-extrabold uppercase tracking-widest">Constituency Command</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-sm font-black text-white tracking-tight">Kondapi Connect</h1>
-              <p className="text-[10px] text-amber-400 font-extrabold uppercase tracking-widest">Constituency Command</p>
-            </div>
+            <button
+              onClick={() => setIsSidebarOpen(false)}
+              className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 cursor-pointer"
+              aria-label="Close sidebar"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
           <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
@@ -1156,8 +1153,31 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
       {/* --------------------------------------------------------
           MAIN DISPLAY VIEW AREA
          -------------------------------------------------------- */}
-      <main className="flex-1 h-screen overflow-y-auto overflow-x-hidden md:pl-64" id="main-workspace-section">
-        <div className="p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto" id="constituency-main-container">
+      <main className="flex-1 h-full overflow-y-auto overflow-x-hidden md:pl-64" id="main-workspace-section">
+        {/* Mobile Header Bar */}
+        <div className="md:hidden flex items-center justify-between bg-white border border-slate-200/80 rounded-xl p-3 shadow-xs m-4 mb-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-amber-400 flex items-center justify-center font-black text-slate-950 text-xs shadow-xs">
+              <Crown className="w-4 h-4 text-slate-950" />
+            </div>
+            <div>
+              <span className="font-black text-xs text-slate-900 tracking-tight block">
+                {session?.assignedConstituency || 'Constituency'} Command
+              </span>
+              <span className="text-[10px] text-amber-600 font-bold">Assembly Dashboard</span>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsSidebarOpen(true)}
+            className="p-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg shadow-xs cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+            aria-label="Open navigation menu"
+          >
+            <Menu className="w-4 h-4" />
+            <span>Menu</span>
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto" id="constituency-main-container">
           
           {/* Header Title block */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-slate-200/80 pb-5 gap-4">

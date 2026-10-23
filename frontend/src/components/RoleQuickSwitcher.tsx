@@ -204,18 +204,18 @@ export default function RoleQuickSwitcher({
       id="role-quick-switcher"
       className="fixed top-0 left-0 right-0 h-14 z-50 bg-slate-950/95 backdrop-blur-xl border-b border-slate-800 text-slate-100 select-none shadow-md"
     >
-      <div className="h-full px-4 sm:px-6 flex items-center justify-between gap-3">
+      <div className="h-full px-2.5 sm:px-4 md:px-6 flex items-center justify-between gap-1.5 sm:gap-3 max-w-full">
         {/* ========================================================
             LEFT: Brand Crest & Telemetry Status
            ======================================================== */}
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black shadow-md shadow-amber-500/20">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black shadow-md shadow-amber-500/20 shrink-0">
               <Shield className="w-4 h-4 text-slate-950 fill-slate-950" />
             </div>
             <div className="hidden sm:block">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-black text-white tracking-tight uppercase truncate max-w-[180px] md:max-w-none">
+                <span className="text-xs font-black text-white tracking-tight uppercase truncate max-w-[140px] md:max-w-none">
                   {partyName}
                 </span>
                 <span className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -233,23 +233,23 @@ export default function RoleQuickSwitcher({
         {/* ========================================================
             CENTER: Station Command Switcher (Executive Popover)
            ======================================================== */}
-        <div className="relative flex items-center gap-2" ref={dropdownRef}>
+        <div className="relative flex items-center gap-1.5 sm:gap-2 min-w-0" ref={dropdownRef}>
           {/* Main Station Switcher Button */}
           <button
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shadow-xs ${isDropdownOpen
+            className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl border transition-all cursor-pointer shadow-xs min-w-0 ${isDropdownOpen
                 ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold shadow-md shadow-amber-400/20'
                 : 'bg-slate-900/90 hover:bg-slate-800 text-slate-200 border-slate-700/80 hover:border-slate-600'
               }`}
             title="Click to switch between command stations & modules"
           >
-            <div className={`w-5 h-5 rounded-md flex items-center justify-center ${isDropdownOpen ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-800 text-amber-400'}`}>
+            <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${isDropdownOpen ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-800 text-amber-400'}`}>
               <ActiveIcon className="w-3.5 h-3.5" />
             </div>
-            <span className="text-xs font-bold truncate max-w-[140px] sm:max-w-[200px]">
+            <span className="text-xs font-bold truncate max-w-[90px] xs:max-w-[130px] sm:max-w-[200px]">
               {activeItem.label}
             </span>
-            <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-slate-950' : 'text-slate-400'}`} />
+            <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-slate-950' : 'text-slate-400'}`} />
           </button>
 
           {/* Quick Direct Jump Pills (Gracefully hidden on small screens, NO scrollbar) */}
@@ -271,11 +271,19 @@ export default function RoleQuickSwitcher({
             )}
           </div>
 
+          {/* Mobile Backdrop when Dropdown is open */}
+          {isDropdownOpen && (
+            <div
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 sm:hidden"
+              onClick={() => setIsDropdownOpen(false)}
+            />
+          )}
+
           {/* ========================================================
               POP-OVER EXECUTIVE COMMAND PALETTE
              ======================================================== */}
           {isDropdownOpen && (
-            <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-80 sm:w-96 max-h-[80vh] overflow-y-auto bg-slate-900/98 backdrop-blur-2xl border border-slate-700/80 rounded-2xl shadow-2xl z-50 p-3 space-y-3 animate-fade-in no-scrollbar">
+            <div className="fixed inset-x-2 top-14 mt-1.5 sm:absolute sm:inset-x-auto sm:top-full sm:mt-2 sm:left-1/2 sm:-translate-x-1/2 w-auto sm:w-96 max-h-[85vh] sm:max-h-[80vh] overflow-y-auto bg-slate-900/98 backdrop-blur-2xl border border-slate-700/80 rounded-2xl shadow-2xl z-50 p-3 space-y-3 animate-fade-in no-scrollbar">
               <div className="flex items-center justify-between pb-2 border-b border-slate-800 px-1">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1.5">
                   <Sparkles className="w-3 h-3 text-amber-400" />
@@ -396,6 +404,48 @@ export default function RoleQuickSwitcher({
                     );
                   })}
               </div>
+
+              {/* Tier 4: Account & Session Controls (Always accessible on Mobile) */}
+              <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                <div className="px-2 flex items-center justify-between text-[11px] text-slate-400">
+                  <span className="font-semibold text-slate-200 truncate max-w-[170px]">
+                    {session?.userName || 'Connected Operator'}
+                  </span>
+                  {session?.mobileNumber && (
+                    <span className="font-mono text-amber-400 font-bold text-[10px]">
+                      +91 {session.mobileNumber}
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2 pt-0.5">
+                  {session?.mobileNumber && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsDropdownOpen(false);
+                        setIsMobileModalOpen(true);
+                      }}
+                      className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition cursor-pointer"
+                    >
+                      <Smartphone className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Change Phone</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDropdownOpen(false);
+                      onLogout();
+                    }}
+                    className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black transition cursor-pointer shadow-md ${
+                      !session?.mobileNumber ? 'col-span-2' : 'col-span-1'
+                    }`}
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -403,7 +453,7 @@ export default function RoleQuickSwitcher({
         {/* ========================================================
             RIGHT: Active Hierarchy Pill & Exit Portal
            ======================================================== */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-400">
             <Radio className="w-3 h-3 text-amber-400" />
             <span>Hierarchy:</span>
@@ -413,22 +463,24 @@ export default function RoleQuickSwitcher({
           {session?.mobileNumber && (
             <button
               onClick={() => setIsMobileModalOpen(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-amber-500/15 text-slate-300 hover:text-amber-300 border border-slate-800 hover:border-amber-500/30 text-xs font-semibold transition-all cursor-pointer shadow-xs active:scale-98"
+              className="flex items-center gap-1 sm:gap-1.5 p-2 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-900 hover:bg-amber-500/15 text-slate-300 hover:text-amber-300 border border-slate-800 hover:border-amber-500/30 text-xs font-semibold transition-all cursor-pointer shadow-xs active:scale-95 touch-manipulation"
               title="Change Registered Mobile Number"
+              aria-label="Change Mobile Number"
             >
               <Smartphone className="w-3.5 h-3.5 text-amber-400 shrink-0" />
               <span className="font-mono text-[11px] hidden sm:inline">+91 {session.mobileNumber}</span>
-              <span className="text-[10px] text-amber-400 font-bold ml-0.5 px-1.5 py-0.5 rounded bg-amber-400/10 border border-amber-400/20">Change</span>
+              <span className="text-[10px] text-amber-400 font-bold ml-0.5 px-1.5 py-0.5 rounded bg-amber-400/10 border border-amber-400/20 hidden sm:inline">Change</span>
             </button>
           )}
 
           <button
             onClick={onLogout}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-rose-500/15 text-slate-300 hover:text-rose-300 border border-slate-800 hover:border-rose-500/30 text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-98"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-rose-950/70 hover:bg-rose-900/80 text-rose-300 hover:text-white border border-rose-800/60 hover:border-rose-600 text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 touch-manipulation shrink-0"
             title="Log out or switch account"
+            aria-label="Sign Out"
           >
-            <LogOut className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Sign Out</span>
+            <LogOut className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span className="text-[11px] sm:text-xs">Sign Out</span>
           </button>
         </div>
       </div>

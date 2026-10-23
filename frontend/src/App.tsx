@@ -340,7 +340,7 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
   const showTopSwitcher = Boolean(activeSession) && !isLandingRoute && !isLoginRoute && currentPath !== '/cms';
 
   return (
-    <div className={`${isDashboardActive ? 'h-screen overflow-hidden' : 'min-h-screen'} bg-gray-50 text-gray-900 flex flex-col justify-between selection:bg-yellow-200`}>
+    <div className={`${isDashboardActive ? 'h-screen h-[100dvh] overflow-hidden' : 'min-h-screen'} bg-gray-50 text-gray-900 flex flex-col justify-between selection:bg-yellow-200`}>
       {showTopSwitcher && (
         <RoleQuickSwitcher
           currentRole={activeSession?.role}
@@ -362,10 +362,10 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
         />
       )}
 
-      <div className={`${isDashboardActive ? 'h-full overflow-hidden' : 'flex-1'} ${showTopSwitcher ? 'pt-14' : ''} flex flex-col`}>
+      <div className={`${isDashboardActive ? 'h-full flex-1 overflow-hidden' : 'flex-1'} ${showTopSwitcher ? 'pt-14' : ''} flex flex-col min-h-0`}>
         {!activeSession && !isLandingRoute && !isLoginRoute && currentPath !== '/cms' && <Header />}
 
-        <div className={`flex-1 ${isDashboardActive ? 'p-0 overflow-hidden' : (isLandingRoute || isLoginRoute) ? 'p-0' : 'pb-4 md:pb-6'}`}>
+        <div className={`flex-1 min-h-0 ${isDashboardActive ? 'p-0 overflow-hidden h-full' : (isLandingRoute || isLoginRoute) ? 'p-0' : 'pb-4 md:pb-6'}`}>
           <Suspense
             fallback={
               <div className="h-full min-h-[50vh] w-full flex flex-col items-center justify-center gap-3">

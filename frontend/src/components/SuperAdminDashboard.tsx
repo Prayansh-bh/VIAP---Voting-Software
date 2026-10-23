@@ -28,6 +28,8 @@ import {
   Database,
   ArrowRight,
   ChevronRight,
+  Menu,
+  X,
 } from 'lucide-react';
 import { UserSession } from '../types';
 import { useCms } from '../context/CmsContext';
@@ -81,8 +83,11 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
     }
   }, [isKnownSubPath, navigate]);
 
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
   const setActiveTab = (tab: SuperAdminTab) => {
     navigate(SUPER_ADMIN_TAB_TO_PATH[tab]);
+    setIsSidebarOpen(false);
   };
   const [loading, setLoading] = useState(false);
 
@@ -132,24 +137,33 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
   }, [auditLogs, auditPage, auditPageSize]);
 
   return (
-    <div className="w-full h-screen overflow-hidden flex flex-col md:flex-row bg-[#F8FAFC] text-slate-900 font-sans antialiased" id="superadmin-dashboard-root">
+    <div className="w-full h-full overflow-hidden flex flex-col md:flex-row bg-[#F8FAFC] text-slate-900 font-sans antialiased" id="superadmin-dashboard-root">
       {/* Navigation Sidebar: Fixed Full-Height matching Mandal / Booth benchmark */}
-      <aside className="fixed inset-y-0 left-0 z-40 w-64 h-screen bg-slate-950 text-white flex flex-col justify-between border-r border-slate-900 md:fixed shrink-0 select-none" id="superadmin-sidebar">
+      <aside className={`fixed inset-y-0 left-0 z-40 w-64 h-full bg-slate-950 text-white flex flex-col justify-between border-r border-slate-900 transition-transform duration-200 ease-in-out md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:fixed shrink-0 select-none`} id="superadmin-sidebar">
         <div className="flex flex-col flex-1 overflow-hidden">
           {/* Brand & Connected Operator Profile Header */}
           <div className="p-5 border-b border-slate-900/90 space-y-3">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 flex items-center justify-center text-slate-950 shrink-0 font-black text-sm shadow-md shadow-amber-400/20">
-                <ShieldCheck className="w-5 h-5 text-slate-950" />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 flex items-center justify-center text-slate-950 shrink-0 font-black text-sm shadow-md shadow-amber-400/20">
+                  <ShieldCheck className="w-5 h-5 text-slate-950" />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="text-sm font-black text-white tracking-tight truncate">
+                    {config.organisationName || 'Platform Studio'}
+                  </h1>
+                  <p className="text-[10px] text-amber-400 font-extrabold uppercase tracking-widest">
+                    Super Command Root
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <h1 className="text-sm font-black text-white tracking-tight truncate">
-                  {config.organisationName || 'Platform Studio'}
-                </h1>
-                <p className="text-[10px] text-amber-400 font-extrabold uppercase tracking-widest">
-                  Super Command Root
-                </p>
-              </div>
+              <button
+                onClick={() => setIsSidebarOpen(false)}
+                className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 cursor-pointer"
+                aria-label="Close menu"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
             {/* Connected User Profile Widget */}
@@ -235,9 +249,41 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
         </div>
       </aside>
 
+      {/* Mobile Backdrop */}
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 md:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* Main Scrollable Workspace */}
-      <main className="flex-1 h-screen overflow-y-auto overflow-x-hidden bg-[#F8FAFC] relative md:pl-64" id="main-workspace-section">
-        <div className="p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto pb-28">
+      <main className="flex-1 h-full overflow-y-auto overflow-x-hidden bg-[#F8FAFC] relative md:pl-64" id="main-workspace-section">
+        {/* Mobile Header Bar */}
+        <div className="md:hidden flex items-center justify-between bg-white border border-gray-100 rounded-xl p-3 shadow-xs m-4 mb-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-amber-400 flex items-center justify-center font-black text-slate-950 text-xs shadow-xs">
+              <ShieldCheck className="w-4 h-4 text-slate-950" />
+            </div>
+            <div>
+              <span className="font-black text-xs text-slate-900 tracking-tight block">
+                {config.organisationName || 'Platform Studio'}
+              </span>
+              <span className="text-[10px] text-amber-600 font-bold">Super Admin Command</span>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsSidebarOpen(true)}
+            className="p-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg shadow-xs cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+            aria-label="Open navigation menu"
+          >
+            <Menu className="w-4 h-4" />
+            <span>Menu</span>
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto pb-28">
           {/* In-page Header Banner (White Card matching Mandal / Booth standard) */}
           <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm" id="superadmin-header-bar">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
