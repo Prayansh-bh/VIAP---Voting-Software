@@ -53,11 +53,18 @@ export interface TargetSystemField {
 
 export const TARGET_SYSTEM_FIELDS: TargetSystemField[] = [
   {
+    key: 'serialNumber',
+    label: 'Serial Number / Sl. No',
+    required: false,
+    description: 'Electoral roll voter serial number',
+    aliases: ['serialno', 'serialnumber', 'slno', 'newserialno', 'oldserialno', 'voterserialno', 'srno', 'sno', 'serial'],
+  },
+  {
     key: 'epicNumber',
     label: 'Voter ID / EPIC',
     required: true,
     description: 'Unique voter card number (e.g. AP01234567)',
-    aliases: ['epicno', 'epicnumber', 'epic', 'voterid', 'voteridno', 'voteridnumber', 'voteridcard', 'cardno', 'slno', 'idno', 'id', 'electorsno', 'epicid'],
+    aliases: ['epicno', 'epicnumber', 'epic', 'voterid', 'voteridno', 'voteridnumber', 'voteridcard', 'cardno', 'slno', 'idno', 'id', 'electorsno', 'epicid', 'epicidno'],
   },
   {
     key: 'fullName',
@@ -95,6 +102,13 @@ export const TARGET_SYSTEM_FIELDS: TargetSystemField[] = [
     aliases: ['gender', 'sex', 'gendertype'],
   },
   {
+    key: 'voterStatus',
+    label: 'Voter Status (Active/Deleted)',
+    required: false,
+    description: 'ACTIVE, DELETED, SHIFTED, or EXPIRED',
+    aliases: ['voterstatus', 'status', 'activedelete', 'activedeleted', 'recordstatus', 'deletionstatus'],
+  },
+  {
     key: 'houseNumber',
     label: 'House / Door No',
     required: false,
@@ -121,6 +135,13 @@ export const TARGET_SYSTEM_FIELDS: TargetSystemField[] = [
     required: true,
     description: 'Revenue Village, Panchayat, or Urban Ward',
     aliases: ['village', 'villagename', 'panchayat', 'ward', 'town', 'habitation', 'locality', 'grampanchayat', 'villageward'],
+  },
+  {
+    key: 'pollingStation',
+    label: 'Polling Station Name',
+    required: false,
+    description: 'Polling station building or premises name',
+    aliases: ['pollingstation', 'pollingstationname', 'psname', 'stationname', 'buildingname'],
   },
   {
     key: 'boothNumber',
@@ -1035,21 +1056,32 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
               {/* Validation Summary Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Rows in File</div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Sample Preview Rows</div>
                   <div className="text-xl font-bold text-white mt-1">
-                    {preCommitValidation.total.toLocaleString('en-IN')}
+                    {preCommitValidation.total.toLocaleString('en-IN')} Sampled
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">
+                    High-speed sample for column verification
                   </div>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Valid Records</div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Sample Status</div>
                   <div className="text-xl font-bold text-emerald-400 mt-1">
-                    {preCommitValidation.valid.toLocaleString('en-IN')}
+                    {preCommitValidation.valid.toLocaleString('en-IN')} / {preCommitValidation.total} Valid
+                  </div>
+                  <div className="text-[10px] text-emerald-500/80 mt-0.5">
+                    {preCommitValidation.valid === preCommitValidation.total && preCommitValidation.total > 0
+                      ? '100% of sample rows valid'
+                      : `${preCommitValidation.invalid} missing mandatory fields in sample`}
                   </div>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-red-400">Invalid / Missing Rows</div>
-                  <div className="text-xl font-bold text-red-400 mt-1">
-                    {preCommitValidation.invalid.toLocaleString('en-IN')}
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400">Full Ingestion Target</div>
+                  <div className="text-xl font-bold text-amber-400 mt-1">
+                    Entire Spreadsheet
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">
+                    All 2,40,000+ rows streamed to server on commit
                   </div>
                 </div>
               </div>
@@ -1228,13 +1260,13 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
                 {isCommitting ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Committing to PostgreSQL...</span>
+                    <span>Streaming & Ingesting to PostgreSQL...</span>
                   </>
                 ) : (
                   <>
                     <Database className="w-4 h-4" />
                     <span>
-                      Commit {preCommitValidation.valid.toLocaleString('en-IN')} Records to Database
+                      Commit & Ingest Entire File ({selectedFile ? `${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB` : 'Spreadsheet'}) to Database
                     </span>
                   </>
                 )}

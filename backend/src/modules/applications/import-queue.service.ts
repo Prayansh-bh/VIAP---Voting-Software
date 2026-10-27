@@ -649,11 +649,27 @@ export class ImportQueueService {
       );
 
       const mapping = meta.columnMapping as Record<string, string> | undefined;
-      const getVal = (row: any, key: string): string => {
-        if (mapping && mapping[key] && row[mapping[key]] !== undefined) {
-          return String(row[mapping[key]] ?? '').trim();
+      const fieldToHeaderMap = new Map<string, string>();
+      if (mapping) {
+        for (const [k, v] of Object.entries(mapping)) {
+          if (!v) continue;
+          fieldToHeaderMap.set(k.toLowerCase(), v);
+          fieldToHeaderMap.set(v.toLowerCase(), k);
         }
-        return String(row[key] ?? row[key.toLowerCase()] ?? '').trim();
+      }
+
+      const getVal = (row: any, key: string): string => {
+        const mappedHeader = fieldToHeaderMap.get(key.toLowerCase());
+        if (mappedHeader && row[mappedHeader] !== undefined && row[mappedHeader] !== null) {
+          return String(row[mappedHeader]).trim();
+        }
+        if (row[key] !== undefined && row[key] !== null) {
+          return String(row[key]).trim();
+        }
+        if (row[key.toLowerCase()] !== undefined && row[key.toLowerCase()] !== null) {
+          return String(row[key.toLowerCase()]).trim();
+        }
+        return '';
       };
 
       // 5. Stream CSV file in bounded chunks of BATCH_SIZE (500 rows)
