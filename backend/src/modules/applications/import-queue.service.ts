@@ -4,6 +4,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import csv from 'csv-parser';
+import xlsx from 'xlsx';
 import {
   AuditAction,
   Gender,
@@ -50,7 +51,7 @@ export function getTenantUploadDir(tenantId: string): string {
   return tenantDir;
 }
 
-export function getSecureJobFilePath(tenantId: string, jobId: string): string {
+export function getSecureJobFilePath(tenantId: string, jobId: string, ext: string = '.csv'): string {
   if (!jobId || jobId.includes('..') || jobId.includes('/') || jobId.includes('\\')) {
     throw new Error('Path traversal attempt detected in job file creation.');
   }
@@ -59,7 +60,9 @@ export function getSecureJobFilePath(tenantId: string, jobId: string): string {
   if (!sanitizedJobId) {
     throw new Error('Invalid job identifier for upload storage.');
   }
-  const filePath = path.resolve(tenantDir, `import-${sanitizedJobId}.csv`);
+  const lowerExt = ext.toLowerCase();
+  const cleanExt = lowerExt.startsWith('.xls') ? (lowerExt.endsWith('x') ? '.xlsx' : '.xls') : '.csv';
+  const filePath = path.resolve(tenantDir, `import-${sanitizedJobId}${cleanExt}`);
   if (!filePath.startsWith(tenantDir)) {
     throw new Error('Path traversal attempt detected in job file creation.');
   }
@@ -70,13 +73,17 @@ export async function cleanupOrphanedUploads(maxAgeMs: number = 3600000): Promis
   try {
     if (!fs.existsSync(TEMP_DIR)) return;
     const now = Date.now();
+    const isImportFile = (name: string) =>
+      name.startsWith('import-') &&
+      (name.endsWith('.csv') || name.endsWith('.xlsx') || name.endsWith('.xls'));
+
     const entries = await fs.promises.readdir(TEMP_DIR, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory()) {
         const tenantDir = path.join(TEMP_DIR, entry.name);
         const files = await fs.promises.readdir(tenantDir, { withFileTypes: true });
         for (const file of files) {
-          if (file.isFile() && file.name.startsWith('import-') && file.name.endsWith('.csv')) {
+          if (file.isFile() && isImportFile(file.name)) {
             const filePath = path.join(tenantDir, file.name);
             try {
               const stat = await fs.promises.stat(filePath);
@@ -86,7 +93,7 @@ export async function cleanupOrphanedUploads(maxAgeMs: number = 3600000): Promis
             } catch {}
           }
         }
-      } else if (entry.isFile() && entry.name.startsWith('import-') && entry.name.endsWith('.csv')) {
+      } else if (entry.isFile() && isImportFile(entry.name)) {
         const filePath = path.join(TEMP_DIR, entry.name);
         try {
           const stat = await fs.promises.stat(filePath);
@@ -299,21 +306,27 @@ export class ImportQueueService {
 
     // 3. File Extension & MIME Type Check
     const originalFilename = part.filename || 'voter_data.csv';
-    const isCsv = originalFilename.toLowerCase().endsWith('.csv') || part.mimetype?.includes('csv') || part.mimetype === 'text/plain';
-    if (!isCsv) {
+    const lowerFilename = originalFilename.toLowerCase();
+    const isCsv = lowerFilename.endsWith('.csv') || part.mimetype?.includes('csv') || part.mimetype === 'text/plain';
+    const isXlsx = lowerFilename.endsWith('.xlsx') || part.mimetype?.includes('spreadsheetml');
+    const isXls = lowerFilename.endsWith('.xls') || part.mimetype?.includes('ms-excel');
+
+    if (!isCsv && !isXlsx && !isXls) {
       part.file.resume();
       return reply.status(400).send(
         errorResponse(
-          'Unsupported file type for streaming import. Only standard CSV files (.csv) are supported for large-scale streaming.',
+          'Unsupported file type for streaming import. Supported formats: .csv, .xlsx, .xls.',
           'INVALID_FILE_TYPE'
         )
       );
     }
 
+    const fileExt = isXlsx ? '.xlsx' : (isXls ? '.xls' : '.csv');
+
     // 4. Stream to unique temp file while computing SHA-256 hash (partitioned by tenant with secure permissions)
     const tenantId = config.organisationId || 'global-default';
     const importJobId = crypto.randomUUID();
-    const tempFilePath = getSecureJobFilePath(tenantId, importJobId);
+    const tempFilePath = getSecureJobFilePath(tenantId, importJobId, fileExt);
     const writeStream = fs.createWriteStream(tempFilePath, { mode: 0o600 });
     const hash = crypto.createHash('sha256');
 
@@ -344,24 +357,36 @@ export class ImportQueueService {
     const sha256 = hash.digest('hex');
     const idempotencyKey = crypto.createHash('sha256').update(`${constituency.id}:${sha256}`).digest('hex');
 
-    // 5. Rapid CSV Header Pre-validation: ensure essential columns exist
+    // 5. Rapid Header Pre-validation: ensure essential columns exist
     let headerValidated = false;
     let headerColumns: string[] = [];
     try {
-      const headerStream = fs.createReadStream(tempFilePath, { highWaterMark: 4096 });
-      const parser = headerStream.pipe(csv());
-      for await (const row of parser) {
-        headerColumns = Object.keys(row).map((k) => k.trim());
-        headerValidated = true;
-        headerStream.destroy();
-        break;
+      if (isCsv) {
+        const headerStream = fs.createReadStream(tempFilePath, { highWaterMark: 4096 });
+        const parser = headerStream.pipe(csv());
+        for await (const row of parser) {
+          headerColumns = Object.keys(row).map((k) => k.trim());
+          headerValidated = true;
+          headerStream.destroy();
+          break;
+        }
+      } else {
+        const wb = xlsx.readFile(tempFilePath, { sheetRows: 5 });
+        const firstSheet = wb.Sheets[wb.SheetNames[0]];
+        const sampleRows: any[][] = xlsx.utils.sheet_to_json(firstSheet, { header: 1, blankrows: false });
+        if (sampleRows.length > 0) {
+          headerColumns = sampleRows[0].map((c: any) => String(c ?? '').trim());
+          headerValidated = headerColumns.length > 0;
+        }
       }
-    } catch {}
+    } catch (err: any) {
+      console.warn('Header pre-validation notice:', err?.message);
+    }
 
     if (!headerValidated || headerColumns.length === 0) {
       await fs.promises.unlink(tempFilePath).catch(() => {});
       return reply.status(400).send(
-        errorResponse('Malformed or empty CSV file. Could not read header row.', 'MALFORMED_CSV')
+        errorResponse('Malformed or empty spreadsheet file. Could not read header row.', 'MALFORMED_SPREADSHEET')
       );
     }
 
@@ -640,9 +665,25 @@ export class ImportQueueService {
       let batchBuffer: any[] = [];
       const errorRecords: Array<{ rowNumber: number; field: string; value?: string; errorMessage: string }> = [];
 
-      const stream = fs.createReadStream(tempFilePath).pipe(csv());
+      const isExcel = tempFilePath.toLowerCase().endsWith('.xlsx') || tempFilePath.toLowerCase().endsWith('.xls');
 
-      for await (const rawRow of stream) {
+      async function* getRowSource(): AsyncIterable<any> {
+        if (isExcel) {
+          const wb = xlsx.readFile(tempFilePath!, { cellDates: true });
+          const firstSheet = wb.Sheets[wb.SheetNames[0]];
+          const rows: any[] = xlsx.utils.sheet_to_json(firstSheet, { defval: '' });
+          for (const r of rows) {
+            yield r;
+          }
+        } else {
+          const stream = fs.createReadStream(tempFilePath!).pipe(csv());
+          for await (const r of stream) {
+            yield r;
+          }
+        }
+      }
+
+      for await (const rawRow of getRowSource()) {
         if (isShuttingDown) {
           throw new Error('Worker received shutdown signal. Aborting gracefully.');
         }

@@ -251,7 +251,7 @@ function analyzeSheetGrid(rawGrid: any[][]): SheetAnalysisResult {
   let hasDetectedHeaders = false;
   let warningNote: string | undefined = undefined;
 
-  const colCount = Math.max(...nonEmptyRows.map((r) => r.length), 1);
+  const colCount = nonEmptyRows.slice(0, 50).reduce((max, r) => Math.max(max, r.length), 1);
 
   if (headerIndex >= 0) {
     hasDetectedHeaders = true;
@@ -553,7 +553,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
         }
       } else {
         const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: 'array' });
+        const workbook = XLSX.read(buffer, { type: 'array', sheetRows: 50 });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
 
@@ -626,229 +626,124 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
       return;
     }
 
-    const isCsv = selectedFile.name.toLowerCase().endsWith('.csv');
-
-    if (isCsv) {
-      // ── CSV Streaming Import via In-Process Background Worker ──
-      setIsMappingModalOpen(false);
-      setIsCommitting(true);
-      setUploadStatus('uploading');
-      setUploadPercentage(0);
-      setStatusMessage('Streaming CSV upload to server (multipart/form-data)...');
-      setUploadErrors([]);
-      setProcessingStats(null);
-
-      try {
-        const uploadRes = await uploadVoterCsvStream(
-          currentApp.id,
-          selectedFile,
-          {
-            targetConstituencyId: summary?.constituencyId,
-            importMode: 'APPEND',
-            columnMapping,
-          },
-          (pct) => {
-            setUploadPercentage(pct);
-            if (pct < 100) {
-              setStatusMessage(`Uploading CSV file... ${pct}%`);
-            } else {
-              setStatusMessage('Upload complete (100%). Finalizing file and creating job record...');
-            }
-          }
-        );
-
-        const jobId = uploadRes?.jobId || uploadRes?.id;
-        if (!jobId) {
-          throw new Error('Server did not return a valid job identifier.');
-        }
-
-        setUploadStatus('processing');
-        setStatusMessage('File received by server. Queued in PostgreSQL-backed worker...');
-
-        // Poll job status until COMPLETED, PARTIAL_SUCCESS, or FAILED
-        let pollCount = 0;
-        const pollTimer = setInterval(async () => {
-          try {
-            pollCount++;
-            const job = await fetchImportJobStatus(currentApp.id, jobId);
-            const status = job?.status;
-            const total = Number(job?.totalRecords || 0);
-            const processed = Number(job?.processedRecords || 0);
-            const imported = Number(job?.importedCount || 0);
-            const updated = Number(job?.updatedCount || 0);
-            const failed = Number(job?.failedCount || job?.errorCount || 0);
-
-            setProcessingStats({
-              valid: imported + updated,
-              imported,
-              updated,
-              failed,
-              total,
-            });
-
-            if (status === 'PROCESSING') {
-              const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
-              setStatusMessage(
-                `Processing voter records: ${processed.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')} (${pct}%) — batch size: 500 rows...`
-              );
-            } else if (status === 'COMPLETED') {
-              clearInterval(pollTimer);
-              setUploadStatus('success');
-              const totalCommitted = imported + updated;
-              setStatusMessage(
-                `Import completed successfully: ${totalCommitted.toLocaleString('en-IN')} voter records committed into PostgreSQL database.`
-              );
-              setIsCommitting(false);
-              await loadLiveData();
-            } else if (status === 'PARTIAL_SUCCESS') {
-              clearInterval(pollTimer);
-              setUploadStatus('partial');
-              const totalCommitted = imported + updated;
-              setStatusMessage(
-                `Partial import completed: ${totalCommitted.toLocaleString('en-IN')} records committed, ${failed.toLocaleString('en-IN')} records failed validation.`
-              );
-              if (Array.isArray(job.errors)) {
-                setUploadErrors(job.errors);
-              }
-              setIsCommitting(false);
-              await loadLiveData();
-            } else if (status === 'FAILED') {
-              clearInterval(pollTimer);
-              setUploadStatus('error');
-              const reason = job?.failureReason || 'Import failed';
-              if (reason === 'SOURCE_FILE_LOST_REUPLOAD_REQUIRED') {
-                setStatusMessage(
-                  'Import failed: The temporary source file was lost due to a container restart or sleep. On $0 ephemeral hosting (/tmp), please re-upload your CSV file.'
-                );
-              } else if (reason.includes('BULK_REPLACE_DISABLED')) {
-                setStatusMessage(
-                  'Bulk REPLACE mode is disabled to protect existing election turnouts and cross-constituency data integrity. Please use APPEND mode.'
-                );
-              } else {
-                setStatusMessage(`Import failed: ${reason}`);
-              }
-              if (Array.isArray(job.errors)) {
-                setUploadErrors(job.errors);
-              }
-              setIsCommitting(false);
-              await loadLiveData();
-            }
-          } catch (pollErr: any) {
-            console.warn('Job polling error:', pollErr);
-            if (pollCount > 300) {
-              clearInterval(pollTimer);
-              setUploadStatus('error');
-              setStatusMessage('Job monitoring timed out. Please check Import History to see final status.');
-              setIsCommitting(false);
-            }
-          }
-        }, 2000);
-
-      } catch (err: any) {
-        setUploadStatus('error');
-        setStatusMessage(err?.message || 'Streaming upload failed.');
-        setIsCommitting(false);
-      }
-      return;
-    }
-
-    // ── Existing XLSX / Small File In-Memory Path ──
+    // ── Unified Streaming Import via Background Worker (handles .csv, .xlsx, .xls) ──
+    setIsMappingModalOpen(false);
     setIsCommitting(true);
-    setUploadStatus('parsing');
-    setStatusMessage(`Preparing ${sheetRowObjects.length.toLocaleString('en-IN')} records for database commitment...`);
+    setUploadStatus('uploading');
+    setUploadPercentage(0);
+    setStatusMessage('Streaming file upload to server (multipart/form-data)...');
+    setUploadErrors([]);
+    setProcessingStats(null);
 
     try {
-      const BATCH_SIZE = 2000;
-      const totalBatches = Math.ceil(sheetRowObjects.length / BATCH_SIZE);
-      let totalImported = 0;
-      let totalUpdated = 0;
-      let totalFailed = 0;
-      const aggregatedErrors: Array<{ rowNumber?: number; field?: string; errorMessage: string; value?: string }> = [];
-
-      for (let b = 0; b < totalBatches; b++) {
-        const chunk = sheetRowObjects.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
-        const batchNum = b + 1;
-
-        setStatusMessage(
-          totalBatches > 1
-            ? `Committing batch ${batchNum} of ${totalBatches} (${totalImported.toLocaleString('en-IN')} committed, ${totalFailed.toLocaleString('en-IN')} failed)...`
-            : `Committing ${sheetRowObjects.length.toLocaleString('en-IN')} records to PostgreSQL database...`
-        );
-
-        try {
-          const res = await importVoterRolls(currentApp.id, {
-            rows: chunk,
-            columnMapping,
-            fileName: selectedFile.name,
-            fileSize: selectedFile.size,
-            targetConstituencyId: summary?.constituencyId,
-            importMode: 'APPEND',
-          });
-
-          const imported = Number(res?.importedCount ?? 0);
-          const updated = Number(res?.updatedCount ?? 0);
-          const failed = Number(res?.failedCount ?? res?.errorCount ?? 0);
-
-          totalImported += imported;
-          totalUpdated += updated;
-          totalFailed += failed;
-
-          if (Array.isArray(res?.errors)) {
-            aggregatedErrors.push(...res.errors);
-          }
-        } catch (batchErr: any) {
-          const batchErrData = batchErr?.data;
-          const failedCount = batchErrData?.failedCount ?? batchErrData?.errorCount ?? chunk.length;
-          totalFailed += failedCount;
-
-          if (Array.isArray(batchErrData?.errors)) {
-            aggregatedErrors.push(...batchErrData.errors);
+      const uploadRes = await uploadVoterCsvStream(
+        currentApp.id,
+        selectedFile,
+        {
+          targetConstituencyId: summary?.constituencyId,
+          importMode: 'APPEND',
+          columnMapping,
+        },
+        (pct) => {
+          setUploadPercentage(pct);
+          if (pct < 100) {
+            setStatusMessage(`Uploading file... ${pct}%`);
           } else {
-            aggregatedErrors.push({
-              rowNumber: b * BATCH_SIZE + 1,
-              errorMessage: batchErr?.message || 'Batch execution failed',
-            });
+            setStatusMessage('Upload complete (100%). Finalizing file and creating job record...');
           }
         }
+      );
+
+      const jobId = uploadRes?.jobId || uploadRes?.id;
+      if (!jobId) {
+        throw new Error('Server did not return a valid job identifier.');
       }
 
-      setIsMappingModalOpen(false);
-      setUploadErrors(aggregatedErrors);
+      setUploadStatus('processing');
+      setStatusMessage('File received by server. Queued in PostgreSQL-backed worker...');
 
-      const totalCommitted = totalImported + totalUpdated;
+      // Poll job status until COMPLETED, PARTIAL_SUCCESS, or FAILED
+      let pollCount = 0;
+      const pollTimer = setInterval(async () => {
+        try {
+          pollCount++;
+          const job = await fetchImportJobStatus(currentApp.id, jobId);
+          const status = job?.status;
+          const total = Number(job?.totalRecords || 0);
+          const processed = Number(job?.processedRecords || 0);
+          const imported = Number(job?.importedCount || 0);
+          const updated = Number(job?.updatedCount || 0);
+          const failed = Number(job?.failedCount || job?.errorCount || 0);
 
-      if (totalCommitted === 0) {
-        // Complete failure — 0 records committed!
-        setUploadStatus('error');
-        setStatusMessage(
-          `Import failed: 0 records committed into PostgreSQL database. All ${totalFailed.toLocaleString('en-IN')} records failed validation.`
-        );
-      } else if (totalFailed > 0) {
-        // Partial success
-        setUploadStatus('partial');
-        setStatusMessage(
-          `Partial import completed: ${totalCommitted.toLocaleString('en-IN')} records committed into PostgreSQL database, ${totalFailed.toLocaleString('en-IN')} records failed validation.`
-        );
-      } else {
-        // Full success
-        setUploadStatus('success');
-        setStatusMessage(
-          `Successfully committed ${totalCommitted.toLocaleString('en-IN')} records into PostgreSQL database.`
-        );
-      }
+          setProcessingStats({
+            valid: imported + updated,
+            imported,
+            updated,
+            failed,
+            total,
+          });
 
-      // Re-fetch genuine persisted metrics from PostgreSQL
-      await loadLiveData();
+          if (status === 'PROCESSING') {
+            const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+            setStatusMessage(
+              `Processing voter records: ${processed.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')} (${pct}%) — batch size: 500 rows...`
+            );
+          } else if (status === 'COMPLETED') {
+            clearInterval(pollTimer);
+            setUploadStatus('success');
+            const totalCommitted = imported + updated;
+            setStatusMessage(
+              `Import completed successfully: ${totalCommitted.toLocaleString('en-IN')} voter records committed into PostgreSQL database.`
+            );
+            setIsCommitting(false);
+            await loadLiveData();
+          } else if (status === 'PARTIAL_SUCCESS') {
+            clearInterval(pollTimer);
+            setUploadStatus('partial');
+            const totalCommitted = imported + updated;
+            setStatusMessage(
+              `Partial import completed: ${totalCommitted.toLocaleString('en-IN')} records committed, ${failed.toLocaleString('en-IN')} records failed validation.`
+            );
+            if (Array.isArray(job.errors)) {
+              setUploadErrors(job.errors);
+            }
+            setIsCommitting(false);
+            await loadLiveData();
+          } else if (status === 'FAILED') {
+            clearInterval(pollTimer);
+            setUploadStatus('error');
+            const reason = job?.failureReason || 'Import failed';
+            if (reason === 'SOURCE_FILE_LOST_REUPLOAD_REQUIRED') {
+              setStatusMessage(
+                'Import failed: The temporary source file was lost due to a container restart or sleep. On $0 ephemeral hosting (/tmp), please re-upload your file.'
+              );
+            } else if (reason.includes('BULK_REPLACE_DISABLED')) {
+              setStatusMessage(
+                'Bulk REPLACE mode is disabled to protect existing election turnouts and cross-constituency data integrity. Please use APPEND mode.'
+              );
+            } else {
+              setStatusMessage(`Import failed: ${reason}`);
+            }
+            if (Array.isArray(job.errors)) {
+              setUploadErrors(job.errors);
+            }
+            setIsCommitting(false);
+            await loadLiveData();
+          }
+        } catch (pollErr: any) {
+          console.warn('Job polling error:', pollErr);
+          if (pollCount > 300) {
+            clearInterval(pollTimer);
+            setUploadStatus('error');
+            setStatusMessage('Job monitoring timed out. Please check Import History to see final status.');
+            setIsCommitting(false);
+          }
+        }
+      }, 2000);
+
     } catch (err: any) {
-      setIsMappingModalOpen(false);
       setUploadStatus('error');
-      const msg = err?.message || '';
-      if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
-        setStatusMessage('Network connection failed. Unable to reach backend server (http://localhost:4000/api). Please verify the backend is running.');
-      } else {
-        setStatusMessage(msg || 'File ingestion failed.');
-      }
-    } finally {
+      setStatusMessage(err?.message || 'Streaming upload failed.');
       setIsCommitting(false);
     }
   };
