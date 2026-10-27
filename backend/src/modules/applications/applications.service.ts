@@ -4581,6 +4581,7 @@ export class ApplicationsService {
       totalTasks,
       totalMandals,
       totalConstituencies,
+      constituencyId: tenantConstituencyIds[0] || null,
     };
   }
 

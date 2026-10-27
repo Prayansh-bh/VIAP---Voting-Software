@@ -691,10 +691,10 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
           const job = await fetchImportJobStatus(currentApp.id, jobId);
           const status = job?.status;
           const total = Number(job?.totalRecords || 0);
-          const processed = Number(job?.processedRecords || 0);
-          const imported = Number(job?.importedCount || 0);
-          const updated = Number(job?.updatedCount || 0);
-          const failed = Number(job?.failedCount || job?.errorCount || 0);
+          const imported = Number(job?.importedRecords ?? job?.importedCount ?? 0);
+          const updated = Number(job?.updatedRecords ?? job?.updatedCount ?? 0);
+          const failed = Number(job?.failedRecords ?? job?.failedCount ?? job?.errorCount ?? 0);
+          const processed = Number(job?.validRecords ?? job?.processedRecords ?? (imported + updated));
 
           setProcessingStats({
             valid: imported + updated,
@@ -709,7 +709,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
             setStatusMessage(
               `Processing voter records: ${processed.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')} (${pct}%) — batch size: 500 rows...`
             );
-          } else if (status === 'COMPLETED') {
+          } else if (status === 'COMPLETED' || status === 'SUCCESS') {
             clearInterval(pollTimer);
             setUploadStatus('success');
             const totalCommitted = imported + updated;
@@ -723,10 +723,11 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
             setUploadStatus('partial');
             const totalCommitted = imported + updated;
             setStatusMessage(
-              `Partial import completed: ${totalCommitted.toLocaleString('en-IN')} records committed, ${failed.toLocaleString('en-IN')} records failed validation.`
+              `Partial import completed: ${totalCommitted.toLocaleString('en-IN')} records committed successfully, ${failed.toLocaleString('en-IN')} record${failed === 1 ? '' : 's'} skipped (failed validation).`
             );
             if (Array.isArray(job.errors)) {
               setUploadErrors(job.errors);
+              setShowErrorDetails(true);
             }
             setIsCommitting(false);
             await loadLiveData();
