@@ -531,11 +531,11 @@ export async function uploadVoterCsvStream(
   const token = getAdminToken();
   const url = `${API_BASE}/applications/${appId}/data/import/upload`;
   const formData = new FormData();
-  formData.append('file', file, file.name);
   if (fields.targetConstituencyId) formData.append('targetConstituencyId', fields.targetConstituencyId);
   if (fields.importMode) formData.append('importMode', fields.importMode);
   if (fields.columnMapping) formData.append('columnMapping', JSON.stringify(fields.columnMapping));
   if (fields.voterGroupSize) formData.append('voterGroupSize', String(fields.voterGroupSize));
+  formData.append('file', file, file.name);
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();

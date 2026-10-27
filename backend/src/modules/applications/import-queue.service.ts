@@ -397,7 +397,7 @@ export class ImportQueueService {
     await prisma.$transaction(async (tx) => {
       // Serialize concurrent uploads for this constituency using PostgreSQL advisory lock
       const lockKey = getConstituencyLockKey(constituency.id);
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(${lockKey}::bigint)`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey}::bigint)`;
 
       existingDuplicate = await tx.dataImport.findFirst({
         where: {
@@ -1018,7 +1018,7 @@ export class ImportQueueService {
       async (tx) => {
         // Enforce advisory lock during write batch
         const lockKey = getConstituencyLockKey(constituency.id);
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(${lockKey}::bigint)`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey}::bigint)`;
 
         // Pass 1: Resolve Mandal, Village, and Booth hierarchies for all items
         for (const item of filteredItems) {
