@@ -247,14 +247,6 @@ export class OtpService {
     // 4. Timing-safe cryptographic comparison (primary authoritative path)
     let isValid = verifyOtpHash(otpCode, record.mobileNumber, record.otpCode);
 
-    // Fallback: If not matched via dispatched OTP, check if user has a provisioned passwordHash (e.g. default passcode 123456)
-    if (!isValid && record.userId) {
-      const u = record.user || (await prisma.user.findUnique({ where: { id: record.userId }, select: { passwordHash: true } }));
-      if (u?.passwordHash && bcrypt.compareSync(otpCode, u.passwordHash)) {
-        isValid = true;
-      }
-    }
-
     // Development/testing explicit opt-in mock OTP verification (strictly non-production, fails closed)
     if (!isValid && OtpService.isDevMockOtpAllowed()) {
       const staticCode = env.OTP_STATIC_CODE || '123456';
