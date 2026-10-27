@@ -22,7 +22,7 @@ export class VotersController {
   static async createVoter(req: FastifyRequest, reply: FastifyReply) {
     const body = req.body as any;
     if (body?.unitId && !assertUnitAccess(req, reply, body.unitId)) return;
-    const voter = await VotersService.createVoter(body, req.user!.userId);
+    const voter = await VotersService.createVoter(body, req.user!.userId, req.hierarchyScope);
     return reply.status(201).send(successResponse(voter, 'Voter record created'));
   }
 
@@ -103,12 +103,12 @@ export class VotersController {
       rows?: any[];
       data?: any[];
       validateOnly?: boolean;
-      importMode?: 'APPEND' | 'REPLACE';
-      mode?: 'APPEND' | 'REPLACE';
+      importMode?: 'APPEND' | 'REPLACE' | 'UPSERT' | 'REFRESH';
+      mode?: 'APPEND' | 'REPLACE' | 'UPSERT' | 'REFRESH';
       voterGroupSize?: number;
     };
     const rows = Array.isArray(body?.rows) ? body.rows : Array.isArray(body?.data) ? body.data : null;
-    const importMode = (body?.importMode || body?.mode || 'APPEND') as 'APPEND' | 'REPLACE';
+    const importMode = (body?.importMode || body?.mode || 'REFRESH') as 'APPEND' | 'REPLACE' | 'UPSERT' | 'REFRESH';
     if (!body || !body.constituencyId || !rows) {
       return reply.status(400).send(errorResponse('Invalid payload: constituencyId and rows array required.', 'INVALID_PAYLOAD'));
     }

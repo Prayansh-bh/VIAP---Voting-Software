@@ -15,12 +15,27 @@ import {
   ChevronDown,
   ChevronUp,
   Eye,
+  Users,
+  Download,
+  ShieldCheck,
+  Key,
 } from 'lucide-react';
 import { AppInstance, ApplicationSummary } from '../types';
-import { fetchApplicationSummary, fetchVotersList, importVoterRolls, uploadVoterCsvStream, fetchImportJobStatus } from '../lib/api';
+import {
+  fetchApplicationSummary,
+  fetchVotersList,
+  importVoterRolls,
+  uploadVoterCsvStream,
+  fetchImportJobStatus,
+  fetchInchargeRosterPreview,
+  provisionInchargesApi,
+  downloadInchargeRosterCsv,
+} from '../lib/api';
 
 interface DataIngestionProps {
   currentApp: AppInstance | null;
+  apps?: AppInstance[];
+  onSelectApp?: (app: AppInstance) => void;
 }
 
 const MAX_EXCEL_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25MB
@@ -290,7 +305,7 @@ function analyzeSheetGrid(rawGrid: any[][]): SheetAnalysisResult {
   };
 }
 
-export default function DataIngestion({ currentApp }: DataIngestionProps) {
+export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIngestionProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'parsing' | 'uploading' | 'processing' | 'success' | 'partial' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
@@ -310,6 +325,11 @@ export default function DataIngestion({ currentApp }: DataIngestionProps) {
   const [voters, setVoters] = useState<any[]>([]);
   const [totalVotersCount, setTotalVotersCount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
+
+  // Incharge Roster States
+  const [rosterSummary, setRosterSummary] = useState<any>(null);
+  const [isProvisioning, setIsProvisioning] = useState(false);
+  const [provisionMessage, setProvisionMessage] = useState<string | null>(null);
 
   // Column Mapping & Pre-Commit Preview Modal States
   const [isMappingModalOpen, setIsMappingModalOpen] = useState(false);
@@ -332,10 +352,59 @@ export default function DataIngestion({ currentApp }: DataIngestionProps) {
       setSummary(sum);
       setVoters(vList.items);
       setTotalVotersCount(sum?.totalVoters ?? vList.total);
+
+      if (sum?.constituencyId) {
+        try {
+          const rPrev = await fetchInchargeRosterPreview(sum.constituencyId);
+          setRosterSummary(rPrev?.summary || null);
+        } catch {
+          setRosterSummary(null);
+        }
+      } else {
+        setRosterSummary(null);
+      }
     } catch (err) {
       console.warn('Failed to load live ingestion summary from DB:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleProvisionIncharges = async () => {
+    if (!summary?.constituencyId) {
+      alert('Please ingest voter rolls first before provisioning incharges.');
+      return;
+    }
+    setIsProvisioning(true);
+    setProvisionMessage(null);
+    try {
+      const res = await provisionInchargesApi(summary.constituencyId, {
+        partyCode: currentApp?.partyCode || currentApp?.name,
+        defaultPasscode: '123456',
+      });
+      const s = res?.summary;
+      setProvisionMessage(
+        `Successfully provisioned ${s?.totalUsersProvisioned || 0} incharge logins: ` +
+        `${s?.mandalsProvisioned || 0} Mandals, ${s?.villagesProvisioned || 0} Villages/PS, ` +
+        `${s?.boothsProvisioned || 0} Booths, ${s?.groupsProvisioned || 0} 100-Voter Groups! Default Passcode: ${s?.defaultPasscode || '123456'}`
+      );
+      await loadLiveData();
+    } catch (err: any) {
+      alert(err?.message || 'Failed to provision incharges');
+    } finally {
+      setIsProvisioning(false);
+    }
+  };
+
+  const handleDownloadRoster = async () => {
+    if (!summary?.constituencyId) {
+      alert('No constituency found to download roster for.');
+      return;
+    }
+    try {
+      await downloadInchargeRosterCsv(summary.constituencyId);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to download roster CSV');
     }
   };
 
@@ -787,7 +856,7 @@ export default function DataIngestion({ currentApp }: DataIngestionProps) {
   const totalMandals = summary?.totalMandals ?? 0;
   const totalBooths = summary?.totalBooths ?? 0;
   const totalVoters = summary?.totalVoters ?? totalVotersCount;
-  const totalConstituencies = summary?.totalConstituencies ?? (currentApp ? 1 : 0);
+  const totalConstituencies = summary?.totalConstituencies ?? 0;
 
   return (
     <div className="space-y-6">
@@ -804,7 +873,27 @@ export default function DataIngestion({ currentApp }: DataIngestionProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-3 text-xs text-slate-400">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+          {apps && apps.length > 0 && (
+            <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700">
+              <span className="text-[11px] font-bold text-slate-300">Party Tenant:</span>
+              <select
+                value={currentApp?.id || ''}
+                onChange={(e) => {
+                  const target = apps.find((a) => a.id === e.target.value);
+                  if (target && onSelectApp) onSelectApp(target);
+                }}
+                className="bg-slate-900 border border-slate-700 text-amber-400 text-xs font-bold rounded-lg px-2.5 py-1 focus:outline-none focus:border-cyan-400 cursor-pointer"
+              >
+                {apps.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name || a.party || a.partyCode || a.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <button
             onClick={loadLiveData}
             disabled={loading}
@@ -1299,6 +1388,134 @@ export default function DataIngestion({ currentApp }: DataIngestionProps) {
           </div>
           <div className="text-[11px] text-cyan-400 font-bold">
             {totalVoters > 0 ? 'PostgreSQL Live Records' : '0 Enrolled Voters'}
+          </div>
+        </div>
+      </div>
+
+      {/* Cadre Incharge Logins & Credential Roster Center */}
+      <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-white">Cadre Incharge Logins & Credential Roster</h2>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                  {currentApp?.name || 'Party'} Tenant
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Every party has isolated incharge logins generated dynamically after roll ingestion with predictable aliases and passcodes.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={handleProvisionIncharges}
+              disabled={isProvisioning || !summary?.constituencyId}
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 transition cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <Key className={`w-3.5 h-3.5 ${isProvisioning ? 'animate-spin' : ''}`} />
+              <span>{isProvisioning ? 'Provisioning Cadres...' : 'Provision Incharge Logins'}</span>
+            </button>
+
+            <button
+              onClick={handleDownloadRoster}
+              disabled={!summary?.constituencyId}
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition cursor-pointer flex items-center gap-2 disabled:opacity-50"
+            >
+              <Download className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Download Credential Roster (.CSV)</span>
+            </button>
+          </div>
+        </div>
+
+        {provisionMessage && (
+          <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400" />
+            <span>{provisionMessage}</span>
+          </div>
+        )}
+
+        {/* 4 Incharge Hierarchy Tiers */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Tier 1: Mandal Incharge */}
+          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">1. Mandal Incharge</span>
+              <span className="text-xs font-bold font-mono text-slate-300">
+                {rosterSummary?.requiredRosterCounts?.mandalIncharges?.assigned ?? 0} / {rosterSummary?.requiredRosterCounts?.mandalIncharges?.required ?? totalMandals}
+              </span>
+            </div>
+            <div className="text-xs text-slate-300 font-mono">
+              UserCode: <span className="text-cyan-400">MDL-&lt;SLUG&gt;</span>
+            </div>
+            <div className="text-xs text-slate-400 font-mono">
+              Login Mobile: <span className="text-slate-300">9101000001 - 9101000006</span>
+            </div>
+            <div className="text-[11px] text-slate-500">
+              Passcode: <strong className="text-emerald-400">123456</strong>
+            </div>
+          </div>
+
+          {/* Tier 2: Village / PS Incharge */}
+          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">2. Village Incharge</span>
+              <span className="text-xs font-bold font-mono text-slate-300">
+                {rosterSummary?.requiredRosterCounts?.villageIncharges?.assigned ?? 0} / {rosterSummary?.requiredRosterCounts?.villageIncharges?.required ?? (rosterSummary?.pollingStationsCount || 0)}
+              </span>
+            </div>
+            <div className="text-xs text-slate-300 font-mono">
+              UserCode: <span className="text-cyan-400">VIL-&lt;001..151&gt;</span>
+            </div>
+            <div className="text-xs text-slate-400 font-mono">
+              Login Mobile: <span className="text-slate-300">9102000001 - 9102000151</span>
+            </div>
+            <div className="text-[11px] text-slate-500">
+              Mapped to: <strong>Polling Station Name</strong>
+            </div>
+          </div>
+
+          {/* Tier 3: Booth Incharge */}
+          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">3. Booth Incharge</span>
+              <span className="text-xs font-bold font-mono text-slate-300">
+                {rosterSummary?.requiredRosterCounts?.boothIncharges?.assigned ?? 0} / {rosterSummary?.requiredRosterCounts?.boothIncharges?.required ?? totalBooths}
+              </span>
+            </div>
+            <div className="text-xs text-slate-300 font-mono">
+              UserCode: <span className="text-cyan-400">BTH-&lt;001..283&gt;</span>
+            </div>
+            <div className="text-xs text-slate-400 font-mono">
+              Login Mobile: <span className="text-slate-300">9103000001 - 9103000283</span>
+            </div>
+            <div className="text-[11px] text-slate-500">
+              Mapped to: <strong>Part / Booth Number</strong>
+            </div>
+          </div>
+
+          {/* Tier 4: 100-Voter Group Incharge */}
+          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400">4. 100-Voter Incharge</span>
+              <span className="text-xs font-bold font-mono text-slate-300">
+                {rosterSummary?.requiredRosterCounts?.groupIncharges?.assigned ?? 0} / {rosterSummary?.requiredRosterCounts?.groupIncharges?.required ?? (rosterSummary?.groupsCount || 0)}
+              </span>
+            </div>
+            <div className="text-xs text-slate-300 font-mono">
+              UserCode: <span className="text-cyan-400">B&lt;Part&gt;-V&lt;Index&gt;</span>
+            </div>
+            <div className="text-xs text-slate-400 font-mono">
+              Login Mobile: <span className="text-slate-300">9104000001 upwards</span>
+            </div>
+            <div className="text-[11px] text-slate-500">
+              Capacity: <strong>Strict Max 100 Electors</strong>
+            </div>
           </div>
         </div>
       </div>

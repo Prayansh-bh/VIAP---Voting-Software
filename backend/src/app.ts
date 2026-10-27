@@ -55,14 +55,26 @@ export function buildApp(): FastifyInstance {
     }
   });
 
-  // Security Headers Hook (zero external dependencies)
-  app.addHook('onSend', async (_request, reply) => {
+  // Security & Cache Protection Headers Hook (zero external dependencies)
+  app.addHook('onSend', async (request, reply) => {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('X-Frame-Options', 'DENY');
     reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
     reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
     if (env.NODE_ENV === 'production') {
       reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+
+    // Comprehensive Cache Protection:
+    // Prevent intermediate proxies, CDNs, and browser caches from caching sensitive API data
+    // (authenticated endpoints, voter rolls, OTPs, WhatsApp statuses, pairing credentials, audit data).
+    // Static assets under /api/cms/assets/ retain their immutable cache policy.
+    const url = request.raw.url || '';
+    if (!url.startsWith('/api/cms/assets/')) {
+      reply.header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      reply.header('Pragma', 'no-cache');
+      reply.header('Expires', '0');
+      reply.header('Surrogate-Control', 'no-store');
     }
   });
 

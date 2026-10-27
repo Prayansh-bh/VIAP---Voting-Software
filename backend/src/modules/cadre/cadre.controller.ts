@@ -3,6 +3,7 @@ import { errorResponse, successResponse } from '../../common/response.js';
 import { assertOrganisationAccess, assertUserScope } from '../../middleware/rbac.js';
 import { prisma } from '../../lib/prisma.js';
 import { CadreService } from './cadre.service.js';
+import { InchargeProvisioningService } from './incharge-provisioning.service.js';
 
 export class CadreController {
   static async listCadre(req: FastifyRequest<{ Querystring: { page?: string; limit?: string } }>, reply: FastifyReply) {
@@ -101,5 +102,67 @@ export class CadreController {
       isSuperAdmin,
     );
     return reply.send(successResponse(perf));
+  }
+
+  static async getRosterPreview(req: FastifyRequest<{ Params: { constituencyId: string } }>, reply: FastifyReply) {
+    const { constituencyId } = req.params;
+    if (!constituencyId) {
+      return reply.status(400).send(errorResponse('constituencyId is required', 'VALIDATION_ERROR'));
+    }
+
+    // Role-wise scope verification: fail-closed if out of scope
+    if (req.hierarchyScope && !req.hierarchyScope.isGlobalScope) {
+      if (!req.hierarchyScope.accessibleConstituencyIds.has(constituencyId)) {
+        return reply.status(403).send(errorResponse('Access denied to this constituency roster', 'FORBIDDEN_SCOPE'));
+      }
+    }
+
+    const preview = await InchargeProvisioningService.generateRosterPreview(constituencyId);
+    return reply.send(successResponse(preview));
+  }
+
+  static async provisionRoster(
+    req: FastifyRequest<{ Params: { constituencyId: string }; Body?: { partyCode?: string; defaultPasscode?: string } }>,
+    reply: FastifyReply
+  ) {
+    const { constituencyId } = req.params;
+    if (!constituencyId) {
+      return reply.status(400).send(errorResponse('constituencyId is required', 'VALIDATION_ERROR'));
+    }
+
+    if (req.hierarchyScope && !req.hierarchyScope.isGlobalScope) {
+      if (!req.hierarchyScope.accessibleConstituencyIds.has(constituencyId)) {
+        return reply.status(403).send(errorResponse('Access denied to this constituency roster', 'FORBIDDEN_SCOPE'));
+      }
+    }
+
+    const body = req.body || {};
+    const result = await InchargeProvisioningService.provisionIncharges({
+      constituencyId,
+      organisationId: req.user?.organisationId ?? undefined,
+      partyCode: body.partyCode,
+      defaultPasscode: body.defaultPasscode || '123456',
+      actorId: req.user?.userId,
+    });
+
+    return reply.status(201).send(successResponse(result, 'Cadre incharge accounts provisioned successfully'));
+  }
+
+  static async exportRoster(req: FastifyRequest<{ Params: { constituencyId: string } }>, reply: FastifyReply) {
+    const { constituencyId } = req.params;
+    if (!constituencyId) {
+      return reply.status(400).send(errorResponse('constituencyId is required', 'VALIDATION_ERROR'));
+    }
+
+    if (req.hierarchyScope && !req.hierarchyScope.isGlobalScope) {
+      if (!req.hierarchyScope.accessibleConstituencyIds.has(constituencyId)) {
+        return reply.status(403).send(errorResponse('Access denied to this constituency roster', 'FORBIDDEN_SCOPE'));
+      }
+    }
+
+    const csv = await InchargeProvisioningService.exportRosterCsv(constituencyId);
+    reply.header('Content-Type', 'text/csv');
+    reply.header('Content-Disposition', `attachment; filename="incharge_roster_${constituencyId}.csv"`);
+    return reply.send(csv);
   }
 }

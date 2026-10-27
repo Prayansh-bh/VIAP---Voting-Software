@@ -57,33 +57,33 @@ export class ApplicationsController {
 
   static async getConfiguration(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId } = req.params as { applicationId: string };
-    const data = await ApplicationsService.getConfiguration(applicationId);
+    const data = await ApplicationsService.getConfiguration(applicationId, req.user);
     return reply.send(successResponse(data));
   }
 
   static async getHierarchy(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId } = req.params as { applicationId: string };
-    const data = await ApplicationsService.getHierarchy(applicationId);
+    const data = await ApplicationsService.getHierarchy(applicationId, req.hierarchyScope, req.user);
     return reply.send(successResponse(data));
   }
 
   static async getHierarchyNodes(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId, level } = req.params as { applicationId: string; level: string };
     const query = req.query as { parentId?: string };
-    const data = await ApplicationsService.getHierarchyNodesByLevel(applicationId, level, query?.parentId);
+    const data = await ApplicationsService.getHierarchyNodesByLevel(applicationId, level, query?.parentId, req.hierarchyScope, req.user);
     return reply.send(successResponse(data));
   }
 
   static async getConstituencies(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId } = req.params as { applicationId: string };
     const query = req.query as { stateId?: string; zoneId?: string; parliamentId?: string };
-    const data = await ApplicationsService.getConstituencies(applicationId, query);
+    const data = await ApplicationsService.getConstituencies(applicationId, query, req.hierarchyScope, req.user);
     return reply.send(successResponse(data));
   }
 
   static async getConstituencyDetail(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId, id } = req.params as { applicationId: string; id: string };
-    const data = await ApplicationsService.getConstituencyDetail(applicationId, id);
+    const data = await ApplicationsService.getConstituencyDetail(applicationId, id, req.hierarchyScope, req.user);
     return reply.send(successResponse(data));
   }
 
@@ -210,13 +210,13 @@ export class ApplicationsController {
       endDate: query?.endDate,
       page: query?.page ? parseInt(query.page, 10) : 1,
       limit: query?.limit ? parseInt(query.limit, 10) : 20,
-    }, req.hierarchyScope);
+    }, req.hierarchyScope, req.user);
     return reply.send(successResponse(data));
   }
 
   static async getDataImportById(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId, importId } = req.params as { applicationId?: string; importId: string };
-    const data = await ApplicationsService.getDataImportById(importId, applicationId, req.hierarchyScope, req.user?.userId);
+    const data = await ApplicationsService.getDataImportById(importId, applicationId, req.hierarchyScope, req.user?.userId, req.user);
     return reply.send(successResponse(data));
   }
 
@@ -226,7 +226,7 @@ export class ApplicationsController {
     if (!id) {
       return reply.status(400).send({ success: false, error: { message: 'Import ID is required' } });
     }
-    const data = await ApplicationsService.getDataImportErrors(id, applicationId, req.hierarchyScope, req.user?.userId);
+    const data = await ApplicationsService.getDataImportErrors(id, applicationId, req.hierarchyScope, req.user?.userId, req.user);
     return reply.send(successResponse(data));
   }
 
@@ -336,20 +336,20 @@ export class ApplicationsController {
   static async getBooths(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId } = req.params as { applicationId: string };
     const query = req.query as { villageId?: string };
-    const data = await ApplicationsService.getHierarchyNodesByLevel(applicationId, 'BOOTH', query?.villageId);
+    const data = await ApplicationsService.getHierarchyNodesByLevel(applicationId, 'BOOTH', query?.villageId, req.hierarchyScope, req.user);
     return reply.send(successResponse(data));
   }
 
   static async getVoterGroups(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId } = req.params as { applicationId: string };
     const query = req.query as { boothId?: string };
-    const data = await ApplicationsService.getHierarchyNodesByLevel(applicationId, 'VOTER_GROUP', query?.boothId);
+    const data = await ApplicationsService.getHierarchyNodesByLevel(applicationId, 'VOTER_GROUP', query?.boothId, req.hierarchyScope, req.user);
     return reply.send(successResponse(data));
   }
 
   static async getSummary(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId } = req.params as { applicationId: string };
-    const data = await ApplicationsService.getSummary(applicationId, req.hierarchyScope);
+    const data = await ApplicationsService.getSummary(applicationId, req.hierarchyScope, req.user);
     return reply.send(successResponse(data));
   }
 

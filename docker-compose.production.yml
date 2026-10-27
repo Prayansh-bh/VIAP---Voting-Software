@@ -48,6 +48,8 @@ services:
       - WHATSAPP_PROVIDER=baileys
       - WHATSAPP_BAILEYS_AUTH_DIR=/app/.baileys_auth
       - ALLOW_MOCK_OTP=false
+    volumes:
+      - baileys_auth_data:/app/.baileys_auth
     depends_on:
       - postgres
       - redis
@@ -70,3 +72,4 @@ volumes:
   postgres_data:
   redis_data:
   ssl_certs:
+  baileys_auth_data:

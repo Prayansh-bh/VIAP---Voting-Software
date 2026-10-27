@@ -2624,19 +2624,15 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                   <h4 className="text-[10px] font-black uppercase text-slate-800 tracking-wider">2. Registration & Status</h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1.5">
-                      <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Voter Status</label>
+                      <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Operational Verification Status</label>
                       <select
                         value={editStatus}
                         onChange={(e) => setEditStatus(e.target.value as VoterStatus)}
                         className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold focus:outline-none focus:border-yellow-400"
                       >
-                        <option value="Active">Active / Valid resident</option>
-                        <option value="Shifted">Shifted / Migrated address</option>
-                        <option value="Deceased">Deceased voter</option>
-                        <option value="Duplicate">Duplicate registration</option>
-                        <option value="Fake">Fake registration / Flag delete</option>
-                        <option value="Doubtful">Doubtful registration</option>
-                        <option value="Unknown">Unknown registration</option>
+                        <option value="Active">Active / Valid Resident</option>
+                        <option value="Fake">Fake / Unverified Entry</option>
+                        <option value="Doubtful">Doubtful Registration</option>
                       </select>
                     </div>
 

@@ -308,6 +308,7 @@ model Constituency {
   isReservedST    Boolean          @default(false)
   totalVoters     Int              @default(0)
   mandals         Mandal[]
+  pollingStations PollingStation[]
   voters          Voter[]
   users           UserHierarchyAssignment[]
   tasks           Task[]           @relation("ConstituencyTasks")
@@ -334,6 +335,7 @@ model Mandal {
   mandalNumber    Int?
   totalVoters     Int              @default(0)
   villages        Village[]
+  pollingStations PollingStation[]
   voters          Voter[]
   users           UserHierarchyAssignment[]
   reports         GroundReport[]
@@ -365,27 +367,53 @@ model Village {
   @@index([code])
 }
 
-model Booth {
-  id              String           @id @default(uuid()) @db.Uuid
-  villageId       String           @db.Uuid
-  village         Village          @relation(fields: [villageId], references: [id], onDelete: Cascade)
-  boothNumber     String
-  code            String           @unique
-  name            String
-  pollingStation  String?
+model PollingStation {
+  id                  String                    @id @default(uuid()) @db.Uuid
+  constituencyId      String                    @db.Uuid
+  constituency        Constituency              @relation(fields: [constituencyId], references: [id], onDelete: Cascade)
+  mandalId            String                    @db.Uuid
+  mandal              Mandal                    @relation(fields: [mandalId], references: [id], onDelete: Cascade)
+  name                String
+  code                String                    @unique
+  stationNumber       Int?
   locationCoordinates Json?
-  totalVoters     Int              @default(0)
-  voterGroups     VoterGroup[]
-  voters          Voter[]
-  users           UserHierarchyAssignment[]
-  cadreAssignments CadreAssignment[]
-  pollingReports  PollingReport[]
-  reports         GroundReport[]
-  tasks           Task[]           @relation("BoothTasks")
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  totalVoters         Int                       @default(0)
+  totalBooths         Int                       @default(0)
+  booths              Booth[]
+  users               UserHierarchyAssignment[]
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+
+  @@unique([constituencyId, mandalId, name])
+  @@index([constituencyId])
+  @@index([mandalId])
+  @@index([name])
+}
+
+model Booth {
+  id                  String           @id @default(uuid()) @db.Uuid
+  villageId           String           @db.Uuid
+  village             Village          @relation(fields: [villageId], references: [id], onDelete: Cascade)
+  pollingStationId    String?          @db.Uuid
+  stationRef          PollingStation?  @relation(fields: [pollingStationId], references: [id], onDelete: SetNull)
+  boothNumber         String
+  code                String           @unique
+  name                String
+  pollingStation      String?
+  locationCoordinates Json?
+  totalVoters         Int              @default(0)
+  voterGroups         VoterGroup[]
+  voters              Voter[]
+  users               UserHierarchyAssignment[]
+  cadreAssignments    CadreAssignment[]
+  pollingReports      PollingReport[]
+  reports             GroundReport[]
+  tasks               Task[]           @relation("BoothTasks")
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
 
   @@index([villageId])
+  @@index([pollingStationId])
   @@index([code])
   @@index([boothNumber])
 }
@@ -533,20 +561,23 @@ model UserHierarchyAssignment {
   constituency    Constituency?    @relation(fields: [constituencyId], references: [id], onDelete: Cascade)
   mandalId        String?          @db.Uuid
   mandal          Mandal?          @relation(fields: [mandalId], references: [id], onDelete: Cascade)
-  villageId       String?          @db.Uuid
-  village         Village?         @relation(fields: [villageId], references: [id], onDelete: Cascade)
-  boothId         String?          @db.Uuid
-  booth           Booth?           @relation(fields: [boothId], references: [id], onDelete: Cascade)
-  voterGroupId    String?          @db.Uuid
-  voterGroup      VoterGroup?      @relation(fields: [voterGroupId], references: [id], onDelete: Cascade)
-  isActive        Boolean          @default(true)
-  assignedAt      DateTime         @default(now())
+  villageId           String?          @db.Uuid
+  village             Village?         @relation(fields: [villageId], references: [id], onDelete: Cascade)
+  pollingStationId    String?          @db.Uuid
+  pollingStationRef   PollingStation?  @relation(fields: [pollingStationId], references: [id], onDelete: SetNull)
+  boothId             String?          @db.Uuid
+  booth               Booth?           @relation(fields: [boothId], references: [id], onDelete: Cascade)
+  voterGroupId        String?          @db.Uuid
+  voterGroup          VoterGroup?      @relation(fields: [voterGroupId], references: [id], onDelete: Cascade)
+  isActive            Boolean          @default(true)
+  assignedAt          DateTime         @default(now())
 
   @@index([userId])
   @@index([roleType])
   @@index([constituencyId])
   @@index([mandalId])
   @@index([villageId])
+  @@index([pollingStationId])
   @@index([boothId])
   @@index([voterGroupId])
 }

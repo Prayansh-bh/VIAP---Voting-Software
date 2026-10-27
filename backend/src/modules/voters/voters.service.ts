@@ -2,6 +2,7 @@ import { AuditAction, FakeVoterStatus, NotificationType, Prisma, VoterLocationSt
 import { prisma } from '../../lib/prisma.js';
 import { logAudit } from '../../middleware/audit.js';
 import { emitHierarchyEvent } from '../../lib/socket.js';
+import { env } from '../../config/env.js';
 import {
   CreateVoterDto,
   FlagFakeVoterDto,
@@ -147,9 +148,14 @@ export class VotersService {
           where.boothId = ids.length > 0 ? { in: ids } : '00000000-0000-0000-0000-000000000000';
         }
       } else if (scope.role === 'VILLAGE_INCHARGE') {
-        if (!villageId) {
-          const ids = Array.from(scope.accessibleVillageIds);
-          where.villageId = ids.length > 0 ? { in: ids } : '00000000-0000-0000-0000-000000000000';
+        if (!villageId && !boothId) {
+          const bIds = Array.from(scope.accessibleBoothIds);
+          if (bIds.length > 0) {
+            where.boothId = { in: bIds };
+          } else {
+            const ids = Array.from(scope.accessibleVillageIds);
+            where.villageId = ids.length > 0 ? { in: ids } : '00000000-0000-0000-0000-000000000000';
+          }
         }
       } else if (scope.role === 'MANDAL_INCHARGE') {
         if (!mandalId) {
@@ -311,7 +317,7 @@ export class VotersService {
     return voter;
   }
 
-  static async createVoter(dto: CreateVoterDto, actorId: string) {
+  static async createVoter(dto: CreateVoterDto, actorId: string, scope?: import('../../common/types.js').UserHierarchyScope) {
     // 1. Prevent duplicate EPIC numbers
     const duplicate = await prisma.voter.findUnique({
       where: { epicNumber: dto.epicNumber },
@@ -329,138 +335,297 @@ export class VotersService {
     let boothId = dto.boothId;
     let voterGroupId = dto.voterGroupId;
     let unitId = dto.unitId;
+    let stateId: string | null = null;
+    let zoneId: string | null = null;
+    let parliamentId: string | null = null;
 
     // Resolve hierarchy tree if booth is provided
     if (boothId && (!villageId || !mandalId || !constituencyId)) {
       const b = await prisma.booth.findUnique({
         where: { id: boothId },
-        include: { village: { include: { mandal: true } } },
+        include: { village: { include: { mandal: { include: { constituency: { include: { parliament: { include: { zone: true } } } } } } } } },
       });
       if (b) {
         villageId = villageId || b.villageId;
         mandalId = mandalId || b.village.mandalId;
         constituencyId = constituencyId || b.village.mandal.constituencyId;
+        parliamentId = b.village.mandal.constituency?.parliamentId || null;
+        zoneId = b.village.mandal.constituency?.parliament?.zoneId || null;
+        stateId = b.village.mandal.constituency?.parliament?.zone?.stateId || null;
       }
     }
 
-    const voter = await prisma.voter.create({
-      data: {
-        serialNumber: dto.serialNumber ?? 1,
-        epicNumber: dto.epicNumber,
-        name: dto.name,
-        fatherHusbandName: dto.fatherHusbandName,
-        relationType: dto.relationType,
-        houseNumber: dto.houseNumber,
-        age: dto.age,
-        gender: dto.gender,
-        mobileNumber: dto.mobileNumber,
-        constituencyId,
-        mandalId,
-        villageId,
-        boothId,
-        voterGroupId,
-        unitId,
-        assignedInchargeId: dto.assignedInchargeId,
-        caste: dto.caste,
-        subCaste: dto.subCaste,
-        profession: dto.profession,
-        politicalPreference: dto.politicalPreference,
-        voterStatus: dto.voterStatus,
-        surveyStatus: dto.surveyStatus,
-        voterLocationStatus: dto.voterLocationStatus,
-        currentLocation: dto.currentLocation,
-        notes: dto.notes,
-      },
-    });
+    if (constituencyId) {
+      const constRecord = await prisma.constituency.findUnique({
+        where: { id: constituencyId },
+        include: { parliament: { include: { zone: { include: { state: true } } } } },
+      });
+      if (!constRecord) {
+        const err: any = new Error(`Target constituency '${constituencyId}' not found.`);
+        err.statusCode = 404;
+        throw err;
+      }
+      const constOrgId = constRecord.parliament?.zone?.state?.organisationId;
+      if (scope && !scope.isGlobalScope && scope.organisationId) {
+        if (!constOrgId || constOrgId !== scope.organisationId) {
+          const err: any = new Error('Access denied: Target constituency belongs to another organization.');
+          err.statusCode = 403;
+          err.code = 'FORBIDDEN_TENANT';
+          throw err;
+        }
+        if (scope.accessibleConstituencyIds.size > 0 && !scope.accessibleConstituencyIds.has(constRecord.id)) {
+          const err: any = new Error('Access denied: Target constituency is outside your authorized scope.');
+          err.statusCode = 403;
+          err.code = 'FORBIDDEN_SCOPE';
+          throw err;
+        }
+      }
+      parliamentId = parliamentId || constRecord.parliamentId;
+      zoneId = zoneId || constRecord.parliament?.zoneId || null;
+      stateId = stateId || constRecord.parliament?.zone?.stateId || null;
+    }
 
-    await logAudit({
-      action: AuditAction.CREATE,
-      entityType: 'Voter',
-      entityId: voter.id,
-      userId: actorId,
-      unitId: voter.unitId ?? undefined,
-      changes: dto as unknown as Prisma.InputJsonValue,
-    });
+    // Strict 100-Active-Voter Group Boundary:
+    // Ensure active voter groups cannot exceed the statutory limit of 100 active electors.
+    const politicalPreference = (env.ENABLE_POLITICAL_PREFERENCE_COLLECTION && dto.politicalPreference)
+      ? dto.politicalPreference
+      : 'NEUTRAL';
 
-    return voter;
+    return await prisma.$transaction(async (tx) => {
+      if (voterGroupId && (dto.voterStatus === undefined || dto.voterStatus === VoterStatus.ACTIVE)) {
+        await tx.$queryRaw`
+          SELECT "id"::text FROM "VoterGroup"
+          WHERE "id" = ${voterGroupId}::uuid
+          FOR UPDATE
+        `;
+        const activeCount = await tx.voter.count({
+          where: { voterGroupId, voterStatus: VoterStatus.ACTIVE },
+        });
+        if (activeCount >= 100) {
+          const err: any = new Error(
+            `Voter group already contains ${activeCount} active voters. An active voter group cannot exceed the strict limit of 100 active electors.`
+          );
+          err.statusCode = 400;
+          err.code = 'VOTER_GROUP_CAPACITY_EXCEEDED';
+          throw err;
+        }
+      }
+
+      const voter = await tx.voter.create({
+        data: {
+          serialNumber: dto.serialNumber ?? 1,
+          epicNumber: dto.epicNumber,
+          name: dto.name,
+          fatherHusbandName: dto.fatherHusbandName,
+          relationType: dto.relationType,
+          houseNumber: dto.houseNumber,
+          age: dto.age,
+          gender: dto.gender,
+          mobileNumber: dto.mobileNumber,
+          stateId,
+          zoneId,
+          parliamentId,
+          constituencyId,
+          mandalId,
+          villageId,
+          boothId,
+          voterGroupId,
+          unitId,
+          assignedInchargeId: dto.assignedInchargeId,
+          caste: dto.caste,
+          subCaste: dto.subCaste,
+          profession: dto.profession,
+          politicalPreference,
+          voterStatus: dto.voterStatus,
+          surveyStatus: dto.surveyStatus,
+          voterLocationStatus: dto.voterLocationStatus,
+          currentLocation: dto.currentLocation,
+          notes: dto.notes,
+        },
+      });
+
+      await logAudit({
+        action: AuditAction.CREATE,
+        entityType: 'Voter',
+        entityId: voter.id,
+        userId: actorId,
+        unitId: voter.unitId ?? undefined,
+        changes: dto as unknown as Prisma.InputJsonValue,
+      });
+
+      return voter;
+    });
   }
 
   static async updateVoter(id: string, dto: UpdateVoterDto, actorId: string) {
-    const existing = await prisma.voter.findUnique({ where: { id } });
-    if (!existing) throw new Error('Voter not found');
-
-    // 1. Prevent duplicate EPIC numbers if changed
-    if (dto.epicNumber && dto.epicNumber !== existing.epicNumber) {
-      const duplicate = await prisma.voter.findUnique({
-        where: { epicNumber: dto.epicNumber },
-      });
-      if (duplicate && duplicate.id !== id) {
-        const err: any = new Error(`Voter with EPIC number "${dto.epicNumber}" already exists`);
-        err.statusCode = 409;
-        err.code = 'DUPLICATE_EPIC_NUMBER';
+    return await prisma.$transaction(async (tx) => {
+      const [existing] = await tx.$queryRaw<Array<{
+        id: string;
+        epicNumber: string;
+        voterStatus: VoterStatus;
+        voterGroupId: string | null;
+        unitId: string | null;
+      }>>`
+        SELECT "id"::text, "epicNumber", "voterStatus"::text, "voterGroupId"::text, "unitId"::text
+        FROM "Voter"
+        WHERE "id" = ${id}::uuid
+        FOR UPDATE
+      `;
+      if (!existing) {
+        const err: any = new Error('Voter not found');
+        err.statusCode = 404;
         throw err;
       }
-    }
 
-    // 2. Automatically record status change history
-    if (dto.voterStatus && dto.voterStatus !== existing.voterStatus) {
-      await prisma.voterStatusHistory.create({
-        data: {
-          voterId: id,
-          previousStatus: existing.voterStatus,
-          newStatus: dto.voterStatus,
-          reason: dto.notes || 'Updated via voter profile',
-          changedById: actorId,
-        },
+      // 1. Prevent duplicate EPIC numbers if changed
+      if (dto.epicNumber && dto.epicNumber !== existing.epicNumber) {
+        const duplicate = await tx.voter.findUnique({
+          where: { epicNumber: dto.epicNumber },
+        });
+        if (duplicate && duplicate.id !== id) {
+          const err: any = new Error(`Voter with EPIC number "${dto.epicNumber}" already exists`);
+          err.statusCode = 409;
+          err.code = 'DUPLICATE_EPIC_NUMBER';
+          throw err;
+        }
+      }
+
+      // 2. Strict 100-Active-Voter Group Boundary:
+      // Prevent reassigning active voters to groups that are already at maximum capacity (100 active voters)
+      const targetGroupId = dto.voterGroupId !== undefined ? dto.voterGroupId : existing.voterGroupId;
+      const nextStatus = dto.voterStatus !== undefined ? dto.voterStatus : existing.voterStatus;
+      const isTargetActive = nextStatus === VoterStatus.ACTIVE;
+      const isMovingGroup = dto.voterGroupId !== undefined && dto.voterGroupId !== existing.voterGroupId;
+      const isActivating = dto.voterStatus === VoterStatus.ACTIVE && existing.voterStatus !== VoterStatus.ACTIVE;
+
+      if (targetGroupId && isTargetActive && (isMovingGroup || isActivating)) {
+        await tx.$queryRaw`
+          SELECT "id"::text FROM "VoterGroup"
+          WHERE "id" = ${targetGroupId}::uuid
+          FOR UPDATE
+        `;
+        const activeCount = await tx.voter.count({
+          where: { voterGroupId: targetGroupId, voterStatus: VoterStatus.ACTIVE, id: { not: id } },
+        });
+        if (activeCount >= 100) {
+          const err: any = new Error(
+            `Voter group already contains ${activeCount} active voters. An active voter group cannot exceed the strict limit of 100 active electors.`
+          );
+          err.statusCode = 400;
+          err.code = 'VOTER_GROUP_CAPACITY_EXCEEDED';
+          throw err;
+        }
+      }
+
+      // 3. Automatically record status change history
+      if (dto.voterStatus && dto.voterStatus !== existing.voterStatus) {
+        await tx.voterStatusHistory.create({
+          data: {
+            voterId: id,
+            previousStatus: existing.voterStatus,
+            newStatus: dto.voterStatus,
+            reason: dto.notes || 'Updated via voter profile',
+            changedById: actorId,
+          },
+        });
+      }
+
+      // 4. Sanitize political preference if disabled
+      const updateData: any = { ...dto };
+      if (!env.ENABLE_POLITICAL_PREFERENCE_COLLECTION && updateData.politicalPreference !== undefined) {
+        updateData.politicalPreference = 'NEUTRAL';
+      }
+
+      const voter = await tx.voter.update({
+        where: { id },
+        data: updateData,
       });
-    }
 
-    const voter = await prisma.voter.update({
-      where: { id },
-      data: dto,
+      await logAudit({
+        action: AuditAction.UPDATE,
+        entityType: 'Voter',
+        entityId: voter.id,
+        userId: actorId,
+        unitId: voter.unitId ?? undefined,
+        changes: dto as unknown as Prisma.InputJsonValue,
+      });
+
+      return voter;
     });
-
-    await logAudit({
-      action: AuditAction.UPDATE,
-      entityType: 'Voter',
-      entityId: voter.id,
-      userId: actorId,
-      unitId: voter.unitId ?? undefined,
-      changes: dto as unknown as Prisma.InputJsonValue,
-    });
-
-    return voter;
   }
 
   static async updateVoterStatus(id: string, dto: UpdateVoterStatusDto, actorId: string) {
-    const existing = await prisma.voter.findUnique({ where: { id } });
-    if (!existing) throw new Error('Voter not found');
+    return await prisma.$transaction(async (tx) => {
+      const [existing] = await tx.$queryRaw<Array<{
+        id: string;
+        voterStatus: VoterStatus;
+        voterGroupId: string | null;
+        unitId: string | null;
+      }>>`
+        SELECT "id"::text, "voterStatus"::text, "voterGroupId"::text, "unitId"::text
+        FROM "Voter"
+        WHERE "id" = ${id}::uuid
+        FOR UPDATE
+      `;
+      if (!existing) {
+        const err: any = new Error('Voter not found');
+        err.statusCode = 404;
+        throw err;
+      }
 
-    const voter = await prisma.voter.update({
-      where: { id },
-      data: { voterStatus: dto.status },
+      // Strict 100-Active-Voter Group Boundary:
+      // When reactivating a non-ACTIVE voter to ACTIVE status
+      if (dto.status === VoterStatus.ACTIVE && existing.voterStatus !== VoterStatus.ACTIVE) {
+        if (existing.voterGroupId) {
+          await tx.$queryRaw`
+            SELECT "id"::text FROM "VoterGroup"
+            WHERE "id" = ${existing.voterGroupId}::uuid
+            FOR UPDATE
+          `;
+          const activeCount = await tx.voter.count({
+            where: {
+              voterGroupId: existing.voterGroupId,
+              voterStatus: VoterStatus.ACTIVE,
+              id: { not: id },
+            },
+          });
+          if (activeCount >= 100) {
+            const err: any = new Error(
+              `Cannot reactivate voter: target group already contains ${activeCount} active voters. An active voter group cannot exceed the strict limit of 100 active electors.`
+            );
+            err.statusCode = 400;
+            err.code = 'VOTER_GROUP_CAPACITY_EXCEEDED';
+            throw err;
+          }
+        }
+      }
+
+      const voter = await tx.voter.update({
+        where: { id },
+        data: { voterStatus: dto.status },
+      });
+
+      await tx.voterStatusHistory.create({
+        data: {
+          voterId: id,
+          previousStatus: existing.voterStatus,
+          newStatus: dto.status,
+          reason: dto.reason,
+          changedById: actorId,
+        },
+      });
+
+      await logAudit({
+        action: AuditAction.STATUS_CHANGE,
+        entityType: 'Voter',
+        entityId: voter.id,
+        userId: actorId,
+        unitId: voter.unitId ?? undefined,
+        changes: { previous: existing.voterStatus, next: dto.status, reason: dto.reason },
+      });
+
+      return voter;
     });
-
-    await prisma.voterStatusHistory.create({
-      data: {
-        voterId: id,
-        previousStatus: existing.voterStatus,
-        newStatus: dto.status,
-        reason: dto.reason,
-        changedById: actorId,
-      },
-    });
-
-    await logAudit({
-      action: AuditAction.STATUS_CHANGE,
-      entityType: 'Voter',
-      entityId: voter.id,
-      userId: actorId,
-      unitId: voter.unitId ?? undefined,
-      changes: { previous: existing.voterStatus, next: dto.status, reason: dto.reason },
-    });
-
-    return voter;
   }
 
   static async flagFakeVoter(id: string, dto: FlagFakeVoterDto, actorId: string) {

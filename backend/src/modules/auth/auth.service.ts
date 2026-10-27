@@ -227,13 +227,6 @@ export class AuthService {
       channel,
     });
 
-    const demoNumbers = [
-      '9848012345', '9848088888', '9848088887', '9848099998', '9848099999',
-      '9848077777', '9848010001', '9848010002', '9848010003', '9848010004',
-      '9848010005', '9998887777', '9736654406'
-    ];
-    const isDemoNumber = demoNumbers.includes(cleanMobile);
-
     // 5. Dispatch through configured WhatsApp / SMS Provider with failure handling
     let smsResult;
     try {
@@ -245,17 +238,19 @@ export class AuthService {
       smsResult = { success: false, error: dispatchErr?.message || 'Dispatch failure' };
     }
 
-    const isDemoMobileNumber = isDemoNumber || user?.userCode?.startsWith('DEMO-');
-
     if (!smsResult.success) {
-      if (isDemoMobileNumber) {
-        console.warn(`[Demo Terminal OTP Active] Gateway dispatch bypassed for demo mobile +91${cleanMobile}. Real OTP printed to terminal.`);
+      const nodeEnv = (process.env.NODE_ENV || env.NODE_ENV || '').trim().toLowerCase();
+      const isExplicitDevOrTest = nodeEnv === 'development' || nodeEnv === 'test';
+
+      // Gateway failure can only be bypassed in explicit non-production environment if mock OTP is explicitly enabled
+      if (isExplicitDevOrTest && OtpService.isDevMockOtpAllowed()) {
+        console.warn(`[Dev OTP Active] Gateway dispatch bypassed in dev mode for +91${cleanMobile.slice(-4)}.`);
         await AuthService.enforceTimingFloor(startTime);
         return {
           requestId: record.id,
           expiresAt: record.expiresAt,
           cooldownSeconds: 5,
-          provider: `${smsProvider.name} (Demo Auto-Bypass)`,
+          provider: `${smsProvider.name} (Dev Mode)`,
           channel,
           message: 'OTP verification code dispatched. Enter the 6-digit code to verify.',
         };
@@ -397,18 +392,16 @@ export class AuthService {
     }
 
     if (!dispatchResult.success) {
-      const demoNumbers = [
-        '9848012345', '9848088888', '9848088887', '9848099998', '9848099999',
-        '9848077777', '9848010001', '9848010002', '9848010003', '9848010004',
-        '9848010005', '9998887777', '9736654406'
-      ];
-      if (demoNumbers.includes(cleanMobile) || env.NODE_ENV !== 'production') {
-        console.warn(`[Demo Register OTP] Gateway failure bypassed for demo mobile +91${cleanMobile}. Code: ${rawOtp} (or 123456)`);
+      const nodeEnv = (process.env.NODE_ENV || env.NODE_ENV || '').trim().toLowerCase();
+      const isExplicitDevOrTest = nodeEnv === 'development' || nodeEnv === 'test';
+
+      if (isExplicitDevOrTest && OtpService.isDevMockOtpAllowed()) {
+        console.warn(`[Dev Register OTP] Gateway failure bypassed in dev/test for +91${cleanMobile.slice(-4)}.`);
         return {
           requestId: record.id,
           expiresAt: record.expiresAt,
           cooldownSeconds: 5,
-          provider: `${provider.name} (Demo Auto-Bypass)`,
+          provider: `${provider.name} (Dev Mode)`,
           channel,
           message: 'OTP generated. Please check terminal or enter verification code.',
         };
@@ -1688,13 +1681,11 @@ export class AuthService {
     }
 
     if (!dispatchResult.success) {
-      const demoNumbers = [
-        '9848012345', '9848088888', '9848088887', '9848099998', '9848099999',
-        '9848077777', '9848010001', '9848010002', '9848010003', '9848010004',
-        '9848010005', '9998887777', '9736654406'
-      ];
-      if (demoNumbers.includes(cleanNewMobile) || env.NODE_ENV !== 'production') {
-        console.warn(`[Mobile Change OTP] Gateway failure bypassed in dev mode for ${cleanNewMobile}. OTP: ${rawOtp}`);
+      const nodeEnv = (process.env.NODE_ENV || env.NODE_ENV || '').trim().toLowerCase();
+      const isExplicitDevOrTest = nodeEnv === 'development' || nodeEnv === 'test';
+
+      if (isExplicitDevOrTest && OtpService.isDevMockOtpAllowed()) {
+        console.warn(`[Dev Mobile Change OTP] Gateway failure bypassed in dev mode for +91${cleanNewMobile.slice(-4)}.`);
         return {
           requestId: record.id,
           expiresAt: record.expiresAt,

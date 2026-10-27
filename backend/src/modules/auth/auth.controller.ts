@@ -1,7 +1,9 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import QRCode from 'qrcode';
+import { RoleType } from '@prisma/client';
 import { errorResponse, successResponse } from '../../common/response.js';
 import { isOriginAllowed } from '../../common/origin.js';
+import { generateSecureOtp } from '../../lib/crypto.js';
 import { AuthService } from './auth.service.js';
 import {
   RequestOtpDto,
@@ -439,54 +441,128 @@ export class AuthController {
 
   /**
    * Returns connection status of the WhatsApp OTP Gateway.
+   * Strictly restricted to platform administrators (SUPER_ADMIN / STATE_ADMIN).
    */
-  static async getWhatsAppStatus(_req: FastifyRequest, reply: FastifyReply) {
-    const { SmsProviderFactory } = await import('../../lib/sms/factory.js');
-    const wa = SmsProviderFactory.getProvider('WHATSAPP') as any;
-    const status = wa.getStatus ? wa.getStatus() : { provider: wa.name, isConnected: true };
-    return reply.status(200).send(successResponse(status));
-  }
-
-  static async testWhatsAppSend(req: FastifyRequest, reply: FastifyReply) {
-    const { phone = '9340423885' } = (req.query as { phone?: string }) || {};
-    const { SmsProviderFactory } = await import('../../lib/sms/factory.js');
-    const wa = SmsProviderFactory.getProvider('WHATSAPP') as any;
-    const cleanNumber = phone.replace(/\D/g, '');
-    const recipientDigits = cleanNumber.startsWith('91') && cleanNumber.length > 10
-      ? cleanNumber
-      : (cleanNumber.length === 10 ? `91${cleanNumber}` : cleanNumber);
-
-    let onWaResult = null;
-    let onWaError = null;
-    if (wa.sock?.onWhatsApp) {
-      try {
-        onWaResult = await wa.sock.onWhatsApp(recipientDigits);
-      } catch (e: any) {
-        onWaError = e?.message;
-      }
+  static async getWhatsAppStatus(req: FastifyRequest, reply: FastifyReply) {
+    if (!req.user || (req.user.role !== RoleType.SUPER_ADMIN && req.user.role !== RoleType.STATE_ADMIN)) {
+      return reply.status(403).send(errorResponse('Forbidden: Platform administrator authorization required.', 'FORBIDDEN_ROLE'));
     }
 
-    const sendRes = await wa.sendOtp(phone, '123456');
+    try {
+      const { SmsProviderFactory } = await import('../../lib/sms/factory.js');
+      const wa = SmsProviderFactory.getProvider('WHATSAPP') as any;
+      const rawStatus = wa.getStatus ? wa.getStatus() : { provider: wa.name, isConnected: true };
 
-    return reply.status(200).send(successResponse({
-      phone,
-      recipientDigits,
-      onWhatsApp: onWaResult,
-      onWhatsAppError: onWaError,
-      sendResult: sendRes,
-      senderUser: wa.sock?.user,
-    }));
+      // Sanitize user JID if present to prevent disclosing internal Baileys credentials
+      let sanitizedUser: string | null = null;
+      if (rawStatus.user && typeof rawStatus.user === 'string') {
+        const match = rawStatus.user.match(/(\d{10,12})/);
+        if (match) {
+          const digits = match[1].slice(-10);
+          sanitizedUser = `+91 ${'*'.repeat(6)}${digits.slice(-4)}`;
+        } else {
+          sanitizedUser = 'Connected Device';
+        }
+      }
+
+      const status = {
+        provider: rawStatus.provider || 'whatsapp',
+        isConnected: Boolean(rawStatus.isConnected),
+        hasQr: Boolean(rawStatus.hasQr),
+        user: sanitizedUser,
+        isOwner: Boolean(rawStatus.isOwner),
+      };
+
+      return reply.status(200).send(successResponse(status));
+    } catch {
+      return reply.status(502).send(errorResponse('Failed to retrieve gateway status.', 'GATEWAY_ERROR'));
+    }
+  }
+
+  /**
+   * Internal diagnostic endpoint for testing WhatsApp connectivity and dispatch.
+   * Strictly unavailable in production (404 NOT_FOUND).
+   * In non-production, requires authenticated administrator authorization (SUPER_ADMIN / STATE_ADMIN).
+   */
+  static async testWhatsAppSend(req: FastifyRequest, reply: FastifyReply) {
+    if (process.env.NODE_ENV === 'production') {
+      return reply.status(404).send(errorResponse('Route not found', 'NOT_FOUND'));
+    }
+
+    const queryPhone = (req.query as { phone?: string })?.phone;
+    const userPhone = req.user?.mobileNumber;
+    const rawTarget = queryPhone || userPhone;
+
+    if (!rawTarget) {
+      return reply.status(400).send(errorResponse('Recipient phone number is required.', 'VALIDATION_ERROR'));
+    }
+
+    const cleanNumber = rawTarget.replace(/\D/g, '').slice(-10);
+    if (cleanNumber.length !== 10) {
+      return reply.status(400).send(errorResponse('Invalid phone number format. Must be a 10-digit mobile number.', 'INVALID_PHONE_NUMBER'));
+    }
+
+    const recipientDigits = `91${cleanNumber}`;
+
+    try {
+      const { SmsProviderFactory } = await import('../../lib/sms/factory.js');
+      const wa = SmsProviderFactory.getProvider('WHATSAPP') as any;
+
+      let onWaResult = null;
+      let onWaError = null;
+      if (wa.sock?.onWhatsApp) {
+        try {
+          onWaResult = await wa.sock.onWhatsApp(recipientDigits);
+        } catch (e: any) {
+          onWaError = e?.message;
+        }
+      }
+
+      // Generate a fresh cryptographically secure random OTP (never hardcoded '123456')
+      const testOtp = generateSecureOtp();
+      const sendRes = await wa.sendOtp(cleanNumber, testOtp);
+
+      const maskedTarget = `+91 ${'*'.repeat(6)}${cleanNumber.slice(-4)}`;
+      console.log(`[WhatsApp Test Dispatch] Invoked by user: ${req.user?.userId || 'unknown'}, Target: ${maskedTarget}, Success: ${Boolean(sendRes?.success)}`);
+
+      return reply.status(200).send(
+        successResponse({
+          recipient: maskedTarget,
+          onWhatsApp: Boolean(onWaResult?.[0]?.exists ?? onWaResult),
+          delivered: Boolean(sendRes?.success),
+          provider: wa.name || 'whatsapp',
+        }, 'WhatsApp connectivity test completed successfully.')
+      );
+    } catch (err: any) {
+      return reply.status(502).send(errorResponse('WhatsApp test dispatch failed.', 'GATEWAY_ERROR', {
+        details: err?.message || 'Gateway communication error',
+      }));
+    }
   }
 
   /**
    * Serves an interactive, responsive HTML page displaying the WhatsApp QR code,
    * customizable sizing (compact/medium/large), raw image link, and direct Phone Pairing Code.
+   * Strictly restricted to platform administrators (SUPER_ADMIN / STATE_ADMIN).
    */
-  static async getWhatsAppQr(_req: FastifyRequest, reply: FastifyReply) {
+  static async getWhatsAppQr(req: FastifyRequest, reply: FastifyReply) {
+    if (!req.user || (req.user.role !== RoleType.SUPER_ADMIN && req.user.role !== RoleType.STATE_ADMIN)) {
+      return reply.status(403).send(errorResponse('Forbidden: Platform administrator authorization required.', 'FORBIDDEN_ROLE'));
+    }
+
     const { SmsProviderFactory } = await import('../../lib/sms/factory.js');
     const wa = SmsProviderFactory.getProvider('WHATSAPP') as any;
     const status = wa.getStatus ? wa.getStatus() : { isConnected: false };
     const qr = wa.getQrCode ? wa.getQrCode() : null;
+
+    let sanitizedUser: string = 'Connected Device';
+    if (status.user && typeof status.user === 'string') {
+      const match = status.user.match(/(\d{10,12})/);
+      if (match) {
+        const digits = match[1].slice(-10);
+        sanitizedUser = `+91 ${'*'.repeat(6)}${digits.slice(-4)}`;
+      }
+    }
 
     if (status?.isConnected) {
       return reply.type('text/html').send(`
@@ -510,7 +586,7 @@ export class AuthController {
             <div class="badge">● Online & Ready</div>
             <h2>WhatsApp is Connected!</h2>
             <p>Authentication and OTP dispatch are fully active and connected to your linked phone.</p>
-            <div class="user-tag">JID: ${status.user || 'Connected Device'}</div>
+            <div class="user-tag">Device: ${sanitizedUser}</div>
             <p style="font-size: 13px; color: #8696a0;">All OTP requests will be sent instantly via WhatsApp.</p>
           </div>
         </body>
@@ -722,6 +798,7 @@ export class AuthController {
               const res = await fetch('/api/auth/whatsapp/pair', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ phoneNumber: phone })
               });
               const json = await res.json();
@@ -745,7 +822,7 @@ export class AuthController {
           // Auto-poll status every 3 seconds to transition to connected state
           setInterval(async () => {
             try {
-              const res = await fetch('/api/auth/whatsapp/status');
+              const res = await fetch('/api/auth/whatsapp/status', { credentials: 'include' });
               const json = await res.json();
               if (json.data?.isConnected) {
                 location.reload();
@@ -763,14 +840,19 @@ export class AuthController {
 
   /**
    * Serves direct raw PNG image of the WhatsApp QR code.
+   * Strictly restricted to platform administrators (SUPER_ADMIN / STATE_ADMIN).
    */
-  static async getWhatsAppQrImage(_req: FastifyRequest, reply: FastifyReply) {
+  static async getWhatsAppQrImage(req: FastifyRequest, reply: FastifyReply) {
+    if (!req.user || (req.user.role !== RoleType.SUPER_ADMIN && req.user.role !== RoleType.STATE_ADMIN)) {
+      return reply.status(403).send(errorResponse('Forbidden: Platform administrator authorization required.', 'FORBIDDEN_ROLE'));
+    }
+
     const { SmsProviderFactory } = await import('../../lib/sms/factory.js');
     const wa = SmsProviderFactory.getProvider('WHATSAPP') as any;
     const qr = wa.getQrCode ? wa.getQrCode() : null;
 
     if (!qr) {
-      return reply.status(404).send({ success: false, error: 'QR code not available or WhatsApp already connected.' });
+      return reply.status(404).send(errorResponse('QR code not available or WhatsApp already connected.', 'NOT_FOUND'));
     }
 
     try {
@@ -780,28 +862,38 @@ export class AuthController {
         color: { dark: '#000000', light: '#ffffff' },
       });
       return reply.type('image/png').send(buffer);
-    } catch (err: any) {
-      return reply.status(500).send({ success: false, error: err?.message || 'Failed to generate QR buffer' });
+    } catch {
+      return reply.status(500).send(errorResponse('Failed to generate QR buffer', 'GATEWAY_ERROR'));
     }
   }
 
   /**
    * Generates an 8-character pairing code for linking with a phone number.
+   * Strictly restricted to platform administrators (SUPER_ADMIN / STATE_ADMIN).
    */
   static async requestWhatsAppPairingCode(req: FastifyRequest, reply: FastifyReply) {
+    if (!req.user || (req.user.role !== RoleType.SUPER_ADMIN && req.user.role !== RoleType.STATE_ADMIN)) {
+      return reply.status(403).send(errorResponse('Forbidden: Platform administrator authorization required.', 'FORBIDDEN_ROLE'));
+    }
+
     const body = req.body as { phoneNumber?: string };
     if (!body?.phoneNumber) {
       return reply.status(400).send(errorResponse('phoneNumber is required', 'VALIDATION_ERROR'));
+    }
+
+    const cleanNumber = body.phoneNumber.replace(/\D/g, '').slice(-10);
+    if (cleanNumber.length !== 10) {
+      return reply.status(400).send(errorResponse('Invalid phone number format. Must be a 10-digit mobile number.', 'INVALID_PHONE_NUMBER'));
     }
 
     try {
       const { SmsProviderFactory } = await import('../../lib/sms/factory.js');
       const wa = SmsProviderFactory.getProvider('WHATSAPP') as any;
       if (!wa.requestPairingCode) {
-        return reply.status(400).send(errorResponse('Pairing code not supported', 'NOT_SUPPORTED'));
+        return reply.status(400).send(errorResponse('Pairing code not supported by current provider', 'NOT_SUPPORTED'));
       }
 
-      const pairingCode = await wa.requestPairingCode(body.phoneNumber);
+      const pairingCode = await wa.requestPairingCode(cleanNumber);
       return reply.status(200).send(successResponse({ pairingCode }, 'Pairing code generated successfully.'));
     } catch (err: any) {
       return reply.status(400).send(errorResponse(err?.message || 'Failed to generate pairing code', 'PAIRING_FAILED'));

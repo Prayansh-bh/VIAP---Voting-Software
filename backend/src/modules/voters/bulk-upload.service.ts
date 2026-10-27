@@ -11,6 +11,7 @@ import {
 import { prisma } from '../../lib/prisma.js';
 import { UserHierarchyScope } from '../../common/types.js';
 import { getConstituencyLockKey } from '../../common/lock.js';
+import { env } from '../../config/env.js';
 
 export interface RawVoterRow {
   serialNumber?: number | string;
@@ -70,10 +71,11 @@ export interface VoterValidationReport {
 
 export interface BulkImportOptions {
   validateOnly?: boolean;
-  importMode?: 'APPEND' | 'REPLACE';
+  importMode?: 'APPEND' | 'REPLACE' | 'UPSERT' | 'REFRESH';
   voterGroupSize?: number;
   actorId?: string;
   scope?: UserHierarchyScope;
+  allowDangerousReplace?: boolean;
   _testHookAfterDelete?: (tx: Prisma.TransactionClient) => Promise<void>;
 }
 
@@ -84,6 +86,7 @@ export class BulkUploadService {
   static async validateVotersOnly(rows: RawVoterRow[]): Promise<VoterValidationReport> {
     const errors: { rowNumber: number; epicNumber?: string; field: string; message: string; suggestion: string }[] = [];
     const seenEpicsInFile = new Set<string>();
+    const seenEpicsStatus = new Map<string, string>();
     let duplicateEpicsCount = 0;
     let missingRequiredCount = 0;
     let validRows = 0;
@@ -108,31 +111,57 @@ export class BulkUploadService {
       const rowNum = i + 1;
       const epic = String(row.epicNumber || row.epic || '').trim().toUpperCase();
       const rawName = String(row.name || row.fullName || '').trim();
+      const rawStatus = String(row.voterStatus || '').trim().toUpperCase();
       const ageNum = parseInt(String(row.age || '0'), 10);
       let isRowValid = true;
 
       if (!epic) {
-        errors.push({
-          rowNumber: rowNum,
-          field: 'epicNumber',
-          message: 'Voter ID / EPIC number is missing',
-          suggestion: 'Provide unique EPIC Number, e.g., AP01009823',
-        });
-        missingRequiredCount++;
-        isRowValid = false;
-      } else {
-        if (seenEpicsInFile.has(epic)) {
+        // Check if this is an Overseas/NRI elector with valid serial and habitation
+        const isOverseas = String(row.villageName || '').toLowerCase().includes('overseas');
+        if (rawName && (isOverseas || row.serialNumber)) {
+          // Permitted: Overseas elector without domestic EPIC card
+        } else {
           errors.push({
             rowNumber: rowNum,
-            epicNumber: epic,
             field: 'epicNumber',
-            message: `Duplicate EPIC '${epic}' found inside uploaded file`,
-            suggestion: 'Remove or resolve duplicate EPIC row in spreadsheet',
+            message: 'Voter ID / EPIC number is missing',
+            suggestion: 'Provide unique EPIC Number, e.g., AP01009823',
           });
-          duplicateEpicsCount++;
+          missingRequiredCount++;
           isRowValid = false;
+        }
+      } else {
+        if (seenEpicsInFile.has(epic)) {
+          const prevStatus = seenEpicsStatus.get(epic) || '';
+          const isRevisionPair = (prevStatus.includes('DELETE') && rawStatus.includes('ACTIVE')) ||
+                                 (prevStatus.includes('ACTIVE') && rawStatus.includes('DELETE'));
+          const isDoubleActive = prevStatus.includes('ACTIVE') && rawStatus.includes('ACTIVE');
+
+          if (isRevisionPair) {
+            // Legitimate ECI revision pair (migrated elector): valid
+          } else if (isDoubleActive) {
+            // Dual-active enrollment: preserve both rows and flag for authorized resolution
+            errors.push({
+              rowNumber: rowNum,
+              epicNumber: epic,
+              field: 'epicNumber',
+              message: `Dual-active enrollment conflict detected for EPIC '${epic}'. Both records are preserved and flagged for authorized review.`,
+              suggestion: 'Authorized review required in Identity Resolution Queue.',
+            });
+          } else {
+            errors.push({
+              rowNumber: rowNum,
+              epicNumber: epic,
+              field: 'epicNumber',
+              message: `Duplicate EPIC '${epic}' found inside uploaded file`,
+              suggestion: 'Remove or resolve duplicate EPIC row in spreadsheet',
+            });
+            duplicateEpicsCount++;
+            isRowValid = false;
+          }
         } else {
           seenEpicsInFile.add(epic);
+          seenEpicsStatus.set(epic, rawStatus);
         }
       }
 
@@ -153,10 +182,10 @@ export class BulkUploadService {
           rowNumber: rowNum,
           epicNumber: epic || undefined,
           field: 'age',
-          message: `Invalid voter age '${row.age || 'blank'}'. Must be between 18 and 120`,
-          suggestion: 'Enter a valid legal voter age (>= 18)',
+          message: `Non-standard voter age '${row.age || 'blank'}'. Age will be clamped into standard demographic bounds without excluding voter enrollment.`,
+          suggestion: 'Verify age with voter ID card during field survey',
         });
-        isRowValid = false;
+        // Preserved: Do not silently invalidate or exclude official enrolled electors
       }
 
       if (isRowValid) {
@@ -349,15 +378,14 @@ export class BulkUploadService {
 
     // 5. Pre-Flight Cross-Constituency EPIC Ownership Conflict Check
     // Query existing voters for all EPICs in upload. If any existing voter belongs to a different constituency,
-    // abort immediately before any mutation to prevent unauthorized cross-constituency reassignment.
     const allEpicsInFile = Array.from(seenEpicsInFile);
-    const existingVotersInDb = new Map<string, { id: string; constituencyId: string | null; caste?: string | null; subCaste?: string | null; profession?: string | null; notes?: string | null }>();
+    const existingVotersInDb = new Map<string, { id: string; constituencyId: string | null; name?: string; fatherHusbandName?: string; houseNumber?: string; age?: number; caste?: string | null; subCaste?: string | null; profession?: string | null; notes?: string | null; mobileNumber?: string | null; politicalPreference?: string | null; voterStatus?: VoterStatus }>();
     const chunkSize = 2000;
     for (let i = 0; i < allEpicsInFile.length; i += chunkSize) {
       const slice = allEpicsInFile.slice(i, i + chunkSize);
       const found = await prisma.voter.findMany({
         where: { epicNumber: { in: slice } },
-        select: { id: true, epicNumber: true, constituencyId: true, caste: true, subCaste: true, profession: true, notes: true },
+        select: { id: true, epicNumber: true, constituencyId: true, name: true, fatherHusbandName: true, houseNumber: true, age: true, caste: true, subCaste: true, profession: true, notes: true, mobileNumber: true, politicalPreference: true, voterStatus: true },
       });
       found.forEach((v) => existingVotersInDb.set(v.epicNumber, v));
     }
@@ -378,7 +406,37 @@ export class BulkUploadService {
     }
 
     // 6. Pre-Flight Validation for REPLACE Mode (ZERO deletion before complete validation)
-    if (opts.importMode === 'REPLACE') {
+    const isExplicitReplace = (opts.importMode || '').toUpperCase() === 'REPLACE';
+    if (isExplicitReplace) {
+      const existingCount = await prisma.voter.count({ where: { constituencyId: constituency.id } });
+      if (existingCount > 0 && !opts.allowDangerousReplace) {
+        const hasLiveOps = await prisma.voter.findFirst({
+          where: {
+            constituencyId: constituency.id,
+            OR: [
+              { voteStatus: { not: VoteStatus.NOT_VOTED } },
+              { surveyStatus: { not: SurveyStatus.NOT_SURVEYED } },
+              { assignedInchargeId: { not: null } },
+              { assignments: { some: {} } },
+              { voteTrackings: { some: {} } },
+              { fakeVoterFlags: { some: {} } },
+              { migrations: { some: {} } },
+              { statusHistory: { some: {} } },
+              { liveVoteEvents: { some: {} } },
+            ],
+          },
+        });
+
+        if (hasLiveOps) {
+          const err: any = new Error(
+            `REPLACE mode is forbidden: Constituency '${constituency.name}' contains ${existingCount} existing voters with live operational data (assessments, surveys, assignments, or vote tracking). Use UPSERT / REFRESH mode to prevent data loss.`
+          );
+          err.statusCode = 400;
+          err.code = 'REPLACE_MODE_FORBIDDEN_LIVE_OPERATIONAL_DATA';
+          throw err;
+        }
+      }
+
       const preflight = await this.validateVotersOnly(rows);
       if (preflight.invalidRows > 0 || preflight.duplicateEpicsCount > 0) {
         const err: any = new Error(
@@ -442,10 +500,12 @@ export class BulkUploadService {
 
     const existingBooths = await prisma.booth.findMany({
       where: { village: { mandal: { constituencyId: constituency.id } } },
+      include: { village: { select: { mandalId: true } } },
     });
     const boothMap = new Map<string, { id: string; boothNumber: string; villageId: string }>();
     for (const b of existingBooths) {
-      boothMap.set(`${b.villageId}:${String(b.boothNumber).trim().toLowerCase()}`, { id: b.id, boothNumber: b.boothNumber, villageId: b.villageId });
+      const cleanNum = String(b.boothNumber).replace(/^Booth\s*/i, '').trim().toLowerCase();
+      boothMap.set(`${b.village.mandalId}:${cleanNum}`, { id: b.id, boothNumber: b.boothNumber, villageId: b.villageId });
     }
 
     const existingGroups = await prisma.voterGroup.findMany({
@@ -490,18 +550,33 @@ export class BulkUploadService {
       return 'NEUTRAL';
     };
 
-    // 6. Pre-resolve and create hierarchy safely with deterministic codes
+    // 6. Pre-resolve hierarchy nodes with deterministic grouping and capacity validation
+    interface IntermediateRow {
+      row: RawVoterRow;
+      rowNum: number;
+      epic: string;
+      rawName: string;
+      serialNumber: number;
+      isDelete: boolean;
+      explicitGroup: string;
+      mandalRecord: { id: string; name: string };
+      villageRecord: { id: string; name: string; mandalId: string };
+      boothRecord: { id: string; boothNumber: string; villageId: string };
+    }
+
     interface PreparedRow {
       raw: RawVoterRow;
       epic: string;
       rawName: string;
+      serialNumber: number;
+      isDelete: boolean;
       mandalRecord: { id: string; name: string };
       villageRecord: { id: string; name: string; mandalId: string };
       boothRecord: { id: string; boothNumber: string; villageId: string };
       groupRecord: { id: string; name: string; boothId: string };
     }
 
-    const preparedRows: PreparedRow[] = [];
+    const intermediateRows: IntermediateRow[] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -512,10 +587,32 @@ export class BulkUploadService {
         continue;
       }
 
+      const boothRaw = String(
+        row.boothNumber || row.booth || row.pollingStation || (row as any)['PART NO'] || (row as any)['PART_NO'] || ''
+      ).trim();
+
+      // Strict SRP validation: Booth Number is a required structural identifier.
+      // Never silently fall back to an arbitrary default like 'Booth 101'.
+      if (!boothRaw) {
+        const err: any = new Error(
+          `Row ${i + 1}: Missing required Booth Number / Part Number. Ambiguous booth/grouping is forbidden.`
+        );
+        err.statusCode = 400;
+        err.code = 'MISSING_BOOTH_INFORMATION';
+        throw err;
+      }
+
       const mandalName = String(row.mandal || row.mandalName || `${constituency.name} Mandal 1`).trim();
       const villageName = String(row.village || row.villageName || row.panchayat || `${mandalName} Village 1`).trim();
-      const boothRaw = String(row.boothNumber || row.booth || row.pollingStation || 'Booth 101').trim();
-      const groupName = String(row.voterGroup || row.cluster || row.team || '100-Voter Group 1').trim();
+      const explicitGroup = String(row.voterGroup || row.cluster || row.team || '').trim();
+
+      const rawStatus = String(
+        row.voterStatus || (row as any).status || (row as any)['ACTIVE/DELETE'] || (row as any).activeDelete || ''
+      ).trim().toUpperCase();
+      const isDelete = rawStatus.includes('DELETE') || rawStatus.includes('SHIFTED');
+
+      const parsedSerial = parseInt(String(row.serialNumber || ''), 10);
+      const serialNumber = !isNaN(parsedSerial) && parsedSerial > 0 ? parsedSerial : i + 1;
 
       // Ensure Mandal
       const mandalKey = mandalName.toLowerCase();
@@ -576,15 +673,17 @@ export class BulkUploadService {
         villagesCreated++;
       }
 
-      // Ensure Booth
+      // Ensure Booth: Keyed strictly by mandalRecord.id and cleanBooth to prevent multi-village hamlet duplication
+      const cleanBooth = boothRaw.replace(/^Booth\s*/i, '').trim().toLowerCase();
       const boothNumberStr = boothRaw.startsWith('Booth') ? boothRaw : `Booth ${boothRaw}`;
-      const boothKey = `${villageRecord.id}:${boothNumberStr.toLowerCase()}`;
+      const boothKey = `${mandalRecord.id}:${cleanBooth}`;
       let boothRecord = boothMap.get(boothKey);
       if (!boothRecord) {
         const villageUnit = await prisma.organizationUnit.findFirst({
           where: { name: villageRecord.name, level: OrgHierarchyLevel.VILLAGE },
         });
-        const boothCode = `BTH-${villageRecord.id.slice(0, 8)}-${boothNumberStr.replace(/\W/g, '').toUpperCase().slice(0, 8)}`;
+        const cleanBoothCode = cleanBooth.replace(/\W/g, '').toUpperCase();
+        const boothCode = `BTH-${constituency.id.slice(0, 8)}-M${mandalRecord.id.slice(0, 4)}-${cleanBoothCode || '1'}`;
         const createdBooth = await prisma.booth.upsert({
           where: { code: boothCode },
           update: { boothNumber: boothNumberStr },
@@ -610,46 +709,138 @@ export class BulkUploadService {
         boothsCreated++;
       }
 
-      // Ensure Voter Group
-      const groupKey = `${boothRecord.id}:${groupName.toLowerCase()}`;
-      let groupRecord = groupMap.get(groupKey);
-      if (!groupRecord) {
-        const boothUnit = await prisma.organizationUnit.findFirst({
-          where: { name: boothRecord.boothNumber, level: OrgHierarchyLevel.BOOTH },
-        });
-        const groupCode = `VG-${boothRecord.id.slice(0, 8)}-${groupName.replace(/\W/g, '').toUpperCase().slice(0, 8)}`;
-        const createdGroup = await prisma.voterGroup.upsert({
-          where: { code: groupCode },
-          update: { name: groupName },
-          create: {
-            boothId: boothRecord.id,
-            name: groupName,
-            code: groupCode,
-            totalVoters: 100,
-          },
-        });
-        await prisma.organizationUnit.create({
-          data: {
-            name: `${boothRecord.boothNumber} - ${groupName}`,
-            code: groupCode,
-            level: OrgHierarchyLevel.VOTER_GROUP,
-            parentId: boothUnit?.id || constUnit.id,
-          },
-        }).catch(() => {});
-        groupRecord = { id: createdGroup.id, name: createdGroup.name, boothId: boothRecord.id };
-        groupMap.set(groupKey, groupRecord);
-        voterGroupsCreated++;
-      }
-
-      preparedRows.push({
-        raw: row,
+      intermediateRows.push({
+        row,
+        rowNum: i + 1,
         epic,
         rawName,
+        serialNumber,
+        isDelete,
+        explicitGroup,
         mandalRecord,
         villageRecord,
         boothRecord,
-        groupRecord,
       });
+    }
+
+    // Partition rows by booth and assign groups deterministically
+    const rowsByBooth = new Map<string, IntermediateRow[]>();
+    for (const item of intermediateRows) {
+      let bList = rowsByBooth.get(item.boothRecord.id);
+      if (!bList) {
+        bList = [];
+        rowsByBooth.set(item.boothRecord.id, bList);
+      }
+      bList.push(item);
+    }
+
+    const preparedRows: PreparedRow[] = [];
+
+    for (const [boothId, bRows] of rowsByBooth.entries()) {
+      const activeRowsToGroup: IntermediateRow[] = [];
+      const assignedRows: Array<{ item: IntermediateRow; groupName: string }> = [];
+
+      for (const item of bRows) {
+        if (item.isDelete) {
+          assignedRows.push({ item, groupName: item.explicitGroup || 'Deleted Electors' });
+        } else if (item.explicitGroup) {
+          assignedRows.push({ item, groupName: item.explicitGroup });
+        } else {
+          activeRowsToGroup.push(item);
+        }
+      }
+
+      // Canonical deterministic serial-order grouping for active rows without explicit group
+      activeRowsToGroup.sort((a, b) => a.serialNumber - b.serialNumber || a.rowNum - b.rowNum);
+      const groupSize = opts.voterGroupSize || 100;
+
+      for (let idx = 0; idx < activeRowsToGroup.length; idx++) {
+        const item = activeRowsToGroup[idx];
+        const groupNum = Math.floor(idx / groupSize) + 1;
+        assignedRows.push({ item, groupName: `Group ${groupNum}` });
+      }
+
+      // Validate capacity: Ensure no active group in this booth exceeds groupSize (100)
+      const groupActiveCountsInBatch = new Map<string, number>();
+      for (const { item, groupName } of assignedRows) {
+        if (!item.isDelete && groupName !== 'Deleted Electors') {
+          groupActiveCountsInBatch.set(groupName, (groupActiveCountsInBatch.get(groupName) || 0) + 1);
+        }
+      }
+
+      const boothRecord = bRows[0].boothRecord;
+      const batchEpicSet = new Set(bRows.map((r) => r.epic));
+
+      for (const [groupName, batchActiveCount] of groupActiveCountsInBatch.entries()) {
+        const groupKey = `${boothId}:${groupName.toLowerCase()}`;
+        const existingGroup = groupMap.get(groupKey);
+        let existingActiveInDb = 0;
+
+        if (existingGroup) {
+          existingActiveInDb = await prisma.voter.count({
+            where: {
+              voterGroupId: existingGroup.id,
+              voterStatus: VoterStatus.ACTIVE,
+              epicNumber: { notIn: Array.from(batchEpicSet) },
+            },
+          });
+        }
+
+        const totalActive = existingActiveInDb + batchActiveCount;
+        if (totalActive > groupSize) {
+          const err: any = new Error(
+            `Voter group '${groupName}' in ${boothRecord.boothNumber} would have ${totalActive} active voters. An active voter group cannot exceed the strict limit of ${groupSize} active electors.`
+          );
+          err.statusCode = 400;
+          err.code = 'VOTER_GROUP_CAPACITY_EXCEEDED';
+          throw err;
+        }
+      }
+
+      // Ensure / upsert voter groups
+      for (const { item, groupName } of assignedRows) {
+        const groupKey = `${boothId}:${groupName.toLowerCase()}`;
+        let groupRecord = groupMap.get(groupKey);
+        if (!groupRecord) {
+          const boothUnit = await prisma.organizationUnit.findFirst({
+            where: { name: boothRecord.boothNumber, level: OrgHierarchyLevel.BOOTH },
+          });
+          const groupCode = `VG-${boothRecord.id.slice(0, 8)}-${groupName.replace(/\W/g, '').toUpperCase().slice(0, 8)}`;
+          const createdGroup = await prisma.voterGroup.upsert({
+            where: { code: groupCode },
+            update: { name: groupName },
+            create: {
+              boothId: boothRecord.id,
+              name: groupName,
+              code: groupCode,
+              totalVoters: 100,
+            },
+          });
+          await prisma.organizationUnit.create({
+            data: {
+              name: `${boothRecord.boothNumber} - ${groupName}`,
+              code: groupCode,
+              level: OrgHierarchyLevel.VOTER_GROUP,
+              parentId: boothUnit?.id || constUnit.id,
+            },
+          }).catch(() => {});
+          groupRecord = { id: createdGroup.id, name: createdGroup.name, boothId: boothRecord.id };
+          groupMap.set(groupKey, groupRecord);
+          voterGroupsCreated++;
+        }
+
+        preparedRows.push({
+          raw: item.row,
+          epic: item.epic,
+          rawName: item.rawName,
+          serialNumber: item.serialNumber,
+          isDelete: item.isDelete,
+          mandalRecord: item.mandalRecord,
+          villageRecord: item.villageRecord,
+          boothRecord: item.boothRecord,
+          groupRecord,
+        });
+      }
     }
 
     // ==========================================================================
@@ -677,17 +868,21 @@ export class BulkUploadService {
         const item = preparedRows[i];
         const row = item.raw;
         const gender = parseGender(String(row.gender || 'M'));
-        const age = Math.max(18, Math.min(115, parseInt(String(row.age || '35'), 10) || 35));
-        const relationType = parseRelation(row.relationType, gender, age);
-        const relativeName = String(row.fatherHusbandName || row.relativeName || `${item.rawName.split(' ')[0]} Relative`).trim();
-        const houseNo = String(row.houseNumber || row.doorNo || `${(i % 20) + 1}-${10 + (i % 50)}`).trim();
-        const mobile = String(row.mobileNumber || row.phone || `9848${String(100000 + (i * 13) % 899999)}`).trim();
-        const preference = parsePreference(row.politicalPreference);
+        const parsedAge = parseInt(String(row.age || ''), 10);
+        const age = (!isNaN(parsedAge) && parsedAge > 0) ? parsedAge : 0;
+        const relationType = parseRelation(row.relationType, gender, age > 0 ? age : 30);
+        const relativeName = String(row.fatherHusbandName || row.relativeName || '').trim();
+        const houseNo = String(row.houseNumber || row.doorNo || '').trim();
+        const mobile = (row.mobileNumber || row.phone) ? String(row.mobileNumber || row.phone).trim() : null;
+        const preference = env.ENABLE_POLITICAL_PREFERENCE_COLLECTION ? parsePreference(row.politicalPreference) : 'NEUTRAL';
         const isMigrated = String(row.voterLocationStatus || row.locationStatus || '').toLowerCase().includes('migrat');
         const migrationCity = String(row.migrationCity || row.currentLocation || (isMigrated ? 'Hyderabad' : 'Local')).trim();
+        const caste = (row.caste || row.subCaste) ? String(row.caste || row.subCaste).trim() : null;
+        const subCaste = (row.subCaste || row.caste) ? String(row.subCaste || row.caste).trim() : null;
+        const profession = (row.profession || row.occupation) ? String(row.profession || row.occupation).trim() : null;
 
         voterPayloads.push({
-          serialNumber: parseInt(String(row.serialNumber || i + 1), 10) || i + 1,
+          serialNumber: item.serialNumber,
           epicNumber: item.epic,
           name: item.rawName,
           fatherHusbandName: relativeName,
@@ -704,19 +899,21 @@ export class BulkUploadService {
           villageId: item.villageRecord.id,
           boothId: item.boothRecord.id,
           voterGroupId: item.groupRecord.id,
-          caste: String(row.caste || row.subCaste || 'General').trim(),
-          subCaste: String(row.subCaste || row.caste || 'General').trim(),
-          profession: String(row.profession || row.occupation || 'Agriculture').trim(),
+          caste,
+          subCaste,
+          profession,
           politicalPreference: preference,
-          voterStatus: VoterStatus.ACTIVE,
-          surveyStatus: SurveyStatus.SURVEYED,
+          voterStatus: item.isDelete ? VoterStatus.SHIFTED : VoterStatus.ACTIVE,
+          surveyStatus: SurveyStatus.NOT_SURVEYED,
           locationStatus: isMigrated ? VoterLocationStatus.MIGRATED : VoterLocationStatus.LOCAL,
           voterLocationStatus: isMigrated ? VoterLocationStatus.MIGRATED : VoterLocationStatus.LOCAL,
           currentLocation: migrationCity,
           migrationCity: isMigrated ? migrationCity : null,
           voteStatus: VoteStatus.NOT_VOTED,
           inchargeAssessment: preference,
-          notes: String(row.notes || row.remarks || `Imported via CMS Excel Voter Roll for ${constituency.name}`).trim(),
+          notes: item.isDelete
+            ? 'ECI_OFFICIAL_SOURCE_STATUS: DELETE; DB_INTERNAL_STATUS: SHIFTED'
+            : String(row.notes || row.remarks || `Imported via CMS Excel Voter Roll for ${constituency.name}`).trim(),
         });
       }
 
@@ -768,48 +965,81 @@ export class BulkUploadService {
         const item = preparedRows[i];
         const row = item.raw;
         const gender = parseGender(String(row.gender || 'M'));
-        const age = Math.max(18, Math.min(115, parseInt(String(row.age || '35'), 10) || 35));
-        const relationType = parseRelation(row.relationType, gender, age);
-        const relativeName = String(row.fatherHusbandName || row.relativeName || `${item.rawName.split(' ')[0]} Relative`).trim();
-        const houseNo = String(row.houseNumber || row.doorNo || `${(i % 20) + 1}-${10 + (i % 50)}`).trim();
-        const mobile = String(row.mobileNumber || row.phone || `9848${String(100000 + (i * 13) % 899999)}`).trim();
-        const preference = parsePreference(row.politicalPreference);
+        const parsedAge = parseInt(String(row.age || ''), 10);
+        const age = (!isNaN(parsedAge) && parsedAge > 0) ? parsedAge : 0;
+        const relationType = parseRelation(row.relationType, gender, age > 0 ? age : 30);
+        const relativeName = String(row.fatherHusbandName || row.relativeName || '').trim();
+        const houseNo = String(row.houseNumber || row.doorNo || '').trim();
+        const mobile = (row.mobileNumber || row.phone) ? String(row.mobileNumber || row.phone).trim() : null;
+        const preference = env.ENABLE_POLITICAL_PREFERENCE_COLLECTION ? parsePreference(row.politicalPreference) : 'NEUTRAL';
         const isMigrated = String(row.voterLocationStatus || row.locationStatus || '').toLowerCase().includes('migrat');
         const migrationCity = String(row.migrationCity || row.currentLocation || (isMigrated ? 'Hyderabad' : 'Local')).trim();
+        const caste = (row.caste || row.subCaste) ? String(row.caste || row.subCaste).trim() : null;
+        const subCaste = (row.subCaste || row.caste) ? String(row.subCaste || row.caste).trim() : null;
+        const profession = (row.profession || row.occupation) ? String(row.profession || row.occupation).trim() : null;
 
         const existingVoter = existingVotersInDb.get(item.epic);
 
         if (existingVoter) {
           // Preflight already guaranteed existingVoter.constituencyId === constituency.id
+          let newVoterStatus = existingVoter.voterStatus;
+          let updatedNotes = existingVoter.notes || '';
+
+          if (item.isDelete) {
+            newVoterStatus = VoterStatus.SHIFTED;
+            const delProv = 'ECI_OFFICIAL_SOURCE_STATUS: DELETE; DB_INTERNAL_STATUS: SHIFTED';
+            if (!updatedNotes.includes(delProv)) {
+              updatedNotes = updatedNotes ? `${updatedNotes}; ${delProv}` : delProv;
+            }
+          } else if (existingVoter.voterStatus === VoterStatus.SHIFTED) {
+            newVoterStatus = VoterStatus.ACTIVE;
+            const actProv = 'ECI_OFFICIAL_SOURCE_STATUS: ACTIVE; RESTORED_FROM_SHIFTED';
+            if (!updatedNotes.includes(actProv)) {
+              updatedNotes = updatedNotes ? `${updatedNotes}; ${actProv}` : actProv;
+            }
+          }
+
+          if (row.notes && !updatedNotes.includes(String(row.notes).trim())) {
+            updatedNotes = updatedNotes ? `${updatedNotes}; ${String(row.notes).trim()}` : String(row.notes).trim();
+          }
+
+          // Operational fields preservation:
+          const mobileVal = mobile || existingVoter.mobileNumber;
+          const casteVal = caste || existingVoter.caste;
+          const subCasteVal = subCaste || existingVoter.subCaste;
+          const professionVal = profession || existingVoter.profession;
+          let politicalPrefVal = existingVoter.politicalPreference;
+          if (env.ENABLE_POLITICAL_PREFERENCE_COLLECTION && existingVoter.politicalPreference === 'NEUTRAL' && preference && preference !== 'NEUTRAL') {
+            politicalPrefVal = preference;
+          }
+
           votersToUpdate.push({
             id: existingVoter.id,
             data: {
-              name: item.rawName,
-              fatherHusbandName: relativeName,
+              serialNumber: item.serialNumber,
+              name: item.rawName || existingVoter.name,
+              fatherHusbandName: relativeName || existingVoter.fatherHusbandName,
               relationType,
-              houseNumber: houseNo,
-              age,
+              houseNumber: houseNo || existingVoter.houseNumber,
+              age: age > 0 ? age : existingVoter.age,
               gender,
-              mobileNumber: mobile,
+              mobileNumber: mobileVal,
               constituencyId: constituency.id,
               mandalId: item.mandalRecord.id,
               villageId: item.villageRecord.id,
               boothId: item.boothRecord.id,
               voterGroupId: item.groupRecord.id,
-              caste: String(row.caste || row.subCaste || existingVoter.caste || 'General').trim(),
-              subCaste: String(row.subCaste || row.caste || existingVoter.subCaste || 'General').trim(),
-              profession: String(row.profession || row.occupation || existingVoter.profession || 'Agriculture').trim(),
-              politicalPreference: preference,
-              locationStatus: isMigrated ? VoterLocationStatus.MIGRATED : VoterLocationStatus.LOCAL,
-              voterLocationStatus: isMigrated ? VoterLocationStatus.MIGRATED : VoterLocationStatus.LOCAL,
-              currentLocation: migrationCity,
-              migrationCity: isMigrated ? migrationCity : null,
-              notes: String(row.notes || row.remarks || existingVoter.notes || '').trim(),
+              caste: casteVal,
+              subCaste: subCasteVal,
+              profession: professionVal,
+              politicalPreference: politicalPrefVal,
+              voterStatus: newVoterStatus,
+              notes: updatedNotes || null,
             },
           });
         } else {
           newVoterPayloads.push({
-            serialNumber: parseInt(String(row.serialNumber || i + 1), 10) || i + 1,
+            serialNumber: item.serialNumber,
             epicNumber: item.epic,
             name: item.rawName,
             fatherHusbandName: relativeName,
@@ -826,19 +1056,21 @@ export class BulkUploadService {
             villageId: item.villageRecord.id,
             boothId: item.boothRecord.id,
             voterGroupId: item.groupRecord.id,
-            caste: String(row.caste || row.subCaste || 'General').trim(),
-            subCaste: String(row.subCaste || row.caste || 'General').trim(),
-            profession: String(row.profession || row.occupation || 'Agriculture').trim(),
+            caste,
+            subCaste,
+            profession,
             politicalPreference: preference,
-            voterStatus: VoterStatus.ACTIVE,
-            surveyStatus: SurveyStatus.SURVEYED,
+            voterStatus: item.isDelete ? VoterStatus.SHIFTED : VoterStatus.ACTIVE,
+            surveyStatus: SurveyStatus.NOT_SURVEYED,
             locationStatus: isMigrated ? VoterLocationStatus.MIGRATED : VoterLocationStatus.LOCAL,
             voterLocationStatus: isMigrated ? VoterLocationStatus.MIGRATED : VoterLocationStatus.LOCAL,
             currentLocation: migrationCity,
             migrationCity: isMigrated ? migrationCity : null,
             voteStatus: VoteStatus.NOT_VOTED,
             inchargeAssessment: preference,
-            notes: String(row.notes || row.remarks || `Imported via CMS Excel Voter Roll for ${constituency.name}`).trim(),
+            notes: item.isDelete
+              ? 'ECI_OFFICIAL_SOURCE_STATUS: DELETE; DB_INTERNAL_STATUS: SHIFTED'
+              : String(row.notes || row.remarks || `Imported via CMS Excel Voter Roll for ${constituency.name}`).trim(),
           });
         }
       }

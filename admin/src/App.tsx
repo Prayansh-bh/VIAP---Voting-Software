@@ -599,7 +599,7 @@ export default function App() {
 
             <Route
               path="/admin/data"
-              element={<DataIngestion currentApp={selectedApp} />}
+              element={<DataIngestion currentApp={selectedApp} apps={apps} onSelectApp={handleSelectApp} />}
             />
 
             <Route
@@ -609,6 +609,8 @@ export default function App() {
                   currentApp={
                     apps.find((a) => a.id === location.pathname.split('/')[3]) || selectedApp
                   }
+                  apps={apps}
+                  onSelectApp={handleSelectApp}
                 />
               }
             />

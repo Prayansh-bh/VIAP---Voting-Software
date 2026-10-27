@@ -78,7 +78,7 @@ export class UsersService {
     if (!isSuperAdmin && actorOrgId && user.organisationId && user.organisationId !== actorOrgId) {
       const err: any = new Error('Access denied: User belongs to another organization');
       err.statusCode = 403;
-      err.code = 'FORBIDDEN_TENANT';
+      err.code = 'CROSS_ORG_ACCESS_FORBIDDEN';
       throw err;
     }
 

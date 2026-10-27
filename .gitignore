@@ -66,3 +66,9 @@ frontend/CLAUDE.md
 .neon
 uploads/
 backend/uploads/
+
+# Archive (Contains real voter records and forensic reconciliation artifacts)
+archive/
+
+# Scratch & diagnostic scripts
+scratch/

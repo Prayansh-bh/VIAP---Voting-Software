@@ -29,7 +29,7 @@ export const importDataSchema = z.object({
   rows: z.array(z.record(z.string(), z.any())).min(1, 'At least one data row is required'),
   targetConstituencyId: z.string().optional(),
   columnMapping: z.record(z.string(), z.string()).optional(),
-  importMode: z.enum(['APPEND', 'REPLACE']).default('APPEND'),
+  importMode: z.enum(['APPEND', 'REPLACE', 'UPSERT', 'REFRESH']).default('REFRESH'),
   voterGroupSize: z.number().int().min(10).max(500).default(100),
   fileName: z
     .string()

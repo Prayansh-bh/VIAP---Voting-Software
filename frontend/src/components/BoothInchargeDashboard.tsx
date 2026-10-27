@@ -2646,6 +2646,14 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                 <h3 className="text-base font-bold text-slate-100 mt-1">
                   S.No {editingVoter.serialNumber} &mdash; {editingVoter.name}
                 </h3>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-xs font-mono text-yellow-300 bg-slate-900 px-2 py-0.5 rounded border border-slate-700">
+                    {editingVoter.epicNumber?.startsWith('INTERNAL-NO-EPIC-') ? 'No Domestic EPIC (Overseas/Form 6A)' : (editingVoter.epicNumber || 'No EPIC')}
+                  </span>
+                  <span className="text-xs text-slate-400">
+                    Part {editingVoter.boothNumber || '—'}
+                  </span>
+                </div>
               </div>
               <button 
                 onClick={() => setEditingVoter(null)}

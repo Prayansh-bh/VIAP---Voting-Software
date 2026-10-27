@@ -1,6 +1,9 @@
 import { FastifyInstance } from 'fastify';
 import { validateBody } from '../../common/validation.js';
+import { errorResponse } from '../../common/response.js';
 import { authenticate } from '../../middleware/auth.js';
+import { requireRoles } from '../../middleware/rbac.js';
+import { RoleType } from '@prisma/client';
 import {
   requestOtpSchema,
   registerOtpSchema,
@@ -209,10 +212,48 @@ export async function authRoutes(fastify: FastifyInstance) {
     AuthController.revokeDevice,
   );
 
-  // WhatsApp OTP Gateway Management & QR Linking
-  fastify.get('/whatsapp/status', AuthController.getWhatsAppStatus);
-  fastify.get('/whatsapp/qr', AuthController.getWhatsAppQr);
-  fastify.get('/whatsapp/qr.png', AuthController.getWhatsAppQrImage);
-  fastify.post('/whatsapp/pair', AuthController.requestWhatsAppPairingCode);
-  fastify.get('/whatsapp/test', AuthController.testWhatsAppSend);
+  // WhatsApp OTP Gateway Management & QR Linking (Restricted to Platform Administrators)
+  fastify.get(
+    '/whatsapp/status',
+    {
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.STATE_ADMIN)],
+    },
+    AuthController.getWhatsAppStatus
+  );
+  fastify.get(
+    '/whatsapp/qr',
+    {
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.STATE_ADMIN)],
+    },
+    AuthController.getWhatsAppQr
+  );
+  fastify.get(
+    '/whatsapp/qr.png',
+    {
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.STATE_ADMIN)],
+    },
+    AuthController.getWhatsAppQrImage
+  );
+  fastify.post(
+    '/whatsapp/pair',
+    {
+      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.STATE_ADMIN)],
+    },
+    AuthController.requestWhatsAppPairingCode
+  );
+  fastify.get(
+    '/whatsapp/test',
+    {
+      preHandler: [
+        async (_req, reply) => {
+          if (process.env.NODE_ENV === 'production') {
+            return reply.status(404).send(errorResponse('Route not found', 'NOT_FOUND'));
+          }
+        },
+        authenticate,
+        requireRoles(RoleType.SUPER_ADMIN, RoleType.STATE_ADMIN),
+      ],
+    },
+    AuthController.testWhatsAppSend
+  );
 }

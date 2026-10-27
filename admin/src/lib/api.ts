@@ -227,9 +227,11 @@ export async function fetchApplications(): Promise<AppInstance[]> {
         party: c.parties?.[0]?.name || c.organisationName || c.appName || 'Party Alliance',
         partyCode: c.activePartyCode || c.parties?.[0]?.code || 'APP',
         leaderName: c.candidateName || 'Party Leadership',
-        jurisdiction: c.appScope === 'SINGLE_MLA'
-          ? (c.parliamentName ? `${c.parliamentName} (1 MLA Segment)` : `${c.appName || 'Assembly'} (Segment)`)
-          : (c.parliamentName ? `${c.parliamentName} (${c.constituenciesCount || 7} Constituencies)` : `${c.appName || 'Assembly'} (${c.constituenciesCount || 1} Constituencies)`),
+        jurisdiction: (typeof c.constituenciesCount === 'number' && c.constituenciesCount === 0)
+          ? `${c.appName || 'Party'} (0 Constituencies Ingested)`
+          : c.appScope === 'SINGLE_MLA'
+            ? (c.parliamentName ? `${c.parliamentName} (1 MLA Segment)` : `${c.appName || 'Assembly'} (Segment)`)
+            : (c.parliamentName ? `${c.parliamentName} (${c.constituenciesCount || 7} Constituencies)` : `${c.appName || 'Assembly'} (${c.constituenciesCount || 1} Constituencies)`),
         description: `Operational Tenant for ${c.appName || 'Party'}, ${c.stateName || 'Apex'}`,
         primaryColor: c.primaryColor || c.parties?.[0]?.primaryColor || '#F59E0B',
         secondaryColor: c.secondaryColor || '#DC2626',
@@ -651,4 +653,39 @@ export async function deleteCredential(keyName: string, organisationId?: string)
     method: 'DELETE',
   });
 }
+
+export async function fetchInchargeRosterPreview(constituencyId: string): Promise<any> {
+  return request(`/cadre/roster-preview/${encodeURIComponent(constituencyId)}`);
+}
+
+export async function provisionInchargesApi(
+  constituencyId: string,
+  payload?: { partyCode?: string; defaultPasscode?: string }
+): Promise<any> {
+  return request(`/cadre/provision-roster/${encodeURIComponent(constituencyId)}`, {
+    method: 'POST',
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export async function downloadInchargeRosterCsv(constituencyId: string): Promise<void> {
+  const token = getAdminToken();
+  const url = `${API_BASE}/cadre/roster-export/${encodeURIComponent(constituencyId)}`;
+  const resp = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!resp.ok) {
+    throw new Error(`Failed to download roster: ${resp.statusText}`);
+  }
+  const blob = await resp.blob();
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = downloadUrl;
+  a.download = `incharge_roster_${constituencyId}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(downloadUrl);
+}
+
 

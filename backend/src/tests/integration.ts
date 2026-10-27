@@ -51,7 +51,12 @@ async function runIntegrationTests() {
   });
 
   // Get real users from DB
-  const mlaUser = await prisma.user.findFirst({ where: { role: RoleType.CONSTITUENCY_INCHARGE } });
+  const mlaUser = await prisma.user.findFirst({
+    where: {
+      role: RoleType.CONSTITUENCY_INCHARGE,
+      organisation: { parties: { some: { isActive: true } } },
+    },
+  });
   const incharge100 = await prisma.user.findFirst({ where: { role: RoleType.VOTER_100_INCHARGE } });
 
   assert.ok(mlaUser, 'MLA user must exist');

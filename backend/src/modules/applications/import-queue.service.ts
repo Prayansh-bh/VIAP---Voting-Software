@@ -28,10 +28,86 @@ let isWorkerBusy = false;
 let workerIntervalTimer: NodeJS.Timeout | null = null;
 let isShuttingDown = false;
 
+export function getTenantUploadDir(tenantId: string): string {
+  if (!tenantId || tenantId.includes('..') || tenantId.includes('/') || tenantId.includes('\\')) {
+    throw new Error('Path traversal attempt detected in upload storage.');
+  }
+  const sanitizedTenant = (tenantId || 'global-default').replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!sanitizedTenant) {
+    throw new Error('Invalid tenant identifier for upload storage.');
+  }
+  const baseDir = path.resolve(TEMP_DIR);
+  const tenantDir = path.resolve(baseDir, sanitizedTenant);
+  if (!tenantDir.startsWith(baseDir)) {
+    throw new Error('Path traversal attempt detected in upload storage.');
+  }
+  if (!fs.existsSync(tenantDir)) {
+    fs.mkdirSync(tenantDir, { recursive: true, mode: 0o700 });
+  }
+  try {
+    fs.chmodSync(tenantDir, 0o700);
+  } catch {}
+  return tenantDir;
+}
+
+export function getSecureJobFilePath(tenantId: string, jobId: string): string {
+  if (!jobId || jobId.includes('..') || jobId.includes('/') || jobId.includes('\\')) {
+    throw new Error('Path traversal attempt detected in job file creation.');
+  }
+  const tenantDir = getTenantUploadDir(tenantId);
+  const sanitizedJobId = jobId.replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!sanitizedJobId) {
+    throw new Error('Invalid job identifier for upload storage.');
+  }
+  const filePath = path.resolve(tenantDir, `import-${sanitizedJobId}.csv`);
+  if (!filePath.startsWith(tenantDir)) {
+    throw new Error('Path traversal attempt detected in job file creation.');
+  }
+  return filePath;
+}
+
+export async function cleanupOrphanedUploads(maxAgeMs: number = 3600000): Promise<void> {
+  try {
+    if (!fs.existsSync(TEMP_DIR)) return;
+    const now = Date.now();
+    const entries = await fs.promises.readdir(TEMP_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const tenantDir = path.join(TEMP_DIR, entry.name);
+        const files = await fs.promises.readdir(tenantDir, { withFileTypes: true });
+        for (const file of files) {
+          if (file.isFile() && file.name.startsWith('import-') && file.name.endsWith('.csv')) {
+            const filePath = path.join(tenantDir, file.name);
+            try {
+              const stat = await fs.promises.stat(filePath);
+              if (now - stat.mtimeMs > maxAgeMs) {
+                await fs.promises.unlink(filePath).catch(() => {});
+              }
+            } catch {}
+          }
+        }
+      } else if (entry.isFile() && entry.name.startsWith('import-') && entry.name.endsWith('.csv')) {
+        const filePath = path.join(TEMP_DIR, entry.name);
+        try {
+          const stat = await fs.promises.stat(filePath);
+          if (now - stat.mtimeMs > maxAgeMs) {
+            await fs.promises.unlink(filePath).catch(() => {});
+          }
+        } catch {}
+      }
+    }
+  } catch (err: any) {
+    console.warn('[ImportQueue] Orphaned upload cleanup notice:', err?.message);
+  }
+}
+
 function ensureTempDir(): void {
   if (!fs.existsSync(TEMP_DIR)) {
-    fs.mkdirSync(TEMP_DIR, { recursive: true });
+    fs.mkdirSync(TEMP_DIR, { recursive: true, mode: 0o700 });
   }
+  try {
+    fs.chmodSync(TEMP_DIR, 0o700);
+  } catch {}
 }
 
 function parseGender(val?: string): Gender {
@@ -54,6 +130,7 @@ export class ImportQueueService {
    */
   static init(): void {
     ensureTempDir();
+    cleanupOrphanedUploads().catch(() => {});
     this.recoverStaleJobsOnStartup().catch((err) => {
       console.warn('⚠️ [ImportQueue] Startup recovery notice:', err?.message || err);
     });
@@ -156,7 +233,7 @@ export class ImportQueueService {
       );
     }
 
-    const config = await ApplicationsService.resolveApplication(applicationId);
+    const config = await ApplicationsService.resolveApplication(applicationId, actor);
     ensureTempDir();
 
     let part: any;
@@ -201,8 +278,13 @@ export class ImportQueueService {
     try {
       constituency = await ApplicationsService.resolveConstituencyForApp(config, targetConstituencyId);
     } catch (err: any) {
-      part.file.resume();
-      return reply.status(err.statusCode || 400).send(errorResponse(err.message, err.code || 'BAD_REQUEST'));
+      if ((err.code === 'TARGET_CONSTITUENCY_REQUIRED' || err.statusCode === 404) && config.organisationId) {
+        const fallbackName = targetConstituencyId || config.headerTitle || config.appName || '110 Kondapi';
+        constituency = await ApplicationsService.ensureTenantConstituency(config, fallbackName);
+      } else {
+        part.file.resume();
+        return reply.status(err.statusCode || 400).send(errorResponse(err.message, err.code || 'BAD_REQUEST'));
+      }
     }
 
     const scope = req.hierarchyScope;
@@ -228,10 +310,11 @@ export class ImportQueueService {
       );
     }
 
-    // 4. Stream to unique temp file while computing SHA-256 hash
+    // 4. Stream to unique temp file while computing SHA-256 hash (partitioned by tenant with secure permissions)
+    const tenantId = config.organisationId || 'global-default';
     const importJobId = crypto.randomUUID();
-    const tempFilePath = path.join(TEMP_DIR, `import-${importJobId}.csv`);
-    const writeStream = fs.createWriteStream(tempFilePath);
+    const tempFilePath = getSecureJobFilePath(tenantId, importJobId);
+    const writeStream = fs.createWriteStream(tempFilePath, { mode: 0o600 });
     const hash = crypto.createHash('sha256');
 
     let bytesWritten = 0;
@@ -527,9 +610,10 @@ export class ImportQueueService {
 
       const existingBooths = await prisma.booth.findMany({
         where: { village: { mandal: { constituencyId: constituency.id } } },
+        include: { village: { select: { mandalId: true } } },
       });
       const boothMap = new Map<string, string>(
-        existingBooths.map((b) => [`${b.villageId}:${String(b.boothNumber).trim().toLowerCase()}`, b.id]),
+        existingBooths.map((b) => [`${b.village.mandalId}:${String(b.boothNumber).replace(/^Booth\s*/i, '').trim().toLowerCase()}`, b.id]),
       );
 
       const existingGroups = await prisma.voterGroup.findMany({
@@ -767,28 +851,60 @@ export class ImportQueueService {
     const validBatchItems: any[] = [];
     let skipped = 0;
 
+    const seenEpicsInBatch = new Set<string>();
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const rowNum = startRowIndex + i;
 
-      const epic = getVal(row, 'epicNumber') || getVal(row, 'epic') || getVal(row, 'voterId');
-      const name = getVal(row, 'fullName') || getVal(row, 'name');
+      const name = (getVal(row, 'fullName') || getVal(row, 'name') || '').trim();
 
-      if (!epic || !name) {
+      if (!name) {
         skipped++;
         errors.push({
           rowNumber: rowNum,
-          field: !epic ? 'epicNumber' : 'name',
-          value: !epic ? 'empty' : 'empty',
-          errorMessage: 'Missing required EPIC Number or Voter Full Name',
+          field: 'name',
+          value: 'empty',
+          errorMessage: 'Missing required Voter Full Name',
         });
         continue;
       }
 
+      const rawEpic = (getVal(row, 'epicNumber') || getVal(row, 'epic') || getVal(row, 'voterId') || '').trim().toUpperCase();
+      const boothRaw = getVal(row, 'boothNumber') || getVal(row, 'booth') || '101';
+      const parsedSerial = parseInt(getVal(row, 'serialNumber') || '', 10);
+      const serialNumber = (!isNaN(parsedSerial) && parsedSerial > 0) ? parsedSerial : rowNum;
+      const isBlankEpic = !rawEpic;
+      const baseEpic = isBlankEpic ? `NRI-${constituency.code || '110'}-P${boothRaw}-S${serialNumber}` : rawEpic;
+
+      const statusRaw = (getVal(row, 'voterStatus') || '').trim().toUpperCase();
+      const isDelete = statusRaw.includes('DELETE');
+
+      let epic = baseEpic;
+      let notes: string | null = null;
+      if (isBlankEpic) {
+        notes = 'OVERSEAS_ELECTOR_NO_DOMESTIC_EPIC';
+      } else if (isDelete) {
+        notes = 'ECI_DELETED_IN_REVISION';
+      }
+
+      if (seenEpicsInBatch.has(baseEpic)) {
+        if (isDelete) {
+          epic = `${baseEpic}-DEL-P${boothRaw}-S${serialNumber}`;
+          notes = 'ECI_DELETED_IN_REVISION: Migrated entry';
+        } else {
+          epic = `${baseEpic}-DUP-P${boothRaw}-S${serialNumber}`;
+          notes = `DUPLICATE_ACTIVE_CONFLICT: Original EPIC ${baseEpic} duplicate enrollment`;
+        }
+      } else {
+        seenEpicsInBatch.add(baseEpic);
+      }
+
       validBatchItems.push({
         rowNum,
-        epic: epic.trim().toUpperCase(),
-        name: name.trim(),
+        serialNumber,
+        epic,
+        name,
         relativeName: getVal(row, 'relativeName') || getVal(row, 'fatherHusbandName') || 'Relative',
         relation: parseRelation(getVal(row, 'relationType')),
         age: Math.min(125, Math.max(18, parseInt(getVal(row, 'age') || '30', 10) || 30)),
@@ -798,10 +914,13 @@ export class ImportQueueService {
         caste: getVal(row, 'caste') || null,
         profession: getVal(row, 'profession') || null,
         politicalPreference: getVal(row, 'politicalPreference') || 'NEUTRAL',
+        voterStatus: isDelete ? 'SHIFTED' : 'ACTIVE',
+        notes,
         mandalName: getVal(row, 'mandal') || getVal(row, 'mandalName') || `${constituency.name} Mandal`,
         villageName: getVal(row, 'village') || getVal(row, 'villageName') || 'Central Village',
-        boothRaw: getVal(row, 'boothNumber') || getVal(row, 'booth') || '101',
-        groupRaw: getVal(row, 'voterGroup') || 'General Group',
+        boothRaw,
+        pollingStationName: getVal(row, 'pollingStation') || '',
+        groupRaw: getVal(row, 'voterGroup') || '',
       });
     }
 
@@ -844,6 +963,7 @@ export class ImportQueueService {
         const lockKey = getConstituencyLockKey(constituency.id);
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(${lockKey}::bigint)`;
 
+        // Pass 1: Resolve Mandal, Village, and Booth hierarchies for all items
         for (const item of filteredItems) {
           // Resolve Mandal
           let mandalId = mandalMap.get(item.mandalName.toLowerCase());
@@ -882,19 +1002,24 @@ export class ImportQueueService {
             villageMap.set(vKey, villageId);
           }
 
-          // Resolve Booth
-          const bKey = `${villageId}:${item.boothRaw.toLowerCase()}`;
+          // Resolve Booth: Keyed strictly by mandalId and cleanBooth to avoid hamlet duplication
+          const cleanBooth = item.boothRaw.replace(/^Booth\s*/i, '').trim().toLowerCase();
+          const bKey = `${mandalId}:${cleanBooth}`;
           let boothId = boothMap.get(bKey);
           if (!boothId) {
-            const boothCode = `BTH-${villageId.slice(0, 8)}-${item.boothRaw.replace(/\W/g, '').toUpperCase().slice(0, 8)}`;
+            const boothCode = `BTH-${constituency.id.slice(0, 8)}-M${mandalId.slice(0, 4)}-${item.boothRaw.replace(/\W/g, '').toUpperCase().slice(0, 8)}`;
             const b = await tx.booth.upsert({
               where: { code: boothCode },
-              update: { boothNumber: item.boothRaw },
+              update: { 
+                boothNumber: item.boothRaw,
+                pollingStation: item.pollingStationName || `${item.villageName} Polling Station ${item.boothRaw}`,
+              },
               create: {
                 villageId,
                 boothNumber: item.boothRaw,
                 code: boothCode,
-                name: `Booth ${item.boothRaw}`,
+                name: item.pollingStationName ? `Polling Station: ${item.pollingStationName}` : `Booth ${item.boothRaw}`,
+                pollingStation: item.pollingStationName || `${item.villageName} Polling Station ${item.boothRaw}`,
                 totalVoters: 1000,
               },
             });
@@ -902,24 +1027,69 @@ export class ImportQueueService {
             boothMap.set(bKey, boothId);
           }
 
-          // Resolve Voter Group
-          const gKey = `${boothId}:${item.groupRaw.toLowerCase()}`;
-          let groupId = groupMap.get(gKey);
-          if (!groupId) {
-            const groupCode = `VG-${boothId.slice(0, 8)}-${item.groupRaw.replace(/\W/g, '').toUpperCase().slice(0, 8)}`;
-            const g = await tx.voterGroup.upsert({
-              where: { code: groupCode },
-              update: { name: item.groupRaw },
-              create: {
-                boothId,
-                name: item.groupRaw,
-                code: groupCode,
-                totalVoters: 100,
-              },
-            });
-            groupId = g.id;
-            groupMap.set(gKey, groupId);
+          (item as any).mandalId = mandalId;
+          (item as any).villageId = villageId;
+          (item as any).boothId = boothId;
+        }
+
+        // Pass 2: Deterministic per-booth serialNumber-sorted group assignment
+        const itemsByBooth = new Map<string, any[]>();
+        for (const item of filteredItems) {
+          const bId = (item as any).boothId;
+          let list = itemsByBooth.get(bId);
+          if (!list) {
+            list = [];
+            itemsByBooth.set(bId, list);
           }
+          list.push(item);
+        }
+
+        for (const [boothId, bItems] of itemsByBooth.entries()) {
+          const activeToGroup: any[] = [];
+          for (const item of bItems) {
+            if (item.groupRaw) {
+              // explicit group already assigned
+            } else if (item.voterStatus === 'SHIFTED') {
+              item.groupRaw = 'Deleted Electors';
+            } else {
+              activeToGroup.push(item);
+            }
+          }
+
+          // Sort active items by serialNumber ASC, tie-breaking by rowNum ASC
+          activeToGroup.sort((a, b) => a.serialNumber - b.serialNumber || a.rowNum - b.rowNum);
+          for (let idx = 0; idx < activeToGroup.length; idx++) {
+            const groupNum = Math.floor(idx / 100) + 1;
+            activeToGroup[idx].groupRaw = `Group ${groupNum}`;
+          }
+
+          for (const item of bItems) {
+            const gKey = `${boothId}:${item.groupRaw.toLowerCase()}`;
+            let groupId = groupMap.get(gKey);
+            if (!groupId) {
+              const groupCode = `VG-${boothId.slice(0, 8)}-${item.groupRaw.replace(/\W/g, '').toUpperCase().slice(0, 8)}`;
+              const g = await tx.voterGroup.upsert({
+                where: { code: groupCode },
+                update: { name: item.groupRaw },
+                create: {
+                  boothId,
+                  name: item.groupRaw,
+                  code: groupCode,
+                  totalVoters: 100,
+                },
+              });
+              groupId = g.id;
+              groupMap.set(gKey, groupId);
+            }
+            (item as any).groupId = groupId;
+          }
+        }
+
+        for (const item of filteredItems) {
+          const mandalId = (item as any).mandalId;
+          const villageId = (item as any).villageId;
+          const boothId = (item as any).boothId;
+          const groupId = (item as any).groupId;
 
           const existingMatch = existingByEpic.get(item.epic);
 
@@ -938,6 +1108,8 @@ export class ImportQueueService {
                 caste: item.caste,
                 profession: item.profession,
                 politicalPreference: item.politicalPreference,
+                voterStatus: item.voterStatus as any,
+                notes: item.notes,
                 stateId: resolvedStateId,
                 zoneId: resolvedZoneId,
                 parliamentId: resolvedParliamentId,
@@ -954,7 +1126,7 @@ export class ImportQueueService {
             // New voter insert
             const created = await tx.voter.create({
               data: {
-                serialNumber: item.rowNum,
+                serialNumber: item.serialNumber,
                 epicNumber: item.epic,
                 name: item.name,
                 fatherHusbandName: item.relativeName,
@@ -966,6 +1138,8 @@ export class ImportQueueService {
                 caste: item.caste,
                 profession: item.profession,
                 politicalPreference: item.politicalPreference,
+                voterStatus: item.voterStatus as any,
+                notes: item.notes,
                 stateId: resolvedStateId,
                 zoneId: resolvedZoneId,
                 parliamentId: resolvedParliamentId,

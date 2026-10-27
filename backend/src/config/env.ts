@@ -41,12 +41,35 @@ const envSchema = z.object({
   // Cache & Message Broker (Redis)
   REDIS_URL: z.string().optional(),
 
+  // Development / Mock OTP Flags (strictly disabled in production)
+  ENABLE_DEV_MOCK_OTP: z.coerce.boolean().default(false),
+  ENABLE_MOCK_OTP: z.coerce.boolean().default(false),
+
+  // Legal & Privacy Compliance Flags (DPDP Act / Statutory Clearance)
+  ENABLE_POLITICAL_PREFERENCE_COLLECTION: z.coerce.boolean().default(false),
+
   // AI & Analytics
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default('gemini-2.5-flash'),
 }).superRefine((data, ctx) => {
   // In production, enforce strict secrets to avoid token forgery with default dev keys
   if (data.NODE_ENV === 'production') {
+    if (process.env.ENABLE_MOCK_OTP === 'true' || process.env.ENABLE_DEV_MOCK_OTP === 'true' || data.ENABLE_MOCK_OTP || data.ENABLE_DEV_MOCK_OTP) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ENABLE_MOCK_OTP'],
+        message: 'Security Violation: Mock OTP bypass cannot be enabled in production environment.',
+      });
+    }
+
+    if (data.ENABLE_POLITICAL_PREFERENCE_COLLECTION && process.env.STATUTORY_LEGAL_APPROVAL_RECORD !== 'DOCUMENTED_AND_APPROVED') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ENABLE_POLITICAL_PREFERENCE_COLLECTION'],
+        message: 'Statutory Violation: Political preference collection cannot be enabled in production without documented statutory legal approval.',
+      });
+    }
+
     const defaultJwt = 'kondapi-production-jwt-secret-key-change-in-env-2026';
     if (data.JWT_SECRET === defaultJwt || data.JWT_SECRET.length < 32) {
       ctx.addIssue({

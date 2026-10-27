@@ -6,6 +6,9 @@ import {
   Prisma,
   RelationType,
   RoleType,
+  SurveyStatus,
+  VoterStatus,
+  VoteStatus,
 } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { logAudit } from '../../middleware/audit.js';
@@ -92,7 +95,28 @@ export const SYSTEM_FIELDS: SystemFieldDefinition[] = [
     label: 'Voter ID / EPIC',
     required: true,
     description: 'Unique voter registration card number',
-    aliases: ['voter id', 'epic', 'epic number', 'voter id / epic', 'epic_no', 'voter_id', 'card no', 'id', 'epicno', 'voter id no', 'voter id card', 'epic id', 'epic_num', 'electors no'],
+    aliases: ['voter id', 'epic', 'epic number', 'voter id / epic', 'epic_no', 'voter_id', 'card no', 'epicno', 'voter id no', 'voter id card', 'epic id', 'epic_num', 'electors no', 'epic id no', 'epic id no.', 'epicidno'],
+  },
+  {
+    key: 'serialNumber',
+    label: 'Serial Number / ECI Serial',
+    required: false,
+    description: 'Official elector serial number within the booth/part',
+    aliases: ['new serial no', 'new serial number', 'serial no', 'serial number', 'sl no', 'slno', 'serial', 'new_serial_no', 'newserialno', 'serial_no', 'new serial no.'],
+  },
+  {
+    key: 'pollingStation',
+    label: 'Polling Station Name',
+    required: false,
+    description: 'Physical polling station location or facility name',
+    aliases: ['polling station name', 'polling station', 'ps name', 'station name', 'polling_station_name', 'pollingstationname'],
+  },
+  {
+    key: 'voterStatus',
+    label: 'Voter Status (Active / Deleted)',
+    required: false,
+    description: 'Official gazette status: ACTIVE or DELETE',
+    aliases: ['active/delete', 'active delete', 'status', 'voter status', 'activedelete', 'active_delete', 'official status'],
   },
   {
     key: 'fullName',
@@ -209,7 +233,16 @@ export function normalizeColumnKey(str: string): string {
 export const SYSTEM_FIELD_ALIASES: Record<string, string[]> = {
   epicNumber: [
     'epicnumber', 'epicno', 'epicnum', 'epic', 'voterid', 'voteridno', 'voteridnumber',
-    'voteridcard', 'cardno', 'slno', 'idno', 'id', 'electorsno', 'epicid',
+    'voteridcard', 'cardno', 'idno', 'electorsno', 'epicid', 'epicidno',
+  ],
+  serialNumber: [
+    'newserialno', 'newserialnumber', 'serialno', 'serialnumber', 'slno', 'serial', 'newserial',
+  ],
+  pollingStation: [
+    'pollingstationname', 'pollingstation', 'psname', 'stationname', 'pollingstationlabel',
+  ],
+  voterStatus: [
+    'activedelete', 'active', 'delete', 'voterstatus', 'status', 'officialstatus',
   ],
   fullName: [
     'fullname', 'votername', 'electorname', 'citizenname', 'name', 'candidatename',
@@ -302,7 +335,7 @@ export class ApplicationsService {
   /**
    * Helper to resolve application configuration by ID, configKey, or fallback to default
    */
-  static async resolveApplication(appIdOrKey: string): Promise<any> {
+  static async resolveApplication(appIdOrKey: string, user?: AuthenticatedUserPayload): Promise<any> {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appIdOrKey);
     let config: any = await prisma.cMSConfiguration.findFirst({
       where: {
@@ -333,7 +366,15 @@ export class ApplicationsService {
       },
     });
 
-    if (!config) {
+    // If explicit UUID appId was requested but not found, DO NOT fall back to default or other apps!
+    if (!config && isUuid) {
+      const err: any = new Error(`Application with identifier '${appIdOrKey}' not found.`);
+      err.statusCode = 404;
+      err.code = 'APPLICATION_NOT_FOUND';
+      throw err;
+    }
+
+    if (!config && (appIdOrKey === 'default' || !appIdOrKey)) {
       config = await prisma.cMSConfiguration.findFirst({
         where: { configKey: 'default' },
         include: {
@@ -359,32 +400,20 @@ export class ApplicationsService {
     }
 
     if (!config) {
-      config = await prisma.cMSConfiguration.findFirst({
-        orderBy: { updatedAt: 'desc' },
-        include: {
-          organisation: {
-            include: {
-              states: {
-                include: {
-                  zones: {
-                    include: {
-                      parliaments: {
-                        include: {
-                          constituencies: true,
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      });
+      const err: any = new Error(`Application with identifier '${appIdOrKey}' not found.`);
+      err.statusCode = 404;
+      err.code = 'APPLICATION_NOT_FOUND';
+      throw err;
     }
 
-    if (!config) {
-      throw new Error(`Application with identifier '${appIdOrKey}' not found.`);
+    // Tenant Isolation Guard: Verify caller has authority over this application's organization
+    if (user && user.role !== RoleType.SUPER_ADMIN) {
+      if (user.organisationId && config.organisationId && user.organisationId !== config.organisationId) {
+        const err: any = new Error(`Access denied: Application '${appIdOrKey}' belongs to another organization.`);
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_TENANT';
+        throw err;
+      }
     }
 
     return config;
@@ -434,82 +463,135 @@ export class ApplicationsService {
         err.statusCode = 404;
         throw err;
       }
+
+      // Enforce strict tenant boundary check on target constituency
+      const constOrgId = constituency.parliament?.zone?.state?.organisationId;
+      if (config.organisationId && constOrgId && constOrgId !== config.organisationId) {
+        const err: any = new Error(`Access denied: Target constituency '${targetConstituencyId}' belongs to another organization.`);
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_TENANT_CONSTITUENCY';
+        throw err;
+      }
+
       return constituency;
     }
 
-    // 1. Try resolving via configured parliament on this application
-    if (config?.parliamentCode || config?.parliamentName) {
-      const p: any = await prisma.parliament.findFirst({
-        where: {
-          OR: [
-            ...(config.parliamentCode ? [{ code: config.parliamentCode }] : []),
-            ...(config.parliamentName ? [{ name: { equals: config.parliamentName, mode: 'insensitive' as const } }] : []),
-          ],
-        },
-        include: {
-          constituencies: {
-            include: { parliament: { include: { zone: { include: { state: true } } } } },
-            take: 1,
-          },
-        },
-      });
-      if (p?.constituencies?.[0]) {
-        return p.constituencies[0];
-      }
-    }
-
-    // 2. Try resolving via tenant organisation hierarchy
-    if (config?.organisationId) {
-      const orgState: any = await prisma.state.findFirst({
-        where: { organisationId: config.organisationId },
-        include: {
-          zones: {
-            include: {
-              parliaments: {
-                include: {
-                  constituencies: {
-                    include: { parliament: { include: { zone: { include: { state: true } } } } },
-                    take: 1,
-                  },
-                },
-              },
-            },
-          },
-        },
-      });
-      for (const z of orgState?.zones || []) {
-        for (const p of z.parliaments || []) {
-          if (p.constituencies?.[0]) {
-            return p.constituencies[0];
-          }
-        }
-      }
-    }
-
-    // 3. Try matching constituency name by app organisationName / headerTitle
+    // Try unambiguous match by app organisationName / headerTitle within tenant
     if (config?.organisationName || config?.headerTitle) {
-      constituency = await prisma.constituency.findFirst({
+      const candidates = await prisma.constituency.findMany({
         where: {
-          OR: [
-            ...(config.organisationName ? [{ name: { contains: config.organisationName, mode: 'insensitive' as const } }] : []),
-            ...(config.headerTitle ? [{ name: { contains: config.headerTitle, mode: 'insensitive' as const } }] : []),
+          AND: [
+            ...(config.organisationId ? [{ parliament: { zone: { state: { organisationId: config.organisationId } } } }] : []),
+            {
+              OR: [
+                ...(config.organisationName ? [{ name: { equals: config.organisationName.trim(), mode: 'insensitive' as const } }] : []),
+                ...(config.headerTitle ? [{ name: { equals: config.headerTitle.trim(), mode: 'insensitive' as const } }] : []),
+              ],
+            },
           ],
         },
         include: { parliament: { include: { zone: { include: { state: true } } } } },
       });
-      if (constituency) return constituency;
+      if (candidates.length === 1) {
+        return candidates[0];
+      }
+      if (candidates.length > 1) {
+        const err: any = new Error(
+          `Ambiguous constituency match for application '${config?.id || config?.configKey}'. Multiple matches found within tenant.`
+        );
+        err.statusCode = 400;
+        err.code = 'AMBIGUOUS_CONSTITUENCY_MATCH';
+        throw err;
+      }
     }
 
-    // 4. System fallback: Pick first available constituency in the database
-    constituency = await prisma.constituency.findFirst({
-      include: { parliament: { include: { zone: { include: { state: true } } } } },
-      orderBy: { name: 'asc' },
+    // 4. Fail closed: Never guess or pick a constituency from another tenant or global pool
+    const err: any = new Error(
+      `Target constituency could not be resolved safely for application '${config?.id || 'unknown'}'. Please specify a valid targetConstituencyId within your organization.`
+    );
+    err.statusCode = 400;
+    err.code = 'TARGET_CONSTITUENCY_REQUIRED';
+    throw err;
+  }
+
+  /**
+   * Ensures that a root geographic hierarchy (State -> Zone -> Parliament -> Constituency)
+   * exists for a given tenant organisation. Idempotent and strictly scoped to organisationId.
+   */
+  static async ensureTenantConstituency(config: any, rawName?: string): Promise<any> {
+    const orgId = config.organisationId;
+    if (!orgId) {
+      const err: any = new Error('Cannot provision hierarchy: Application has no organisation assigned.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const cleanName = (rawName || config.headerTitle || config.organisationName || config.appName || '110 Kondapi')
+      .replace(/\s*\(AC.*?\)\s*/gi, '')
+      .trim();
+    const parsedNum = parseInt(cleanName.replace(/\D/g, ''), 10);
+    const constNumber = !isNaN(parsedNum) && parsedNum > 0 ? parsedNum : 110;
+    const constCode = `AC-${orgId.slice(0, 8)}-${constNumber}`;
+
+    // 1. Ensure State for this organisation
+    const stateCode = `ST-${orgId.slice(0, 8)}`;
+    const state = await prisma.state.upsert({
+      where: { code: stateCode },
+      update: {},
+      create: {
+        code: stateCode,
+        name: config.stateName || 'Andhra Pradesh',
+        organisationId: orgId,
+      },
     });
 
-    if (!constituency) {
-      const err: any = new Error(`No valid constituency configured or available for application '${config?.id || 'unknown'}'.`);
-      err.statusCode = 404;
-      throw err;
+    // 2. Ensure Zone
+    const zoneCode = `ZN-${orgId.slice(0, 8)}`;
+    const zone = await prisma.zone.upsert({
+      where: { code: zoneCode },
+      update: {},
+      create: {
+        code: zoneCode,
+        name: `${config.appName || 'Party'} Zone`,
+        stateId: state.id,
+      },
+    });
+
+    // 3. Ensure Parliament
+    const pcCode = `PC-${orgId.slice(0, 8)}`;
+    const pcName = config.parliamentName || `${cleanName} Parliament`;
+    const parliament = await prisma.parliament.upsert({
+      where: { code: pcCode },
+      update: {},
+      create: {
+        code: pcCode,
+        name: pcName,
+        zoneId: zone.id,
+      },
+    });
+
+    // 4. Ensure Constituency
+    const constituency = await prisma.constituency.upsert({
+      where: { code: constCode },
+      update: { name: cleanName, constituencyNumber: constNumber },
+      create: {
+        code: constCode,
+        name: cleanName,
+        constituencyNumber: constNumber,
+        parliamentId: parliament.id,
+      },
+      include: { parliament: { include: { zone: { include: { state: true } } } } },
+    });
+
+    // Update config with parliament details if needed
+    if (config.id) {
+      await prisma.cMSConfiguration.update({
+        where: { id: config.id },
+        data: {
+          parliamentName: pcName,
+          parliamentCode: pcCode,
+        },
+      }).catch(() => {});
     }
 
     return constituency;
@@ -547,6 +629,7 @@ export class ApplicationsService {
       .filter((id): id is string => typeof id === 'string' && id.length > 0);
 
     const voterCountByOrg = new Map<string, number>();
+    const constCountByOrg = new Map<string, number>();
 
     if (orgIds.length > 0) {
       const orgStates = await prisma.state.findMany({
@@ -561,17 +644,48 @@ export class ApplicationsService {
       const stateIds = Array.from(stateToOrgMap.keys());
 
       if (stateIds.length > 0) {
-        const voterCountsByState = await prisma.voter.groupBy({
-          by: ['stateId'],
-          where: { stateId: { in: stateIds } },
-          _count: { id: true },
-        });
+        const [voterCountsByState, orgConstituencies] = await Promise.all([
+          prisma.voter.groupBy({
+            by: ['stateId'],
+            where: { stateId: { in: stateIds } },
+            _count: { id: true },
+          }),
+          prisma.constituency.findMany({
+            where: {
+              parliament: {
+                zone: {
+                  stateId: { in: stateIds },
+                },
+              },
+            },
+            select: {
+              id: true,
+              parliament: {
+                select: {
+                  zone: {
+                    select: { stateId: true },
+                  },
+                },
+              },
+            },
+          }),
+        ]);
 
         for (const item of voterCountsByState) {
           if (item.stateId) {
             const matchedOrgId = stateToOrgMap.get(item.stateId);
             if (matchedOrgId) {
               voterCountByOrg.set(matchedOrgId, (voterCountByOrg.get(matchedOrgId) || 0) + item._count.id);
+            }
+          }
+        }
+
+        for (const cItem of orgConstituencies) {
+          const sId = cItem.parliament?.zone?.stateId;
+          if (sId) {
+            const matchedOrgId = stateToOrgMap.get(sId);
+            if (matchedOrgId) {
+              constCountByOrg.set(matchedOrgId, (constCountByOrg.get(matchedOrgId) || 0) + 1);
             }
           }
         }
@@ -590,14 +704,7 @@ export class ApplicationsService {
         : activeParties.map((p) => ({ name: p.name, code: p.code, primaryColor: p.primaryColor }));
 
       const effectiveScope = c.appScope || 'SINGLE_MLA';
-      const constituenciesCount = effectiveScope === 'SINGLE_MLA'
-        ? 1
-        : effectiveScope === 'PARLIAMENT_MP'
-          ? 7
-          : effectiveScope === 'ZONE'
-            ? 21
-            : 10;
-
+      const constituenciesCount = c.organisationId ? (constCountByOrg.get(c.organisationId) || 0) : 0;
       const votersCount = c.organisationId ? (voterCountByOrg.get(c.organisationId) || 0) : 0;
 
       return {
@@ -1421,8 +1528,8 @@ export class ApplicationsService {
   /**
    * Return detailed configuration for a specific application
    */
-  static async getConfiguration(appId: string) {
-    const config = await this.resolveApplication(appId);
+  static async getConfiguration(appId: string, user?: AuthenticatedUserPayload) {
+    const config = await this.resolveApplication(appId, user);
     return {
       id: config.id,
       configKey: config.configKey,
@@ -1458,8 +1565,8 @@ export class ApplicationsService {
   /**
    * Return dynamic hierarchy tree and configured levels
    */
-  static async getHierarchy(appId: string) {
-    const config = await this.resolveApplication(appId);
+  static async getHierarchy(appId: string, userScope?: UserHierarchyScope, user?: AuthenticatedUserPayload) {
+    const config = await this.resolveApplication(appId, user);
     const activeLevels = Array.isArray(config.activeHierarchyLevels)
       ? (config.activeHierarchyLevels as string[])
       : ['STATE', 'ZONE', 'PARLIAMENT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
@@ -1480,7 +1587,12 @@ export class ApplicationsService {
 
     const stateName = config.stateName || 'Andhra Pradesh';
     const state = await prisma.state.findFirst({
-      where: { name: { equals: stateName, mode: 'insensitive' } },
+      where: {
+        AND: [
+          ...(config.organisationId ? [{ organisationId: config.organisationId }] : []),
+          { name: { equals: stateName, mode: 'insensitive' as const } },
+        ],
+      },
       include: {
         zones: {
           include: {
@@ -1510,7 +1622,47 @@ export class ApplicationsService {
       },
     });
 
+    const resolvedState = state || (config.organisationId ? await prisma.state.findFirst({
+      where: { organisationId: config.organisationId },
+      include: {
+        zones: {
+          include: {
+            parliaments: {
+              include: {
+                constituencies: {
+                  include: {
+                    mandals: {
+                      include: {
+                        villages: {
+                          include: {
+                            booths: {
+                              include: {
+                                voterGroups: true,
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    }) : null);
+
+    const constWhere: Prisma.ConstituencyWhereInput = {};
+    if (config.organisationId) {
+      constWhere.parliament = { zone: { state: { organisationId: config.organisationId } } };
+    }
+    if (userScope && user?.role !== RoleType.SUPER_ADMIN && userScope.accessibleConstituencyIds.size > 0) {
+      constWhere.id = { in: Array.from(userScope.accessibleConstituencyIds) };
+    }
+
     const allConstituencies = await prisma.constituency.findMany({
+      where: Object.keys(constWhere).length > 0 ? constWhere : undefined,
       include: {
         parliament: { include: { zone: { include: { state: true } } } },
         mandals: {
@@ -1537,7 +1689,7 @@ export class ApplicationsService {
       appScope: config.appScope || 'SINGLE_MLA',
       activeHierarchyLevels: activeLevels,
       hierarchyLabels,
-      state: state || null,
+      state: resolvedState || null,
       constituencies: allConstituencies,
     };
   }
@@ -1545,48 +1697,144 @@ export class ApplicationsService {
   /**
    * Return child nodes for cascading dropdowns
    */
-  static async getHierarchyNodesByLevel(appId: string, level: string, parentId?: string) {
-    await this.resolveApplication(appId);
+  static async getHierarchyNodesByLevel(
+    appId: string,
+    level: string,
+    parentId?: string,
+    userScope?: UserHierarchyScope,
+    user?: AuthenticatedUserPayload
+  ) {
+    const config = await this.resolveApplication(appId, user);
     const upperLevel = level.toUpperCase();
+    const effectiveOrgId = config.organisationId;
+    const isSuperAdmin = user?.role === RoleType.SUPER_ADMIN;
 
     switch (upperLevel) {
       case 'STATE':
-        return prisma.state.findMany({ orderBy: { name: 'asc' } });
+        return prisma.state.findMany({
+          where: effectiveOrgId ? { organisationId: effectiveOrgId } : undefined,
+          orderBy: { name: 'asc' },
+        });
+
       case 'ZONE':
         return prisma.zone.findMany({
-          where: parentId ? { stateId: parentId } : undefined,
+          where: {
+            AND: [
+              ...(effectiveOrgId ? [{ state: { organisationId: effectiveOrgId } }] : []),
+              ...(parentId ? [{ stateId: parentId }] : []),
+            ],
+          },
           orderBy: { name: 'asc' },
         });
+
       case 'PARLIAMENT':
         return prisma.parliament.findMany({
-          where: parentId ? { zoneId: parentId } : undefined,
+          where: {
+            AND: [
+              ...(effectiveOrgId ? [{ zone: { state: { organisationId: effectiveOrgId } } }] : []),
+              ...(parentId ? [{ zoneId: parentId }] : []),
+            ],
+          },
           orderBy: { name: 'asc' },
         });
-      case 'CONSTITUENCY':
+
+      case 'CONSTITUENCY': {
+        const constWhere: Prisma.ConstituencyWhereInput = {
+          AND: [
+            ...(effectiveOrgId ? [{ parliament: { zone: { state: { organisationId: effectiveOrgId } } } }] : []),
+            ...(parentId ? [{ parliamentId: parentId }] : []),
+          ],
+        };
+        if (!isSuperAdmin && userScope && userScope.accessibleConstituencyIds.size > 0) {
+          constWhere.id = { in: Array.from(userScope.accessibleConstituencyIds) };
+        }
         return prisma.constituency.findMany({
-          where: parentId ? { parliamentId: parentId } : undefined,
+          where: constWhere,
           orderBy: { name: 'asc' },
         });
-      case 'MANDAL':
+      }
+
+      case 'MANDAL': {
+        const mandalWhere: Prisma.MandalWhereInput = {
+          AND: [
+            ...(effectiveOrgId ? [{ constituency: { parliament: { zone: { state: { organisationId: effectiveOrgId } } } } }] : []),
+            ...(parentId ? [{ constituencyId: parentId }] : []),
+          ],
+        };
+        if (!isSuperAdmin && userScope && userScope.accessibleConstituencyIds.size > 0) {
+          mandalWhere.constituencyId = parentId
+            ? (userScope.accessibleConstituencyIds.has(parentId) ? parentId : '00000000-0000-0000-0000-000000000000')
+            : { in: Array.from(userScope.accessibleConstituencyIds) };
+        }
         return prisma.mandal.findMany({
-          where: parentId ? { constituencyId: parentId } : undefined,
+          where: mandalWhere,
           orderBy: { name: 'asc' },
         });
-      case 'VILLAGE':
+      }
+
+      case 'VILLAGE': {
+        const villageWhere: Prisma.VillageWhereInput = {
+          AND: [
+            ...(effectiveOrgId ? [{ mandal: { constituency: { parliament: { zone: { state: { organisationId: effectiveOrgId } } } } } }] : []),
+            ...(parentId ? [{ mandalId: parentId }] : []),
+          ],
+        };
+        if (!isSuperAdmin && userScope && userScope.accessibleConstituencyIds.size > 0) {
+          villageWhere.mandal = {
+            ...(effectiveOrgId ? { constituency: { parliament: { zone: { state: { organisationId: effectiveOrgId } } } } } : {}),
+            constituencyId: { in: Array.from(userScope.accessibleConstituencyIds) },
+          };
+        }
         return prisma.village.findMany({
-          where: parentId ? { mandalId: parentId } : undefined,
+          where: villageWhere,
           orderBy: { name: 'asc' },
         });
-      case 'BOOTH':
+      }
+
+      case 'BOOTH': {
+        const boothWhere: Prisma.BoothWhereInput = {
+          AND: [
+            ...(effectiveOrgId ? [{ village: { mandal: { constituency: { parliament: { zone: { state: { organisationId: effectiveOrgId } } } } } } }] : []),
+            ...(parentId ? [{ villageId: parentId }] : []),
+          ],
+        };
+        if (!isSuperAdmin && userScope && userScope.accessibleConstituencyIds.size > 0) {
+          boothWhere.village = {
+            ...(effectiveOrgId ? { mandal: { constituency: { parliament: { zone: { state: { organisationId: effectiveOrgId } } } } } } : {}),
+            mandal: {
+              constituencyId: { in: Array.from(userScope.accessibleConstituencyIds) },
+            },
+          };
+        }
+        if (!isSuperAdmin && userScope && userScope.accessibleBoothIds.size > 0) {
+          boothWhere.id = parentId
+            ? (userScope.accessibleBoothIds.has(parentId) ? parentId : '00000000-0000-0000-0000-000000000000')
+            : { in: Array.from(userScope.accessibleBoothIds) };
+        }
         return prisma.booth.findMany({
-          where: parentId ? { villageId: parentId } : undefined,
+          where: boothWhere,
           orderBy: { boothNumber: 'asc' },
         });
-      case 'VOTER_GROUP':
+      }
+
+      case 'VOTER_GROUP': {
+        const vgWhere: Prisma.VoterGroupWhereInput = {
+          AND: [
+            ...(effectiveOrgId ? [{ booth: { village: { mandal: { constituency: { parliament: { zone: { state: { organisationId: effectiveOrgId } } } } } } } }] : []),
+            ...(parentId ? [{ boothId: parentId }] : []),
+          ],
+        };
+        if (!isSuperAdmin && userScope && userScope.accessibleBoothIds.size > 0) {
+          vgWhere.boothId = parentId
+            ? (userScope.accessibleBoothIds.has(parentId) ? parentId : '00000000-0000-0000-0000-000000000000')
+            : { in: Array.from(userScope.accessibleBoothIds) };
+        }
         return prisma.voterGroup.findMany({
-          where: parentId ? { boothId: parentId } : undefined,
+          where: vgWhere,
           orderBy: { name: 'asc' },
         });
+      }
+
       default:
         return [];
     }
@@ -1595,20 +1843,45 @@ export class ApplicationsService {
   /**
    * Return scoped constituencies with their data status, booth counts, and voter records
    */
-  static async getConstituencies(appId: string, scopeFilters?: { stateId?: string; zoneId?: string; parliamentId?: string }) {
-    const config = await this.resolveApplication(appId);
+  static async getConstituencies(
+    appId: string,
+    scopeFilters?: { stateId?: string; zoneId?: string; parliamentId?: string },
+    userScope?: UserHierarchyScope,
+    user?: AuthenticatedUserPayload,
+  ) {
+    const config = await this.resolveApplication(appId, user);
     const scope = config.appScope || 'SINGLE_MLA';
 
     const whereClause: Prisma.ConstituencyWhereInput = {};
 
+    if (config.organisationId) {
+      whereClause.parliament = {
+        zone: {
+          state: {
+            organisationId: config.organisationId,
+          },
+        },
+      };
+    }
+
     if (scopeFilters?.parliamentId) {
       whereClause.parliamentId = scopeFilters.parliamentId;
     } else if (scopeFilters?.zoneId) {
-      whereClause.parliament = { zoneId: scopeFilters.zoneId };
+      whereClause.parliament = {
+        ...(whereClause.parliament as any),
+        zoneId: scopeFilters.zoneId,
+      };
     } else if (scopeFilters?.stateId) {
-      whereClause.parliament = { zone: { stateId: scopeFilters.stateId } };
+      whereClause.parliament = {
+        ...(whereClause.parliament as any),
+        zone: {
+          stateId: scopeFilters.stateId,
+          ...(config.organisationId ? { state: { organisationId: config.organisationId } } : {}),
+        },
+      };
     } else if (scope === 'PARLIAMENT_MP' && config.parliamentName) {
       whereClause.parliament = {
+        ...(whereClause.parliament as any),
         name: { contains: config.parliamentName, mode: 'insensitive' },
       };
     } else if (scope === 'SINGLE_MLA') {
@@ -1618,8 +1891,12 @@ export class ApplicationsService {
       ];
     }
 
-    let constituencies = await prisma.constituency.findMany({
-      where: Object.keys(whereClause).length > 0 ? whereClause : undefined,
+    if (userScope && user?.role !== RoleType.SUPER_ADMIN && userScope.accessibleConstituencyIds.size > 0) {
+      whereClause.id = { in: Array.from(userScope.accessibleConstituencyIds) };
+    }
+
+    const constituencies = await prisma.constituency.findMany({
+      where: whereClause,
       include: {
         parliament: {
           include: {
@@ -1646,37 +1923,6 @@ export class ApplicationsService {
       },
       orderBy: { name: 'asc' },
     });
-
-    if (constituencies.length === 0) {
-      constituencies = await prisma.constituency.findMany({
-        include: {
-          parliament: {
-            include: {
-              zone: {
-                include: {
-                  state: true,
-                },
-              },
-            },
-          },
-          mandals: {
-            include: {
-              villages: {
-                include: {
-                  booths: true,
-                },
-              },
-            },
-          },
-          dataImports: {
-            orderBy: { createdAt: 'desc' },
-            take: 1,
-          },
-        },
-        orderBy: { name: 'asc' },
-        take: 25,
-      });
-    }
 
     return constituencies.map((c) => {
       let boothCount = 0;
@@ -1713,8 +1959,13 @@ export class ApplicationsService {
   /**
    * Return single constituency detail
    */
-  static async getConstituencyDetail(appId: string, constituencyId: string) {
-    await this.resolveApplication(appId);
+  static async getConstituencyDetail(
+    appId: string,
+    constituencyId: string,
+    userScope?: UserHierarchyScope,
+    user?: AuthenticatedUserPayload,
+  ) {
+    const config = await this.resolveApplication(appId, user);
     const c = await prisma.constituency.findUnique({
       where: { id: constituencyId },
       include: {
@@ -1736,7 +1987,26 @@ export class ApplicationsService {
     });
 
     if (!c) {
-      throw new Error(`Constituency with id '${constituencyId}' not found.`);
+      const err: any = new Error(`Constituency with id '${constituencyId}' not found.`);
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const constOrgId = c.parliament?.zone?.state?.organisationId;
+    if (config.organisationId && constOrgId && constOrgId !== config.organisationId) {
+      const err: any = new Error(`Access denied: Constituency '${constituencyId}' belongs to another organization.`);
+      err.statusCode = 403;
+      err.code = 'FORBIDDEN_TENANT';
+      throw err;
+    }
+
+    if (user?.role !== RoleType.SUPER_ADMIN && userScope && userScope.accessibleConstituencyIds.size > 0) {
+      if (!userScope.accessibleConstituencyIds.has(c.id)) {
+        const err: any = new Error(`Access denied: Outside authorized constituency scope.`);
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_CONSTITUENCY_SCOPE';
+        throw err;
+      }
     }
 
     return c;
@@ -2064,16 +2334,20 @@ export class ApplicationsService {
     options: {
       targetConstituencyId?: string;
       columnMapping?: Record<string, string>;
-      importMode?: 'APPEND' | 'REPLACE';
+      importMode?: 'APPEND' | 'REPLACE' | 'UPSERT' | 'REFRESH';
       voterGroupSize?: number;
       fileName?: string;
       fileSize?: number;
+      allowDangerousReplace?: boolean;
+      _testHookDuringTransaction?: (tx: any) => Promise<void>;
     },
     actorId?: string,
     scope?: UserHierarchyScope,
   ) {
     const config = await this.resolveApplication(appId);
-    const mode = options.importMode || 'APPEND';
+    const rawMode = (options.importMode || 'REFRESH').toUpperCase();
+    const mode = (rawMode === 'UPSERT' || rawMode === 'REFRESH') ? 'APPEND' : rawMode;
+    const isExplicitReplace = rawMode === 'REPLACE';
     const groupSize = options.voterGroupSize || 100;
     const fileName = options.fileName || 'voter_data_import.xlsx';
     const fileSize = options.fileSize || 0;
@@ -2098,7 +2372,28 @@ export class ApplicationsService {
     const getRowValue = (row: any, systemKey: string): string => extractRowValue(row, systemKey, mapping);
 
     // 1. Resolve Target Constituency strictly & deterministically
-    const constituency = await this.resolveConstituencyForApp(config, options.targetConstituencyId);
+    let targetConstId = options.targetConstituencyId;
+    if (!targetConstId && rows.length > 0) {
+      for (const r of rows) {
+        const val = getRowValue(r, 'constituency');
+        if (val) {
+          targetConstId = val;
+          break;
+        }
+      }
+    }
+
+    let constituency: any;
+    try {
+      constituency = await this.resolveConstituencyForApp(config, targetConstId);
+    } catch (resolveErr: any) {
+      if ((resolveErr.code === 'TARGET_CONSTITUENCY_REQUIRED' || resolveErr.statusCode === 404) && config.organisationId) {
+        const fallbackName = targetConstId || config.headerTitle || config.appName || '110 Kondapi';
+        constituency = await this.ensureTenantConstituency(config, fallbackName);
+      } else {
+        throw resolveErr;
+      }
+    }
     const resolvedParliamentId = constituency.parliamentId || constituency.parliament?.id || null;
     const resolvedZoneId = constituency.parliament?.zoneId || constituency.parliament?.zone?.id || null;
     const resolvedStateId = constituency.parliament?.zone?.stateId || constituency.parliament?.zone?.state?.id || null;
@@ -2132,35 +2427,68 @@ export class ApplicationsService {
     // 4. Pre-Flight Validation for REPLACE Mode (ZERO deletion before complete validation)
     const preflightErrors: Array<{ rowNumber: number; field: string; value?: string; errorMessage: string }> = [];
     const seenEpicsInFile = new Set<string>();
+    const seenEpicsStatus = new Map<string, string>();
 
-    if (mode === 'REPLACE' && level === 'VOTER') {
+    if (isExplicitReplace && level === 'VOTER') {
+      const existingVotersCount = await prisma.voter.count({ where: { constituencyId: constituency.id } });
+      if (existingVotersCount > 0 && !options.allowDangerousReplace) {
+        const hasLiveOps = await prisma.voter.findFirst({
+          where: {
+            constituencyId: constituency.id,
+            OR: [
+              { voteStatus: { not: VoteStatus.NOT_VOTED } },
+              { surveyStatus: { not: SurveyStatus.NOT_SURVEYED } },
+              { assignedInchargeId: { not: null } },
+              { assignments: { some: {} } },
+              { voteTrackings: { some: {} } },
+              { fakeVoterFlags: { some: {} } },
+              { migrations: { some: {} } },
+              { statusHistory: { some: {} } },
+              { liveVoteEvents: { some: {} } },
+            ],
+          },
+        });
+
+        if (hasLiveOps) {
+          const err: any = new Error(
+            `REPLACE mode is forbidden: Constituency '${constituency.name}' contains ${existingVotersCount} existing voters with live operational data (assessments, surveys, assignments, or vote tracking). Use UPSERT / REFRESH mode to prevent data loss.`
+          );
+          err.statusCode = 400;
+          err.code = 'REPLACE_MODE_FORBIDDEN_LIVE_OPERATIONAL_DATA';
+          throw err;
+        }
+      }
+
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const rowNum = i + 1;
         const epic = getRowValue(row, 'epicNumber').toUpperCase();
-        const rawName = getRowValue(row, 'fullName');
-        const rawAgeStr = getRowValue(row, 'age');
-        const ageNum = parseInt(rawAgeStr || '0', 10);
-        const rawGender = getRowValue(row, 'gender').toUpperCase();
-
-        if (!epic) {
-          preflightErrors.push({ rowNumber: rowNum, field: 'epicNumber', errorMessage: 'EPIC / Voter ID number is missing' });
-        } else if (seenEpicsInFile.has(epic)) {
-          preflightErrors.push({ rowNumber: rowNum, field: 'epicNumber', value: epic, errorMessage: `Duplicate EPIC '${epic}' inside uploaded file` });
-        } else {
-          seenEpicsInFile.add(epic);
-        }
+        const rawName = getRowValue(row, 'fullName') || (epic ? `[Name Not Recorded - ${epic}]` : '');
+        const villageName = getRowValue(row, 'village');
+        const isOverseas = (villageName || '').toLowerCase().includes('overseas');
+        const statusRaw = (getRowValue(row, 'voterStatus') || '').trim().toUpperCase();
 
         if (!rawName) {
           preflightErrors.push({ rowNumber: rowNum, field: 'fullName', errorMessage: 'Voter full name is missing' });
         }
 
-        if (rawAgeStr && (isNaN(ageNum) || ageNum < 18 || ageNum > 125)) {
-          preflightErrors.push({ rowNumber: rowNum, field: 'age', value: rawAgeStr, errorMessage: `Invalid voter age '${rawAgeStr}'. Must be between 18 and 125` });
-        }
-
-        if (rawGender && !rawGender.startsWith('M') && !rawGender.startsWith('F') && !rawGender.startsWith('O')) {
-          preflightErrors.push({ rowNumber: rowNum, field: 'gender', value: rawGender, errorMessage: `Invalid gender '${rawGender}'. Must be MALE, FEMALE, or OTHER` });
+        if (!epic) {
+          if (!isOverseas) {
+            preflightErrors.push({ rowNumber: rowNum, field: 'epicNumber', errorMessage: 'EPIC / Voter ID number is missing' });
+          }
+        } else {
+          if (seenEpicsInFile.has(epic)) {
+            const prevStatus = seenEpicsStatus.get(epic) || '';
+            const isRevisionPair = (prevStatus.includes('DELETE') && statusRaw.includes('ACTIVE')) ||
+                                   (prevStatus.includes('ACTIVE') && statusRaw.includes('DELETE'));
+            const isDoubleActive = prevStatus.includes('ACTIVE') && statusRaw.includes('ACTIVE');
+            if (!isRevisionPair && !isDoubleActive) {
+              preflightErrors.push({ rowNumber: rowNum, field: 'epicNumber', value: epic, errorMessage: `Duplicate EPIC '${epic}' inside uploaded file` });
+            }
+          } else {
+            seenEpicsInFile.add(epic);
+            seenEpicsStatus.set(epic, statusRaw);
+          }
         }
       }
 
@@ -2273,9 +2601,10 @@ export class ApplicationsService {
 
       const existingBooths = await prisma.booth.findMany({
         where: { village: { mandal: { constituencyId: constituency.id } } },
+        include: { village: { select: { mandalId: true } } },
       });
       const boothMap = new Map<string, string>(
-        existingBooths.map((b) => [`${b.villageId}:${String(b.boothNumber).trim().toLowerCase()}`, b.id]),
+        existingBooths.map((b) => [`${b.village.mandalId}:${String(b.boothNumber).replace(/^Booth\s*/i, '').trim().toLowerCase()}`, b.id]),
       );
 
       const existingGroups = await prisma.voterGroup.findMany({
@@ -2289,8 +2618,14 @@ export class ApplicationsService {
       let updatedCount = 0;
       let skippedCount = 0;
       let errorCount = 0;
+      let warningsCount = 0;
       let boothsCreated = 0;
       let voterGroupsCreated = 0;
+      let activeSourceCount = 0;
+      let deletedSourceCount = 0;
+      let blankEpicCount = 0;
+      let duplicateEpicCount = 0;
+      const boothTotals: Record<string, { total: number; active: number; deleted: number }> = {};
       const errorRecords: Array<{
         rowNumber: number;
         field: string;
@@ -2322,6 +2657,7 @@ export class ApplicationsService {
         villageId: string;
         boothId: string;
         groupId: string;
+        serialNumber: number;
         age: number;
         gender: Gender;
         relation: RelationType;
@@ -2331,34 +2667,136 @@ export class ApplicationsService {
         caste: string | null;
         profession: string | null;
         politicalPref: string;
+        voterStatus: VoterStatus;
+        notes?: string;
       }
 
+      interface ParsedRowItem {
+        rowNum: number;
+        epic: string;
+        rawName: string;
+        mandalId: string;
+        villageId: string;
+        boothId: string;
+        serialNumber: number;
+        age: number;
+        gender: Gender;
+        relation: RelationType;
+        relativeName: string;
+        houseNo: string;
+        mobile: string | null;
+        caste: string | null;
+        profession: string | null;
+        politicalPref: string;
+        voterStatus: VoterStatus;
+        notes?: string;
+        isDelete: boolean;
+        explicitGroupRaw: string;
+      }
+
+      const parsedRowItems: ParsedRowItem[] = [];
       const preparedItems: PreparedItem[] = [];
+      const seenEpicCounts = new Map<string, number>();
 
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const rowNum = i + 1;
-        const epic = getRowValue(row, 'epicNumber').toUpperCase();
-        const rawName = getRowValue(row, 'fullName');
+        const rawEpic = getRowValue(row, 'epicNumber').trim().toUpperCase();
+        const parsedSerial = parseInt(getRowValue(row, 'serialNumber') || '', 10);
+        const serialNumber = (!isNaN(parsedSerial) && parsedSerial > 0) ? parsedSerial : (i + 1);
+        const boothRaw = getRowValue(row, 'boothNumber').trim();
 
-        if (!epic || !rawName) {
+        // Strict SRP validation: Booth Number is a required structural identifier
+        if (!boothRaw) {
           skippedCount++;
           errorCount++;
           errorRecords.push({
             rowNumber: rowNum,
-            field: !epic ? 'epicNumber' : 'fullName',
-            value: !epic ? 'empty' : 'empty',
-            errorMessage: 'Missing required EPIC Number or Voter Full Name',
+            field: 'boothNumber',
+            value: 'empty',
+            errorMessage: 'Missing required Booth Number / Part Number',
             severity: 'ERROR',
           });
           continue;
         }
 
+        const rawName = getRowValue(row, 'fullName').trim();
+        // Strict SRP validation: Voter Full Name is a required personal identifier
+        if (!rawName) {
+          skippedCount++;
+          errorCount++;
+          errorRecords.push({
+            rowNumber: rowNum,
+            field: 'fullName',
+            value: 'empty',
+            errorMessage: 'Missing required Voter Full Name',
+            severity: 'ERROR',
+          });
+          continue;
+        }
+
+        // Blank EPIC preservation: PostgreSQL schema requires a unique non-null String key.
+        // We preserve blank source records by using an explicitly designated internal surrogate key
+        // while tracking in metadata/notes that the official source EPIC is BLANK.
+        const isBlankEpic = !rawEpic;
+        const baseEpic = isBlankEpic
+          ? `INTERNAL-NO-EPIC-${constituency.code || 'AC'}-P${boothRaw}-S${serialNumber}`
+          : rawEpic;
+
+        let epic = '';
         try {
-          const mandalName = getRowValue(row, 'mandal') || `${constituency.name} Mandal`;
-          const villageName = getRowValue(row, 'village') || `${mandalName} Village`;
-          const boothRaw = getRowValue(row, 'boothNumber') || '101';
-          const groupRaw = getRowValue(row, 'voterGroup') || `Group ${Math.floor(i / groupSize) + 1}`;
+          const mandalName = getRowValue(row, 'mandal').trim() || `${constituency.name} Mandal`;
+          const villageName = getRowValue(row, 'village').trim() || `${mandalName} Village`;
+          const pollingStationName = getRowValue(row, 'pollingStation').trim() || '';
+          const statusRaw = (getRowValue(row, 'voterStatus') || '').trim().toUpperCase();
+          const isDelete = statusRaw.includes('DELETE');
+          const voterStatus = isDelete ? VoterStatus.SHIFTED : VoterStatus.ACTIVE;
+
+          epic = baseEpic;
+          let notes: string | undefined = undefined;
+
+          if (isBlankEpic) {
+            blankEpicCount++;
+            notes = 'SOURCE_EPIC_STATUS: BLANK; INTERNAL_SURROGATE_KEY';
+          } else if (isDelete) {
+            notes = 'ECI_OFFICIAL_SOURCE_STATUS: DELETE';
+          }
+
+          if (seenEpicCounts.has(baseEpic)) {
+            const count = (seenEpicCounts.get(baseEpic) || 0) + 1;
+            seenEpicCounts.set(baseEpic, count);
+            duplicateEpicCount++;
+            if (isDelete) {
+              epic = `${baseEpic}-DEL-P${boothRaw}-S${serialNumber}`;
+              notes = notes ? `${notes}; ECI_DELETED_IN_REVISION: Migrated entry` : 'ECI_DELETED_IN_REVISION: Migrated entry';
+            } else {
+              epic = `${baseEpic}-DUP-P${boothRaw}-S${serialNumber}`;
+              notes = notes ? `${notes}; DUPLICATE_ACTIVE_CONFLICT: Original EPIC ${baseEpic}` : `DUPLICATE_ACTIVE_CONFLICT: Original EPIC ${baseEpic}`;
+            }
+          } else {
+            seenEpicCounts.set(baseEpic, 1);
+          }
+
+          // Provenance retention: capture source row, file, part, and official status
+          const rowProvenance = `SRC: file=${fileName}; row=${rowNum}; part=${boothRaw}; slno=${serialNumber}; status=${statusRaw || 'ACTIVE'}`;
+          notes = notes ? `${notes}; ${rowProvenance}` : rowProvenance;
+
+          // Track status totals and per-booth distribution
+          if (isDelete) {
+            deletedSourceCount++;
+          } else {
+            activeSourceCount++;
+          }
+
+          if (!boothTotals[boothRaw]) {
+            boothTotals[boothRaw] = { total: 0, active: 0, deleted: 0 };
+          }
+          boothTotals[boothRaw].total++;
+          if (isDelete) {
+            boothTotals[boothRaw].deleted++;
+          } else {
+            boothTotals[boothRaw].active++;
+          }
 
           // Ensure Mandal
           let mandalId = mandalMap.get(mandalName.toLowerCase());
@@ -2397,20 +2835,24 @@ export class ApplicationsService {
             villageMap.set(vKey, villageId);
           }
 
-          // Ensure Booth
-          const bKey = `${villageId}:${boothRaw.toLowerCase()}`;
+          // Ensure Booth: Keyed strictly by mandalId and cleanBooth to prevent multi-village hamlet duplication
+          const cleanBooth = boothRaw.replace(/^Booth\s*/i, '').trim().toLowerCase();
+          const bKey = `${mandalId}:${cleanBooth}`;
           let boothId = boothMap.get(bKey);
           if (!boothId) {
-            const boothCode = `BTH-${villageId.slice(0, 8)}-${boothRaw.replace(/\W/g, '').toUpperCase().slice(0, 8)}`;
+            const boothCode = `BTH-${constituency.id.slice(0, 8)}-M${mandalId.slice(0, 4)}-${boothRaw.replace(/\W/g, '').toUpperCase()}`;
             const b = await prisma.booth.upsert({
               where: { code: boothCode },
-              update: { boothNumber: boothRaw },
+              update: { 
+                boothNumber: boothRaw,
+                pollingStation: pollingStationName || `${villageName} Polling Station ${boothRaw}`,
+              },
               create: {
                 villageId,
                 boothNumber: boothRaw,
                 code: boothCode,
-                name: `Polling Station No. ${boothRaw}`,
-                pollingStation: `${villageName} Polling Station ${boothRaw}`,
+                name: pollingStationName ? `Polling Station: ${pollingStationName}` : `Polling Station No. ${boothRaw}`,
+                pollingStation: pollingStationName || `${villageName} Polling Station ${boothRaw}`,
                 totalVoters: 1000,
               },
             });
@@ -2419,45 +2861,45 @@ export class ApplicationsService {
             boothMap.set(bKey, boothId);
           }
 
-          // Ensure Voter Group
-          const gKey = `${boothId}:${groupRaw.toLowerCase()}`;
-          let groupId = groupMap.get(gKey);
-          if (!groupId) {
-            const groupCode = `VG-${boothId.slice(0, 8)}-${groupRaw.replace(/\W/g, '').toUpperCase().slice(0, 8)}`;
-            const g = await prisma.voterGroup.upsert({
-              where: { code: groupCode },
-              update: { name: groupRaw },
-              create: {
-                boothId,
-                name: groupRaw,
-                code: groupCode,
-                totalVoters: 100,
-              },
-            });
-            voterGroupsCreated++;
-            groupId = g.id;
-            groupMap.set(gKey, groupId);
-          }
+          // Capture explicit voter group if provided by user; otherwise groups will be assigned deterministically
+          const explicitGroupRaw = getRowValue(row, 'voterGroup').trim();
 
-          const ageNum = parseInt(getRowValue(row, 'age') || '30', 10);
+          // Demographics: Validate required fields and preserve valid source values without synthetic inventions
+          const rawAgeStr = getRowValue(row, 'age').trim();
+          const parsedAge = parseInt(rawAgeStr || '', 10);
+          if (rawAgeStr && (isNaN(parsedAge) || parsedAge < 18 || parsedAge > 125)) {
+            warningsCount++;
+            errorRecords.push({
+              rowNumber: rowNum,
+              field: 'age',
+              value: rawAgeStr,
+              errorMessage: `Age '${rawAgeStr}' is outside standard voting age range [18-125]`,
+              severity: 'WARNING',
+            });
+          }
+          const ageNum = (!isNaN(parsedAge) && parsedAge > 0) ? parsedAge : 0;
           const gender = parseGender(getRowValue(row, 'gender'));
           const relation = parseRelation(getRowValue(row, 'relationType'));
-          const relativeName = getRowValue(row, 'relativeName') || 'Relative';
-          const houseNo = getRowValue(row, 'houseNumber') || '1-1';
-          const mobile = getRowValue(row, 'mobileNumber') || null;
-          const caste = getRowValue(row, 'caste') || null;
-          const profession = getRowValue(row, 'profession') || null;
-          const politicalPref = getRowValue(row, 'politicalPreference') || 'NEUTRAL';
+          const relativeName = getRowValue(row, 'relativeName').trim();
+          const houseNo = getRowValue(row, 'houseNumber').trim();
+          const rawMobile = getRowValue(row, 'mobileNumber').trim();
+          const mobile = rawMobile ? rawMobile : null;
+          const rawCaste = getRowValue(row, 'caste').trim();
+          const caste = rawCaste ? rawCaste : null;
+          const rawProf = getRowValue(row, 'profession').trim();
+          const profession = rawProf ? rawProf : null;
+          const rawPref = getRowValue(row, 'politicalPreference').trim();
+          const politicalPref = rawPref ? rawPref : 'NEUTRAL';
 
-          preparedItems.push({
+          parsedRowItems.push({
             rowNum,
             epic,
             rawName,
             mandalId,
             villageId,
             boothId,
-            groupId,
-            age: isNaN(ageNum) ? 30 : ageNum,
+            serialNumber,
+            age: ageNum,
             gender,
             relation,
             relativeName,
@@ -2466,6 +2908,10 @@ export class ApplicationsService {
             caste,
             profession,
             politicalPref,
+            voterStatus,
+            notes,
+            isDelete,
+            explicitGroupRaw,
           });
         } catch (err: any) {
           errorCount++;
@@ -2479,10 +2925,110 @@ export class ApplicationsService {
         }
       }
 
-      // 8. Execution: REPLACE Mode (Atomic Transaction) vs APPEND Mode
-      if (mode === 'REPLACE' && level === 'VOTER') {
-        const voterPayloads: Prisma.VoterCreateManyInput[] = preparedItems.map((item, idx) => ({
-          serialNumber: idx + 1,
+      // 7b. Deterministic 100-Voter Group Assignment per Booth:
+      // - Active voters without explicit groups are ordered strictly by serialNumber ASC, tie-breaking by rowNum ASC.
+      // - Rank 1..100 -> Group 1, 101..200 -> Group 2, etc.
+      // - ECI DELETE records (isDelete === true) are assigned to 'Deleted Electors' group and do NOT consume active rank.
+      const itemsByBooth = new Map<string, ParsedRowItem[]>();
+      for (const item of parsedRowItems) {
+        let bList = itemsByBooth.get(item.boothId);
+        if (!bList) {
+          bList = [];
+          itemsByBooth.set(item.boothId, bList);
+        }
+        bList.push(item);
+      }
+
+      for (const [boothId, bItems] of itemsByBooth.entries()) {
+        const activeItemsToGroup: ParsedRowItem[] = [];
+        const otherItems: Array<{ item: ParsedRowItem; groupName: string }> = [];
+
+        for (const item of bItems) {
+          if (item.isDelete) {
+            otherItems.push({
+              item,
+              groupName: item.explicitGroupRaw || 'Deleted Electors',
+            });
+          } else if (item.explicitGroupRaw) {
+            otherItems.push({
+              item,
+              groupName: item.explicitGroupRaw,
+            });
+          } else {
+            activeItemsToGroup.push(item);
+          }
+        }
+
+        // Sort active voters deterministically by serialNumber ASC, then original row encounter order
+        activeItemsToGroup.sort((a, b) => a.serialNumber - b.serialNumber || a.rowNum - b.rowNum);
+
+        const assignedItems: Array<{ item: ParsedRowItem; groupName: string }> = [];
+        for (let idx = 0; idx < activeItemsToGroup.length; idx++) {
+          const item = activeItemsToGroup[idx];
+          const rank = idx + 1;
+          const groupNum = Math.floor((rank - 1) / groupSize) + 1;
+          assignedItems.push({
+            item,
+            groupName: `Group ${groupNum}`,
+          });
+        }
+
+        const allBoothAssigned = [...assignedItems, ...otherItems];
+
+        for (const { item, groupName } of allBoothAssigned) {
+          const gKey = `${item.boothId}:${groupName.toLowerCase()}`;
+          let groupId = groupMap.get(gKey);
+          if (!groupId) {
+            const groupCode = `VG-${item.boothId.slice(0, 8)}-${groupName.replace(/\W/g, '').toUpperCase()}`;
+            const g = await prisma.voterGroup.upsert({
+              where: { code: groupCode },
+              update: { name: groupName },
+              create: {
+                boothId: item.boothId,
+                name: groupName,
+                code: groupCode,
+                totalVoters: 100,
+              },
+            });
+            voterGroupsCreated++;
+            groupId = g.id;
+            groupMap.set(gKey, groupId);
+          }
+
+          preparedItems.push({
+            rowNum: item.rowNum,
+            epic: item.epic,
+            rawName: item.rawName,
+            mandalId: item.mandalId,
+            villageId: item.villageId,
+            boothId: item.boothId,
+            groupId,
+            serialNumber: item.serialNumber,
+            age: item.age,
+            gender: item.gender,
+            relation: item.relation,
+            relativeName: item.relativeName,
+            houseNo: item.houseNo,
+            mobile: item.mobile,
+            caste: item.caste,
+            profession: item.profession,
+            politicalPref: item.politicalPref,
+            voterStatus: item.voterStatus,
+            notes: item.notes,
+          });
+        }
+      }
+
+      // 8. Execution: REPLACE Mode (Atomic Transaction) vs REFRESH/UPSERT Mode
+      if (isExplicitReplace && level === 'VOTER') {
+        // Map all prepared items by their unique or disambiguated EPIC to preserve 100% of source records
+        const deduplicatedVoterMap = new Map<string, PreparedItem>();
+        for (const item of preparedItems) {
+          deduplicatedVoterMap.set(item.epic, item);
+        }
+
+        const voterPayloads: Prisma.VoterCreateManyInput[] = Array.from(deduplicatedVoterMap.values()).map((item) => ({
+          serialNumber: item.serialNumber,
           epicNumber: item.epic,
           name: item.rawName,
           fatherHusbandName: item.relativeName,
@@ -2494,6 +3040,8 @@ export class ApplicationsService {
           caste: item.caste,
           profession: item.profession,
           politicalPreference: item.politicalPref,
+          voterStatus: item.voterStatus,
+          notes: item.notes,
           stateId: resolvedStateId,
           zoneId: resolvedZoneId,
           parliamentId: resolvedParliamentId,
@@ -2518,6 +3066,10 @@ export class ApplicationsService {
               err.statusCode = 409;
               err.code = 'CONCURRENT_IMPORT_CONFLICT';
               throw err;
+            }
+
+            if (options._testHookDuringTransaction) {
+              await options._testHookDuringTransaction(tx);
             }
 
             // Delete existing voters in this constituency ONLY
@@ -2545,21 +3097,34 @@ export class ApplicationsService {
               } as unknown as Prisma.InputJsonValue,
             });
           },
-          { timeout: 60000 }
+          { timeout: 300000, maxWait: 60000 }
         );
 
         successCount = voterPayloads.length;
       } else {
-        // APPEND Mode: Bulk pre-fetch existing voters to avoid N+1 findUnique queries
+        // REFRESH / UPSERT / APPEND Mode: Preserves existing voter IDs and operational history
         const allEpics = preparedItems.map((p) => p.epic);
-        const existingVotersMap = new Map<string, { id: string; constituencyId: string | null }>();
+        const existingVotersMap = new Map<string, any>();
 
         const chunkSize = 2000;
         for (let i = 0; i < allEpics.length; i += chunkSize) {
           const slice = allEpics.slice(i, i + chunkSize);
           const found = await prisma.voter.findMany({
             where: { epicNumber: { in: slice } },
-            select: { id: true, epicNumber: true, constituencyId: true },
+            select: {
+              id: true,
+              epicNumber: true,
+              constituencyId: true,
+              voterStatus: true,
+              surveyStatus: true,
+              voteStatus: true,
+              mobileNumber: true,
+              caste: true,
+              subCaste: true,
+              profession: true,
+              politicalPreference: true,
+              notes: true,
+            },
           });
           found.forEach((v) => existingVotersMap.set(v.epicNumber, v));
         }
@@ -2594,38 +3159,87 @@ export class ApplicationsService {
               throw err;
             }
 
+            if (options._testHookDuringTransaction) {
+              await options._testHookDuringTransaction(tx);
+            }
+
             for (const item of preparedItems) {
               try {
                 if (existingVotersMap.has(item.epic)) {
                   const ev = existingVotersMap.get(item.epic)!;
+
+                  // 1. Revision & status resolution with explicit audit provenance
+                  let newVoterStatus = ev.voterStatus;
+                  let updatedNotes = ev.notes || '';
+
+                  if (item.voterStatus === 'SHIFTED') {
+                    newVoterStatus = VoterStatus.SHIFTED;
+                    const deleteProvenance = 'ECI_OFFICIAL_SOURCE_STATUS: DELETE; DB_INTERNAL_STATUS: SHIFTED';
+                    if (!updatedNotes.includes(deleteProvenance)) {
+                      updatedNotes = updatedNotes ? `${updatedNotes}; ${deleteProvenance}` : deleteProvenance;
+                    }
+                  } else if (item.voterStatus === 'ACTIVE') {
+                    if (ev.voterStatus === VoterStatus.SHIFTED) {
+                      newVoterStatus = VoterStatus.ACTIVE;
+                      const activeProvenance = 'ECI_OFFICIAL_SOURCE_STATUS: ACTIVE; RESTORED_FROM_SHIFTED';
+                      if (!updatedNotes.includes(activeProvenance)) {
+                        updatedNotes = updatedNotes ? `${updatedNotes}; ${activeProvenance}` : activeProvenance;
+                      }
+                    }
+                  }
+
+                  if (item.notes && !updatedNotes.includes(item.notes)) {
+                    updatedNotes = updatedNotes ? `${updatedNotes}; ${item.notes}` : item.notes;
+                  }
+
+                  // 2. Preserve operational attributes without overwriting surveyed data
+                  const mobileNumber = (item.mobile && item.mobile.trim()) ? item.mobile.trim() : ev.mobileNumber;
+                  const caste = (item.caste && item.caste.trim()) ? item.caste.trim() : ev.caste;
+                  const profession = (item.profession && item.profession.trim()) ? item.profession.trim() : ev.profession;
+
+                  let politicalPreference = ev.politicalPreference;
+                  if (ev.politicalPreference === 'NEUTRAL' && item.politicalPref && item.politicalPref !== 'NEUTRAL') {
+                    politicalPreference = item.politicalPref;
+                  }
+
+                  // In-place selective update: Voter UUID is preserved, preventing cascade-deletion of operational tables
+                  // Do not silently overwrite a correct existing record because an optional source field is blank.
+                  const name = (item.rawName && item.rawName.trim()) ? item.rawName.trim() : ev.name;
+                  const fatherHusbandName = (item.relativeName && item.relativeName.trim()) ? item.relativeName.trim() : ev.fatherHusbandName;
+                  const houseNumber = (item.houseNo && item.houseNo.trim()) ? item.houseNo.trim() : ev.houseNumber;
+                  const age = item.age > 0 ? item.age : ev.age;
+
                   await tx.voter.update({
                     where: { id: ev.id },
                     data: {
-                      name: item.rawName,
-                      fatherHusbandName: item.relativeName,
+                      serialNumber: item.serialNumber,
+                      name,
+                      fatherHusbandName,
                       relationType: item.relation,
-                      age: item.age,
+                      age,
                       gender: item.gender,
-                      mobileNumber: item.mobile,
-                      houseNumber: item.houseNo,
-                      caste: item.caste,
-                      profession: item.profession,
-                      politicalPreference: item.politicalPref,
-                      stateId: resolvedStateId,
-                      zoneId: resolvedZoneId,
-                      parliamentId: resolvedParliamentId,
-                      constituencyId: constituency.id,
+                      houseNumber,
                       mandalId: item.mandalId,
                       villageId: item.villageId,
                       boothId: item.boothId,
                       voterGroupId: item.groupId,
+                      stateId: resolvedStateId,
+                      zoneId: resolvedZoneId,
+                      parliamentId: resolvedParliamentId,
+                      constituencyId: constituency.id,
+                      voterStatus: newVoterStatus,
+                      notes: updatedNotes || null,
+                      mobileNumber,
+                      caste,
+                      profession,
+                      politicalPreference,
                       updatedById: creatorId,
                     },
                   });
                   updatedCount++;
                 } else {
                   newVotersList.push({
-                    serialNumber: item.rowNum,
+                    serialNumber: item.serialNumber,
                     epicNumber: item.epic,
                     name: item.rawName,
                     fatherHusbandName: item.relativeName,
@@ -2637,6 +3251,8 @@ export class ApplicationsService {
                     caste: item.caste,
                     profession: item.profession,
                     politicalPreference: item.politicalPref,
+                    voterStatus: item.voterStatus,
+                    notes: item.notes,
                     stateId: resolvedStateId,
                     zoneId: resolvedZoneId,
                     parliamentId: resolvedParliamentId,
@@ -2671,7 +3287,7 @@ export class ApplicationsService {
               successCount += newVotersList.length;
             }
           },
-          { timeout: 60000 }
+          { timeout: 300000, maxWait: 60000 }
         );
       }
 
@@ -2709,6 +3325,32 @@ export class ApplicationsService {
           ? 'PARTIAL_SUCCESS'
           : 'FAILED';
 
+      // Construct structured reconciliation report covering source counts, statuses, and per-booth distribution
+      const reconciliationReport = {
+        sourceRowCount: rows.length,
+        importedRowCount: successCount,
+        updatedRowCount: updatedCount,
+        rejectedRowCount: skippedCount,
+        errorCount,
+        warningCount: warningsCount,
+        duplicateOrConflictCount: duplicateEpicCount,
+        blankEpicCount,
+        statusTotals: {
+          active: activeSourceCount,
+          deleted: deletedSourceCount,
+        },
+        targetConstituency: {
+          id: constituency.id,
+          name: constituency.name,
+          code: constituency.code,
+          totalVotersInAC,
+        },
+        boothSummary: {
+          distinctBoothsCount: Object.keys(boothTotals).length,
+          perBoothTotals: boothTotals,
+        },
+      };
+
       // 10. Update DataImport & ImportJob records
       await prisma.dataImport.update({
         where: { id: dataImport.id },
@@ -2721,6 +3363,13 @@ export class ApplicationsService {
           failedRecords: errorCount,
           boothsCount: boothsCreated,
           voterGroupsCount: voterGroupsCreated,
+          metadata: {
+            appName: config.organisationName,
+            targetConstituencyName: constituency.name,
+            level,
+            voterGroupSize: groupSize,
+            reconciliationReport,
+          } as unknown as Prisma.InputJsonValue,
           completedAt: new Date(),
         },
       });
@@ -2754,6 +3403,7 @@ export class ApplicationsService {
           failedRecords: errorCount,
           boothsCreated,
           voterGroupsCreated,
+          reconciliationReport,
         } as unknown as Prisma.InputJsonValue,
       });
 
@@ -2772,8 +3422,10 @@ export class ApplicationsService {
         skippedCount,
         errorCount,
         failedCount: errorCount,
+        warningsCount,
         boothsCount: boothsCreated,
         voterGroupsCount: voterGroupsCreated,
+        reconciliationReport,
         errors: errorRecords.slice(0, 50),
       };
     } catch (err: any) {
@@ -2810,8 +3462,9 @@ export class ApplicationsService {
       limit?: number;
     },
     scope?: UserHierarchyScope,
+    user?: AuthenticatedUserPayload,
   ) {
-    const config = await this.resolveApplication(appId);
+    const config = await this.resolveApplication(appId, user);
     const page = Math.max(1, query?.page || 1);
     const limit = Math.min(100, Math.max(1, query?.limit || 20));
     const skip = (page - 1) * limit;
@@ -2915,7 +3568,17 @@ export class ApplicationsService {
   /**
    * Return single import details by ID
    */
-  static async getDataImportById(importId: string, appId?: string, scope?: UserHierarchyScope, actorId?: string) {
+  static async getDataImportById(
+    importId: string,
+    appId?: string,
+    scope?: UserHierarchyScope,
+    actorId?: string,
+    user?: AuthenticatedUserPayload,
+  ) {
+    if (appId) {
+      await this.resolveApplication(appId, user);
+    }
+
     const item = await prisma.dataImport.findUnique({
       where: { id: importId },
       include: {
@@ -2939,7 +3602,18 @@ export class ApplicationsService {
     if (appId && item.applicationId !== appId) {
       const err: any = new Error('Access denied: Import does not belong to requested application.');
       err.statusCode = 403;
+      err.code = 'FORBIDDEN_TENANT';
       throw err;
+    }
+
+    const itemOrgId = item.targetConstituency?.parliament?.zone?.state?.organisationId;
+    if (scope && !scope.isGlobalScope && scope.organisationId) {
+      if (itemOrgId && itemOrgId !== scope.organisationId) {
+        const err: any = new Error('Access denied: Import record belongs to another organization.');
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN_TENANT';
+        throw err;
+      }
     }
 
     if (scope && !scope.isGlobalScope) {
@@ -2948,6 +3622,7 @@ export class ApplicationsService {
       if (!hasConstituencyAccess && !isUploader) {
         const err: any = new Error('Access denied: Import record is outside your authorized hierarchy scope.');
         err.statusCode = 403;
+        err.code = 'FORBIDDEN_HIERARCHY_SCOPE';
         throw err;
       }
     }
@@ -2964,12 +3639,18 @@ export class ApplicationsService {
   /**
    * Return errors for an import record
    */
-  static async getDataImportErrors(importId: string, appId?: string, scope?: UserHierarchyScope, actorId?: string) {
+  static async getDataImportErrors(
+    importId: string,
+    appId?: string,
+    scope?: UserHierarchyScope,
+    actorId?: string,
+    user?: AuthenticatedUserPayload,
+  ) {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(importId);
     if (!isUuid) return [];
 
     if (scope && !scope.isGlobalScope) {
-      await this.getDataImportById(importId, appId, scope, actorId);
+      await this.getDataImportById(importId, appId, scope, actorId, user);
     }
 
     const errors = await prisma.dataImportError.findMany({
@@ -3771,8 +4452,14 @@ export class ApplicationsService {
   /**
    * KPI Rollup summary for the application
    */
-  static async getSummary(appId: string, userScope?: UserHierarchyScope) {
-    const config = await this.resolveApplication(appId);
+  static async getSummary(appId: string, userScope?: UserHierarchyScope, user?: AuthenticatedUserPayload) {
+    const config = await this.resolveApplication(appId, user);
+    if (user && user.role !== RoleType.SUPER_ADMIN && user.organisationId && config.organisationId && user.organisationId !== config.organisationId) {
+      const err: any = new Error(`Access denied: Application belongs to another organization.`);
+      err.statusCode = 403;
+      err.code = 'FORBIDDEN_TENANT';
+      throw err;
+    }
     const scopeWhere: any = {};
 
     if (userScope) {
@@ -3799,6 +4486,23 @@ export class ApplicationsService {
         select: { id: true },
       });
       tenantConstituencyIds = orgConstituencies.map((c) => c.id);
+
+      if (tenantConstituencyIds.length === 0) {
+        return {
+          applicationId: config.id,
+          appName: config.organisationName,
+          stateName: config.stateName || 'Andhra Pradesh',
+          totalVoters: 0,
+          verifiedCount: 0,
+          verificationRate: 0,
+          totalBooths: 0,
+          totalGroups: 0,
+          totalIncharges: 0,
+          totalTasks: 0,
+          totalMandals: 0,
+          totalConstituencies: 0,
+        };
+      }
     }
 
     const effectiveScope = config.appScope || 'SINGLE_MLA';

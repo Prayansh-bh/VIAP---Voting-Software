@@ -15,4 +15,7 @@ export async function cadreRoutes(fastify: FastifyInstance) {
   fastify.delete('/:id', CadreController.deleteCadre);
   fastify.get('/network', CadreController.getCadreNetwork);
   fastify.get('/performance', CadreController.getCadrePerformance);
+  fastify.get('/roster-preview/:constituencyId', CadreController.getRosterPreview);
+  fastify.post('/provision-roster/:constituencyId', CadreController.provisionRoster);
+  fastify.get('/roster-export/:constituencyId', CadreController.exportRoster);
 }

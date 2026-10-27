@@ -31,7 +31,7 @@ export async function applicationsRoutes(fastify: FastifyInstance) {
     },
     ApplicationsController.createApplication,
   );
-  fastify.get('/:applicationId/configuration', { preHandler: [authenticate] }, ApplicationsController.getConfiguration);
+  fastify.get('/:applicationId/configuration', { preHandler: [authenticate, populateHierarchyScope] }, ApplicationsController.getConfiguration);
   fastify.put(
     '/:id',
     {
@@ -52,10 +52,10 @@ export async function applicationsRoutes(fastify: FastifyInstance) {
   );
 
   // 2. Hierarchy & Structure Endpoints
-  fastify.get('/:applicationId/hierarchy', { preHandler: [authenticate] }, ApplicationsController.getHierarchy);
-  fastify.get('/:applicationId/hierarchy/:level', { preHandler: [authenticate] }, ApplicationsController.getHierarchyNodes);
-  fastify.get('/:applicationId/constituencies', { preHandler: [authenticate] }, ApplicationsController.getConstituencies);
-  fastify.get('/:applicationId/constituencies/:id', { preHandler: [authenticate] }, ApplicationsController.getConstituencyDetail);
+  fastify.get('/:applicationId/hierarchy', { preHandler: [authenticate, populateHierarchyScope] }, ApplicationsController.getHierarchy);
+  fastify.get('/:applicationId/hierarchy/:level', { preHandler: [authenticate, populateHierarchyScope] }, ApplicationsController.getHierarchyNodes);
+  fastify.get('/:applicationId/constituencies', { preHandler: [authenticate, populateHierarchyScope] }, ApplicationsController.getConstituencies);
+  fastify.get('/:applicationId/constituencies/:id', { preHandler: [authenticate, populateHierarchyScope] }, ApplicationsController.getConstituencyDetail);
 
   // 3. Data Ingestion: Mapping, Validation & Import
   fastify.post(

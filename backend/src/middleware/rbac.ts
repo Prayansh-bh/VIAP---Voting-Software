@@ -378,6 +378,25 @@ export async function computeUserHierarchyScope(
           });
         });
       }
+    } else if (role === RoleType.VILLAGE_INCHARGE && assignment.pollingStationId) {
+      const ps = await prisma.pollingStation.findUnique({
+        where: { id: assignment.pollingStationId },
+        include: {
+          booths: {
+            include: {
+              voterGroups: true,
+            },
+          },
+        },
+      });
+
+      if (ps) {
+        ps.booths.forEach((b) => {
+          accessibleBoothIds.add(b.id);
+          accessibleVillageIds.add(b.villageId);
+          b.voterGroups.forEach((vg) => accessibleVoterGroupIds.add(vg.id));
+        });
+      }
     } else if (role === RoleType.VILLAGE_INCHARGE && assignment.villageId) {
       const village = await prisma.village.findUnique({
         where: { id: assignment.villageId },
@@ -616,7 +635,29 @@ export async function assertVoterScope(req: FastifyRequest, reply: FastifyReply,
       constituencyId: true,
       assignedInchargeId: true,
       stateId: true,
+      zoneId: true,
+      parliamentId: true,
       state: { select: { organisationId: true } },
+      constituency: {
+        select: {
+          id: true,
+          parliamentId: true,
+          parliament: {
+            select: {
+              id: true,
+              zoneId: true,
+              zone: {
+                select: {
+                  id: true,
+                  state: {
+                    select: { organisationId: true },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     },
   });
 
@@ -625,10 +666,13 @@ export async function assertVoterScope(req: FastifyRequest, reply: FastifyReply,
     return false;
   }
 
-  // Tenant Isolation Check: Voter must belong to caller's organization
-  if (scope.organisationId && voter.state?.organisationId && voter.state.organisationId !== scope.organisationId) {
-    reply.status(403).send(errorResponse('Access denied: Voter belongs to another organization.', 'FORBIDDEN_TENANT'));
-    return false;
+  // Tenant Isolation Check: Voter must belong to caller's organization (Fail Closed)
+  const voterOrgId = voter.state?.organisationId || voter.constituency?.parliament?.zone?.state?.organisationId;
+  if (scope.organisationId) {
+    if (!voterOrgId || voterOrgId !== scope.organisationId) {
+      reply.status(403).send(errorResponse('Access denied: Voter does not belong to your authorized organization.', 'FORBIDDEN_TENANT'));
+      return false;
+    }
   }
 
   // 100-Voter In-Charge: Must belong to their exact voter group or assigned incharge
@@ -645,7 +689,7 @@ export async function assertVoterScope(req: FastifyRequest, reply: FastifyReply,
 
   // Booth Level
   if (scope.role === RoleType.BOOTH_PRESIDENT || scope.role === RoleType.BOOTH_INCHARGE) {
-    if (voter.boothId && !scope.accessibleBoothIds.has(voter.boothId)) {
+    if (!voter.boothId || !scope.accessibleBoothIds.has(voter.boothId)) {
       reply.status(403).send(errorResponse('Access denied: This voter is not in your assigned Booth.', 'FORBIDDEN_VOTER_SCOPE'));
       return false;
     }
@@ -654,7 +698,7 @@ export async function assertVoterScope(req: FastifyRequest, reply: FastifyReply,
 
   // Village Level
   if (scope.role === RoleType.VILLAGE_INCHARGE) {
-    if (voter.villageId && !scope.accessibleVillageIds.has(voter.villageId)) {
+    if (!voter.villageId || !scope.accessibleVillageIds.has(voter.villageId)) {
       reply.status(403).send(errorResponse('Access denied: This voter is not in your assigned Village.', 'FORBIDDEN_VOTER_SCOPE'));
       return false;
     }
@@ -663,7 +707,7 @@ export async function assertVoterScope(req: FastifyRequest, reply: FastifyReply,
 
   // Mandal Level
   if (scope.role === RoleType.MANDAL_INCHARGE) {
-    if (voter.mandalId && !scope.accessibleMandalIds.has(voter.mandalId)) {
+    if (!voter.mandalId || !scope.accessibleMandalIds.has(voter.mandalId)) {
       reply.status(403).send(errorResponse('Access denied: This voter is not in your assigned Mandal.', 'FORBIDDEN_VOTER_SCOPE'));
       return false;
     }
@@ -672,8 +716,28 @@ export async function assertVoterScope(req: FastifyRequest, reply: FastifyReply,
 
   // Constituency Level
   if (scope.role === RoleType.CONSTITUENCY_INCHARGE || scope.role === RoleType.VIEWER) {
-    if (voter.constituencyId && !scope.accessibleConstituencyIds.has(voter.constituencyId)) {
+    if (!voter.constituencyId || !scope.accessibleConstituencyIds.has(voter.constituencyId)) {
       reply.status(403).send(errorResponse('Access denied: This voter is not in your assigned Assembly Constituency.', 'FORBIDDEN_VOTER_SCOPE'));
+      return false;
+    }
+    return true;
+  }
+
+  // Parliament Level
+  if (scope.role === RoleType.PARLIAMENT_INCHARGE) {
+    const effectiveParlId = voter.parliamentId || voter.constituency?.parliamentId;
+    if (!effectiveParlId || !scope.accessibleParliamentIds.has(effectiveParlId)) {
+      reply.status(403).send(errorResponse('Access denied: This voter is not in your assigned Parliament.', 'FORBIDDEN_VOTER_SCOPE'));
+      return false;
+    }
+    return true;
+  }
+
+  // Zone Level
+  if (scope.role === RoleType.ZONE_INCHARGE) {
+    const effectiveZoneId = voter.zoneId || voter.constituency?.parliament?.zoneId;
+    if (!effectiveZoneId || !scope.accessibleZoneIds.has(effectiveZoneId)) {
+      reply.status(403).send(errorResponse('Access denied: This voter is not in your assigned Zone.', 'FORBIDDEN_VOTER_SCOPE'));
       return false;
     }
     return true;
@@ -681,7 +745,7 @@ export async function assertVoterScope(req: FastifyRequest, reply: FastifyReply,
 
   // State / High Command Level
   if (scope.role === RoleType.STATE_ADMIN || scope.role === RoleType.HIGH_COMMAND || scope.role === 'PARTY_ADMIN') {
-    if (voter.stateId && scope.accessibleStateIds.size > 0 && !scope.accessibleStateIds.has(voter.stateId)) {
+    if (scope.accessibleStateIds.size > 0 && (!voter.stateId || !scope.accessibleStateIds.has(voter.stateId))) {
       reply.status(403).send(errorResponse('Access denied: This voter is not in your assigned State.', 'FORBIDDEN_VOTER_SCOPE'));
       return false;
     }
@@ -689,12 +753,17 @@ export async function assertVoterScope(req: FastifyRequest, reply: FastifyReply,
   }
 
   // Fallback to unit check
-  if (voter.unitId && !scope.accessibleUnitIds.has(voter.unitId)) {
-    reply.status(403).send(errorResponse('Access denied: Voter is outside your authorized hierarchy scope.', 'FORBIDDEN_VOTER_SCOPE'));
-    return false;
+  if (voter.unitId) {
+    if (!scope.accessibleUnitIds.has(voter.unitId)) {
+      reply.status(403).send(errorResponse('Access denied: Voter is outside your authorized hierarchy scope.', 'FORBIDDEN_VOTER_SCOPE'));
+      return false;
+    }
+    return true;
   }
 
-  return true;
+  // Fail closed if hierarchy scope cannot be validated
+  reply.status(403).send(errorResponse('Access denied: Voter is outside your authorized hierarchy scope.', 'FORBIDDEN_VOTER_SCOPE'));
+  return false;
 }
 
 /**

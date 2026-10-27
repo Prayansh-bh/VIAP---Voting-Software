@@ -49,9 +49,14 @@ describe('P0 Production Security Remediation Suite (16 Requirements)', () => {
 
     initSocketServer(app.server, '*');
 
-    // Get seeded normal user (CONSTITUENCY_INCHARGE)
+    // Get seeded normal user (CONSTITUENCY_INCHARGE) from active organisation
     mlaUser = await prisma.user.findFirst({
-      where: { role: RoleType.CONSTITUENCY_INCHARGE },
+      where: {
+        role: RoleType.CONSTITUENCY_INCHARGE,
+        organisation: {
+          parties: { some: { isActive: true } },
+        },
+      },
     });
     if (mlaUser) {
       normalUserMobile = mlaUser.mobileNumber;

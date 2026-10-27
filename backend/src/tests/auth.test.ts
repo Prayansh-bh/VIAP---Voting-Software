@@ -43,9 +43,14 @@ describe('Production Authentication & SMS OTP Suite', () => {
     app = buildApp();
     await app.ready();
 
-    // Fetch seeded test user
+    // Fetch seeded test user with active political party
     testUser = await prisma.user.findFirst({
-      where: { role: testRole },
+      where: {
+        role: testRole,
+        organisation: {
+          parties: { some: { isActive: true } },
+        },
+      },
       include: {
         organisation: true,
         roleRef: true,
@@ -470,6 +475,8 @@ describe('Production Authentication & SMS OTP Suite', () => {
     const devUnregMobile = '9188776600';
     const devRegMobile = '9188776655';
     await prisma.user.deleteMany({ where: { mobileNumber: { endsWith: '88776655' } } });
+    await prisma.oTPVerification.deleteMany({ where: { mobileNumber: { endsWith: '88776655' } } });
+    OtpService.clearCooldown(devRegMobile.slice(-10));
 
     // 1. Unregistered number must return 404 USER_NOT_FOUND
     const unregRes = await app.inject({
