@@ -138,11 +138,22 @@ function RouteCmsEditor({
     return <Navigate to="/admin/applications/new" replace />;
   }
 
+  const { reloadConfig } = useCms();
   const targetApp = applicationId
     ? apps.find(
         (a) => a.id === applicationId || a.configKey === applicationId || a.tenantCode === applicationId
       ) || null
     : selectedApp;
+
+  useEffect(() => {
+    if (targetApp) {
+      reloadConfig({
+        applicationId: targetApp.id,
+        organisationId: targetApp.organisationId,
+        tenantCode: targetApp.tenantCode || targetApp.configKey,
+      });
+    }
+  }, [targetApp?.id]);
 
   if (applicationId && !targetApp && apps.length > 0) {
     return (

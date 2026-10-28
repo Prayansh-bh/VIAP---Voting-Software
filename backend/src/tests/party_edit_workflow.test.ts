@@ -148,6 +148,31 @@ describe('VIAP Phase 7 — Party Edit & CMS Phone-Number Conflict Regression Sui
         assert.equal(result.data.newTierIncharges?.[0].mobileNumber, '9425664670');
       }
     });
+
+    it('accepts updated tierIncharges to modify dedicated login phone numbers for existing tiers', () => {
+      const editWithUpdatedTierMobile = {
+        name: 'Telugu Desam Party',
+        hierarchyLevels: ['STATE'],
+        candidateMobile: '9348423886',
+        tierIncharges: [
+          {
+            tierLevel: 'STATE',
+            role: 'STATE_ADMIN',
+            name: 'State Admin User',
+            mobileNumber: '9348423886',
+            unitName: 'Andhra Pradesh',
+          },
+        ],
+      };
+
+      const result = updateApplicationSchema.safeParse(editWithUpdatedTierMobile);
+      assert.equal(result.success, true, 'Update with tierIncharges must pass schema validation');
+      if (result.success) {
+        assert.equal(result.data.tierIncharges?.length, 1);
+        assert.equal(result.data.tierIncharges?.[0].mobileNumber, '9348423886');
+        assert.equal(result.data.candidateMobile, '9348423886');
+      }
+    });
   });
 
   // 3. Editing a party with existing incharge assignments preserves those assignments

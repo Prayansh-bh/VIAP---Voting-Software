@@ -19,6 +19,13 @@ import {
   Download,
   ShieldCheck,
   Key,
+  Phone,
+  FileUp,
+  Search,
+  Check,
+  Layers,
+  ShieldAlert,
+  FileText,
 } from 'lucide-react';
 import { AppInstance, ApplicationSummary } from '../types';
 import {
@@ -30,6 +37,13 @@ import {
   fetchInchargeRosterPreview,
   provisionInchargesApi,
   downloadInchargeRosterCsv,
+  fetchInchargeRosterSlots,
+  downloadInchargeRosterTemplate,
+  uploadInchargeRosterSpreadsheet,
+  submitManualInchargeRoster,
+  CadreRosterSlotsResponse,
+  CadreSlotItem,
+  ManualRosterEntry,
 } from '../lib/api';
 
 interface DataIngestionProps {
@@ -347,10 +361,31 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
   const [totalVotersCount, setTotalVotersCount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
 
-  // Incharge Roster States
+  // Incharge Roster States & Real Number Cadre Allocation
   const [rosterSummary, setRosterSummary] = useState<any>(null);
+  const [rosterSlotsData, setRosterSlotsData] = useState<CadreRosterSlotsResponse | null>(null);
+  const [isLoadingSlots, setIsLoadingSlots] = useState(false);
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [provisionMessage, setProvisionMessage] = useState<string | null>(null);
+
+  // Cadre Allocation UI Mode ('spreadsheet' | 'manual')
+  const [allocationMode, setAllocationMode] = useState<'spreadsheet' | 'manual'>('spreadsheet');
+  const [activeCadreTab, setActiveCadreTab] = useState<'mandals' | 'pollingStations' | 'booths' | 'groups'>('mandals');
+  const [cadreSearchQuery, setCadreSearchQuery] = useState('');
+  const [onlyUnassignedFilter, setOnlyUnassignedFilter] = useState(false);
+
+  // Manual Section-wise Number Inputs: keyed by slotCode -> { inchargeName, mobileNumber }
+  const [manualInputs, setManualInputs] = useState<Record<string, { inchargeName: string; mobileNumber: string }>>({});
+  const [isSubmittingManual, setIsSubmittingManual] = useState(false);
+  const [manualSubmitMessage, setManualSubmitMessage] = useState<string | null>(null);
+  const [manualSubmitError, setManualSubmitError] = useState<string | null>(null);
+
+  // Bulk Spreadsheet Upload states
+  const [rosterSpreadsheetFile, setRosterSpreadsheetFile] = useState<File | null>(null);
+  const [isUploadingRoster, setIsUploadingRoster] = useState(false);
+  const [rosterUploadSuccess, setRosterUploadSuccess] = useState<string | null>(null);
+  const [rosterUploadError, setRosterUploadError] = useState<string | null>(null);
+  const [rosterPasscode, setRosterPasscode] = useState('123456');
 
   // Column Mapping & Pre-Commit Preview Modal States
   const [isMappingModalOpen, setIsMappingModalOpen] = useState(false);
@@ -375,14 +410,24 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
       setTotalVotersCount(sum?.totalVoters ?? vList.total);
 
       if (sum?.constituencyId) {
+        setIsLoadingSlots(true);
         try {
-          const rPrev = await fetchInchargeRosterPreview(sum.constituencyId);
+          const [rPrev, slots] = await Promise.all([
+            fetchInchargeRosterPreview(sum.constituencyId).catch(() => null),
+            fetchInchargeRosterSlots(sum.constituencyId).catch(() => null),
+          ]);
           setRosterSummary(rPrev?.summary || null);
+          if (slots) {
+            setRosterSlotsData(slots);
+          }
         } catch {
           setRosterSummary(null);
+        } finally {
+          setIsLoadingSlots(false);
         }
       } else {
         setRosterSummary(null);
+        setRosterSlotsData(null);
       }
     } catch (err) {
       console.warn('Failed to load live ingestion summary from DB:', err);
@@ -391,29 +436,123 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
     }
   };
 
-  const handleProvisionIncharges = async () => {
+  const handleDownloadTemplate = async (format: 'xlsx' | 'csv' = 'xlsx') => {
     if (!summary?.constituencyId) {
-      alert('Please ingest voter rolls first before provisioning incharges.');
+      alert('Please ingest voter rolls first before downloading the roster template.');
       return;
     }
-    setIsProvisioning(true);
-    setProvisionMessage(null);
     try {
-      const res = await provisionInchargesApi(summary.constituencyId, {
-        partyCode: currentApp?.partyCode || currentApp?.name,
-        defaultPasscode: '123456',
-      });
-      const s = res?.summary;
-      setProvisionMessage(
-        `Successfully provisioned ${s?.totalUsersProvisioned || 0} incharge logins: ` +
-        `${s?.mandalsProvisioned || 0} Mandals, ${s?.villagesProvisioned || 0} Villages/PS, ` +
-        `${s?.boothsProvisioned || 0} Booths, ${s?.groupsProvisioned || 0} 100-Voter Groups! Default Passcode: ${s?.defaultPasscode || '123456'}`
+      await downloadInchargeRosterTemplate(summary.constituencyId, format);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to download roster template');
+    }
+  };
+
+  const handleUploadRosterFile = async () => {
+    if (!summary?.constituencyId || !rosterSpreadsheetFile) {
+      alert('Please select a filled roster spreadsheet (.xlsx or .csv) to upload.');
+      return;
+    }
+    setIsUploadingRoster(true);
+    setRosterUploadSuccess(null);
+    setRosterUploadError(null);
+    try {
+      const res = await uploadInchargeRosterSpreadsheet(
+        summary.constituencyId,
+        rosterSpreadsheetFile,
+        currentApp?.partyCode || currentApp?.name,
+        rosterPasscode
       );
+      const s = res?.summary;
+      setRosterUploadSuccess(
+        `Registered ${s?.totalUsersProvisioned || 0} authentic incharge logins into database! ` +
+        `(${s?.mandalsProvisioned || 0} Mandals, ${s?.villagesProvisioned || 0} Polling Stations, ` +
+        `${s?.boothsProvisioned || 0} Booths, ${s?.groupsProvisioned || 0} 100-Voter Groups)`
+      );
+      setRosterSpreadsheetFile(null);
       await loadLiveData();
     } catch (err: any) {
-      alert(err?.message || 'Failed to provision incharges');
+      setRosterUploadError(err?.message || 'Failed to upload and register roster spreadsheet');
     } finally {
-      setIsProvisioning(false);
+      setIsUploadingRoster(false);
+    }
+  };
+
+  const handleManualInputChange = (slotCode: string, field: 'inchargeName' | 'mobileNumber', value: string) => {
+    setManualInputs((prev) => ({
+      ...prev,
+      [slotCode]: {
+        inchargeName: field === 'inchargeName' ? value : (prev[slotCode]?.inchargeName || ''),
+        mobileNumber: field === 'mobileNumber' ? value : (prev[slotCode]?.mobileNumber || ''),
+      },
+    }));
+  };
+
+  const handleSubmitManualSection = async () => {
+    if (!summary?.constituencyId) {
+      alert('No constituency found.');
+      return;
+    }
+    const currentSectionSlots = rosterSlotsData?.sections[activeCadreTab] || [];
+    const entriesToSubmit: ManualRosterEntry[] = [];
+    const validationErrors: string[] = [];
+
+    for (const slot of currentSectionSlots) {
+      const input = manualInputs[slot.slotCode];
+      if (input && input.mobileNumber.trim()) {
+        const cleanPhone = input.mobileNumber.replace(/\D/g, '').slice(-10);
+        if (cleanPhone.length !== 10) {
+          validationErrors.push(`${slot.slotCode}: Mobile number must be 10 digits.`);
+        } else if (/^910[1-4]\d{6}$/.test(cleanPhone)) {
+          validationErrors.push(`${slot.slotCode}: Mock/synthetic dummy numbers (9101-9104) are strictly prohibited.`);
+        } else if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+          validationErrors.push(`${slot.slotCode}: Mobile number must start with 6, 7, 8, or 9.`);
+        } else {
+          entriesToSubmit.push({
+            slotCode: slot.slotCode,
+            inchargeName: input.inchargeName.trim() || undefined,
+            mobileNumber: cleanPhone,
+          });
+        }
+      }
+    }
+
+    if (validationErrors.length > 0) {
+      setManualSubmitError(validationErrors.slice(0, 3).join(' | '));
+      return;
+    }
+
+    if (entriesToSubmit.length === 0) {
+      alert('Please enter at least one real 10-digit mobile number before submitting.');
+      return;
+    }
+
+    setIsSubmittingManual(true);
+    setManualSubmitMessage(null);
+    setManualSubmitError(null);
+
+    try {
+      await submitManualInchargeRoster(
+        summary.constituencyId,
+        entriesToSubmit,
+        currentApp?.partyCode || currentApp?.name,
+        rosterPasscode
+      );
+      setManualSubmitMessage(
+        `Successfully registered ${entriesToSubmit.length} real mobile numbers for ${activeCadreTab} into PostgreSQL database!`
+      );
+      setManualInputs((prev) => {
+        const next = { ...prev };
+        for (const e of entriesToSubmit) {
+          delete next[e.slotCode];
+        }
+        return next;
+      });
+      await loadLiveData();
+    } catch (err: any) {
+      setManualSubmitError(err?.message || 'Failed to submit manual roster numbers');
+    } finally {
+      setIsSubmittingManual(false);
     }
   };
 
@@ -1321,132 +1460,510 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
       </div>
 
       {/* Cadre Incharge Logins & Credential Roster Center */}
-      <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center">
-              <Users className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white">Cadre Incharge Logins & Credential Roster</h2>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                  {currentApp?.name || 'Party'} Tenant
-                </span>
+      {(() => {
+        const mandalSlots = rosterSlotsData?.sections?.mandals || [];
+        const psSlots = rosterSlotsData?.sections?.pollingStations || [];
+        const boothSlots = rosterSlotsData?.sections?.booths || [];
+        const groupSlots = rosterSlotsData?.sections?.groups || [];
+
+        const mCount = rosterSlotsData?.summary?.mandalCount ?? (mandalSlots.length || totalMandals);
+        const psCount = rosterSlotsData?.summary?.pollingStationCount ?? (psSlots.length || rosterSummary?.pollingStationsCount || 0);
+        const bCount = rosterSlotsData?.summary?.boothCount ?? (boothSlots.length || totalBooths);
+        const gCount = rosterSlotsData?.summary?.groupCount ?? (groupSlots.length || rosterSummary?.groupsCount || 0);
+
+        const mAssigned = mandalSlots.filter((s) => s.assignedUser).length;
+        const psAssigned = psSlots.filter((s) => s.assignedUser).length;
+        const bAssigned = boothSlots.filter((s) => s.assignedUser).length;
+        const gAssigned = groupSlots.filter((s) => s.assignedUser).length;
+
+        const totalRequiredSlots = mCount + psCount + bCount + gCount;
+        const totalAssignedSlots = mAssigned + psAssigned + bAssigned + gAssigned;
+        const overallPct = totalRequiredSlots > 0 ? Math.round((totalAssignedSlots / totalRequiredSlots) * 100) : 0;
+
+        const currentSlots = rosterSlotsData?.sections?.[activeCadreTab] || [];
+        const filteredSlots = currentSlots.filter((slot) => {
+          if (onlyUnassignedFilter && slot.assignedUser) return false;
+          if (!cadreSearchQuery.trim()) return true;
+          const q = cadreSearchQuery.toLowerCase();
+          return (
+            slot.slotCode.toLowerCase().includes(q) ||
+            slot.title.toLowerCase().includes(q) ||
+            (slot.subtitle && slot.subtitle.toLowerCase().includes(q)) ||
+            (slot.mandalName && slot.mandalName.toLowerCase().includes(q)) ||
+            (slot.villageName && slot.villageName.toLowerCase().includes(q)) ||
+            (slot.assignedUser?.name && slot.assignedUser.name.toLowerCase().includes(q)) ||
+            (slot.assignedUser?.mobileNumber && slot.assignedUser.mobileNumber.includes(q))
+          );
+        });
+
+        const activeFilledCount = currentSlots.filter((slot) => {
+          const input = manualInputs[slot.slotCode];
+          return input && input.mobileNumber.trim().replace(/\D/g, '').length === 10;
+        }).length;
+
+        const getValidation = (raw: string) => {
+          const trimmed = (raw || '').trim();
+          if (!trimmed) return { status: 'empty', label: '' };
+          const clean = trimmed.replace(/\D/g, '').slice(-10);
+          if (clean.length < 10) return { status: 'invalid', label: `${10 - clean.length} more digits` };
+          if (/^910[1-4]\d{6}$/.test(clean)) return { status: 'mock', label: 'Synthetic 9101-9104 blocked' };
+          if (!/^[6-9]\d{9}$/.test(clean)) return { status: 'invalid', label: 'Starts with 6-9' };
+          return { status: 'valid', label: 'Valid 10-digit Mobile' };
+        };
+
+        return (
+          <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-6">
+            {/* Header & Controls */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800/80 pb-5">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-white">Cadre Incharge Logins & Number Allocation</h2>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                      {currentApp?.name || 'Party'} Tenant
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Allocate authentic 10-digit mobile numbers for field incharges. Each booth's voters are chunked strictly into 100-voter groups (e.g. B1-V1, B1-V2).
+                  </p>
+                </div>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Every party has isolated incharge logins generated dynamically after roll ingestion with predictable aliases and passcodes.
-              </p>
-            </div>
-          </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              onClick={handleProvisionIncharges}
-              disabled={isProvisioning || !summary?.constituencyId}
-              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 transition cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <Key className={`w-3.5 h-3.5 ${isProvisioning ? 'animate-spin' : ''}`} />
-              <span>{isProvisioning ? 'Provisioning Cadres...' : 'Provision Incharge Logins'}</span>
-            </button>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  onClick={loadLiveData}
+                  disabled={isLoadingSlots}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs border border-slate-700 transition cursor-pointer flex items-center gap-1.5"
+                  title="Refresh slots"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingSlots ? 'animate-spin text-cyan-400' : ''}`} />
+                  <span>Refresh</span>
+                </button>
 
-            <button
-              onClick={handleDownloadRoster}
-              disabled={!summary?.constituencyId}
-              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <Download className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Download Credential Roster (.CSV)</span>
-            </button>
-          </div>
-        </div>
+                <button
+                  onClick={handleDownloadRoster}
+                  disabled={!summary?.constituencyId}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                >
+                  <Download className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Download Live Credential Roster (.CSV)</span>
+                </button>
+              </div>
+            </div>
 
-        {provisionMessage && (
-          <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-3">
-            <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400" />
-            <span>{provisionMessage}</span>
-          </div>
-        )}
+            {/* Anti-Mock Security Directive Banner */}
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-slate-900 to-cyan-500/10 border border-amber-500/30 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+              <div className="flex items-start gap-3">
+                <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-amber-300">Anti-Mock Protection Active: Real 10-Digit Mobile Numbers Required</div>
+                  <div className="text-slate-400 mt-0.5">
+                    Field incharges authenticate directly via Mobile OTP or mobile + passcode. Synthetic dummy ranges (<code className="text-amber-400">9101...</code>, <code className="text-amber-400">9104...</code>) are strictly blocked. Feed real numbers via Option A (Spreadsheet) or Option B (Manual Grid).
+                  </div>
+                </div>
+              </div>
+              <div className="shrink-0 flex items-center gap-2">
+                <div className="px-3 py-1 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] font-mono text-slate-300">
+                  Progress: <strong className="text-emerald-400">{totalAssignedSlots}</strong> / {totalRequiredSlots} ({overallPct}%)
+                </div>
+              </div>
+            </div>
 
-        {/* 4 Incharge Hierarchy Tiers */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Tier 1: Mandal Incharge */}
-          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">1. Mandal Incharge</span>
-              <span className="text-xs font-bold font-mono text-slate-300">
-                {rosterSummary?.requiredRosterCounts?.mandalIncharges?.assigned ?? 0} / {rosterSummary?.requiredRosterCounts?.mandalIncharges?.required ?? totalMandals}
-              </span>
-            </div>
-            <div className="text-xs text-slate-300 font-mono">
-              UserCode: <span className="text-cyan-400">MDL-&lt;SLUG&gt;</span>
-            </div>
-            <div className="text-xs text-slate-400 font-mono">
-              Login Mobile: <span className="text-slate-300">9101000001 - 9101000006</span>
-            </div>
-            <div className="text-[11px] text-slate-500">
-              Passcode: <strong className="text-emerald-400">123456</strong>
-            </div>
-          </div>
+            {/* 4 Incharge Hierarchy Tier Cards (Reflecting Real DB Counts) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Tier 1: Mandals */}
+              <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">1. Mandal Incharge</span>
+                  <span className={`text-xs font-bold font-mono px-2 py-0.5 rounded-full ${mAssigned === mCount && mCount > 0 ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-slate-800 text-slate-300'}`}>
+                    {mAssigned} / {mCount} Logins
+                  </span>
+                </div>
+                <div className="text-xs text-slate-300 font-mono">
+                  UserCode: <span className="text-cyan-400">MDL-&lt;SLUG&gt;</span>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Unit: <strong>Mandal Administrative Incharge</strong>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  Status: <strong className={mAssigned > 0 ? 'text-emerald-400' : 'text-amber-400'}>{mAssigned > 0 ? `${mAssigned} Active in DB` : 'Pending Allocation'}</strong>
+                </div>
+              </div>
 
-          {/* Tier 2: Village / PS Incharge */}
-          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">2. Village Incharge</span>
-              <span className="text-xs font-bold font-mono text-slate-300">
-                {rosterSummary?.requiredRosterCounts?.villageIncharges?.assigned ?? 0} / {rosterSummary?.requiredRosterCounts?.villageIncharges?.required ?? (rosterSummary?.pollingStationsCount || 0)}
-              </span>
-            </div>
-            <div className="text-xs text-slate-300 font-mono">
-              UserCode: <span className="text-cyan-400">VIL-&lt;001..151&gt;</span>
-            </div>
-            <div className="text-xs text-slate-400 font-mono">
-              Login Mobile: <span className="text-slate-300">9102000001 - 9102000151</span>
-            </div>
-            <div className="text-[11px] text-slate-500">
-              Mapped to: <strong>Polling Station Name</strong>
-            </div>
-          </div>
+              {/* Tier 2: Polling Stations */}
+              <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">2. Polling Station Incharge</span>
+                  <span className={`text-xs font-bold font-mono px-2 py-0.5 rounded-full ${psAssigned === psCount && psCount > 0 ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-slate-800 text-slate-300'}`}>
+                    {psAssigned} / {psCount} Logins
+                  </span>
+                </div>
+                <div className="text-xs text-slate-300 font-mono">
+                  UserCode: <span className="text-cyan-400">VIL-&lt;001..151&gt;</span>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Unit: <strong>Polling Station / Village Campus</strong>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  Status: <strong className={psAssigned > 0 ? 'text-emerald-400' : 'text-amber-400'}>{psAssigned > 0 ? `${psAssigned} Active in DB` : 'Pending Allocation'}</strong>
+                </div>
+              </div>
 
-          {/* Tier 3: Booth Incharge */}
-          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">3. Booth Incharge</span>
-              <span className="text-xs font-bold font-mono text-slate-300">
-                {rosterSummary?.requiredRosterCounts?.boothIncharges?.assigned ?? 0} / {rosterSummary?.requiredRosterCounts?.boothIncharges?.required ?? totalBooths}
-              </span>
-            </div>
-            <div className="text-xs text-slate-300 font-mono">
-              UserCode: <span className="text-cyan-400">BTH-&lt;001..283&gt;</span>
-            </div>
-            <div className="text-xs text-slate-400 font-mono">
-              Login Mobile: <span className="text-slate-300">9103000001 - 9103000283</span>
-            </div>
-            <div className="text-[11px] text-slate-500">
-              Mapped to: <strong>Part / Booth Number</strong>
-            </div>
-          </div>
+              {/* Tier 3: Booths */}
+              <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">3. Booth Incharge</span>
+                  <span className={`text-xs font-bold font-mono px-2 py-0.5 rounded-full ${bAssigned === bCount && bCount > 0 ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-slate-800 text-slate-300'}`}>
+                    {bAssigned} / {bCount} Logins
+                  </span>
+                </div>
+                <div className="text-xs text-slate-300 font-mono">
+                  UserCode: <span className="text-cyan-400">BTH-&lt;001..283&gt;</span>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Unit: <strong>Electoral Part / Booth Incharge</strong>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  Status: <strong className={bAssigned > 0 ? 'text-emerald-400' : 'text-amber-400'}>{bAssigned > 0 ? `${bAssigned} Active in DB` : 'Pending Allocation'}</strong>
+                </div>
+              </div>
 
-          {/* Tier 4: 100-Voter Group Incharge */}
-          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400">4. 100-Voter Incharge</span>
-              <span className="text-xs font-bold font-mono text-slate-300">
-                {rosterSummary?.requiredRosterCounts?.groupIncharges?.assigned ?? 0} / {rosterSummary?.requiredRosterCounts?.groupIncharges?.required ?? (rosterSummary?.groupsCount || 0)}
-              </span>
+              {/* Tier 4: 100-Voter Groups */}
+              <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400">4. 100-Voter Incharge</span>
+                  <span className={`text-xs font-bold font-mono px-2 py-0.5 rounded-full ${gAssigned === gCount && gCount > 0 ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-slate-800 text-slate-300'}`}>
+                    {gAssigned} / {gCount} Logins
+                  </span>
+                </div>
+                <div className="text-xs text-slate-300 font-mono">
+                  UserCode: <span className="text-cyan-400">B&lt;Part&gt;-V&lt;Group&gt;</span>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Partition: <strong>Strict Max 100 Electors Chunk</strong>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  Status: <strong className={gAssigned > 0 ? 'text-emerald-400' : 'text-amber-400'}>{gAssigned > 0 ? `${gAssigned} Active in DB` : 'Pending Allocation'}</strong>
+                </div>
+              </div>
             </div>
-            <div className="text-xs text-slate-300 font-mono">
-              UserCode: <span className="text-cyan-400">B&lt;Part&gt;-V&lt;Index&gt;</span>
+
+            {/* Input Method Selector (Option A vs Option B) */}
+            <div className="flex items-center justify-between flex-wrap gap-3 pt-2">
+              <div className="flex items-center bg-slate-950 p-1 rounded-2xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setAllocationMode('spreadsheet')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${allocationMode === 'spreadsheet' ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20' : 'text-slate-400 hover:text-white'}`}
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Option A: Roster Spreadsheet Upload & Template</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAllocationMode('manual')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${allocationMode === 'manual' ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20' : 'text-slate-400 hover:text-white'}`}
+                >
+                  <Layers className="w-4 h-4" />
+                  <span>Option B: Section-wise Manual Number Input Grid</span>
+                </button>
+              </div>
+
+              {/* Default Passcode Configuration */}
+              <div className="flex items-center gap-2 bg-slate-950/80 px-3.5 py-1.5 rounded-xl border border-slate-800 text-xs">
+                <Key className="w-3.5 h-3.5 text-amber-400" />
+                <span className="text-slate-400 font-semibold">Initial Passcode:</span>
+                <input
+                  type="text"
+                  value={rosterPasscode}
+                  onChange={(e) => setRosterPasscode(e.target.value)}
+                  placeholder="123456"
+                  className="w-20 bg-slate-900 border border-slate-700 text-emerald-400 font-mono font-bold text-xs rounded-lg px-2 py-0.5 text-center focus:outline-none focus:border-cyan-400"
+                />
+              </div>
             </div>
-            <div className="text-xs text-slate-400 font-mono">
-              Login Mobile: <span className="text-slate-300">9104000001 upwards</span>
-            </div>
-            <div className="text-[11px] text-slate-500">
-              Capacity: <strong>Strict Max 100 Electors</strong>
-            </div>
+
+            {/* Option A: Spreadsheet Upload & Template */}
+            {allocationMode === 'spreadsheet' && (
+              <div className="p-5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {/* Step 1: Download Pre-filled Template */}
+                  <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
+                      <Download className="w-4 h-4" />
+                      <span>Step 1: Download Pre-filled Roster Template</span>
+                    </div>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Download the template containing all required slots ({mCount} Mandals, {psCount} Polling Stations, {bCount} Booths, {gCount} 100-Voter Groups). Simply fill in Incharge Name and 10-digit Mobile Number.
+                    </p>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadTemplate('xlsx')}
+                        className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition cursor-pointer flex items-center gap-2"
+                      >
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                        <span>Download Template (.XLSX)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadTemplate('csv')}
+                        className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition cursor-pointer flex items-center gap-2"
+                      >
+                        <FileText className="w-4 h-4 text-cyan-400" />
+                        <span>Download (.CSV)</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Step 2: Upload Filled Roster */}
+                  <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-bold text-cyan-400">
+                      <FileUp className="w-4 h-4" />
+                      <span>Step 2: Upload Filled Roster Spreadsheet</span>
+                    </div>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Select your filled spreadsheet. Real mobile numbers will be validated and registered into PostgreSQL with active login accounts.
+                    </p>
+
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
+                      <label className="flex-1 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs font-medium border border-slate-700 cursor-pointer flex items-center justify-between truncate">
+                        <span className="truncate">{rosterSpreadsheetFile ? rosterSpreadsheetFile.name : 'Choose .xlsx or .csv file...'}</span>
+                        <input
+                          type="file"
+                          accept=".xlsx,.xls,.csv"
+                          onChange={(e) => {
+                            if (e.target.files?.[0]) {
+                              setRosterSpreadsheetFile(e.target.files[0]);
+                              setRosterUploadSuccess(null);
+                              setRosterUploadError(null);
+                            }
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={handleUploadRosterFile}
+                        disabled={!rosterSpreadsheetFile || isUploadingRoster}
+                        className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-500/20 transition cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 shrink-0"
+                      >
+                        {isUploadingRoster ? <RefreshCw className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
+                        <span>{isUploadingRoster ? 'Registering...' : 'Upload & Register into DB'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {rosterUploadSuccess && (
+                  <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-3">
+                    <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400" />
+                    <span>{rosterUploadSuccess}</span>
+                  </div>
+                )}
+
+                {rosterUploadError && (
+                  <div className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-semibold flex items-center gap-3">
+                    <AlertCircle className="w-5 h-5 shrink-0 text-red-400" />
+                    <span>{rosterUploadError}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Option B: Section-wise Manual Input Grid */}
+            {allocationMode === 'manual' && (
+              <div className="space-y-4">
+                {/* Section Sub-Tabs */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                  <div className="flex items-center gap-1.5 overflow-x-auto">
+                    {[
+                      { key: 'mandals', label: '1. Mandals', count: mCount, assigned: mAssigned },
+                      { key: 'pollingStations', label: '2. Polling Stations', count: psCount, assigned: psAssigned },
+                      { key: 'booths', label: '3. Booths', count: bCount, assigned: bAssigned },
+                      { key: 'groups', label: '4. 100-Voter Groups', count: gCount, assigned: gAssigned },
+                    ].map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => {
+                          setActiveCadreTab(tab.key as any);
+                          setManualSubmitMessage(null);
+                          setManualSubmitError(null);
+                        }}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shrink-0 ${activeCadreTab === tab.key ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-white bg-slate-950/60 border border-slate-800'}`}
+                      >
+                        <span>{tab.label}</span>
+                        <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${tab.assigned === tab.count && tab.count > 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
+                          {tab.assigned}/{tab.count}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Search and Unassigned Filter */}
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        value={cadreSearchQuery}
+                        onChange={(e) => setCadreSearchQuery(e.target.value)}
+                        placeholder="Search slot code or name..."
+                        className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl pl-8 pr-3 py-1.5 focus:outline-none focus:border-cyan-400 w-48 sm:w-56"
+                      />
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={onlyUnassignedFilter}
+                        onChange={(e) => setOnlyUnassignedFilter(e.target.checked)}
+                        className="rounded border-slate-700 text-cyan-500 focus:ring-0"
+                      />
+                      <span>Only Unassigned</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Feedback Alerts */}
+                {manualSubmitMessage && (
+                  <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-3">
+                    <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400" />
+                    <span>{manualSubmitMessage}</span>
+                  </div>
+                )}
+
+                {manualSubmitError && (
+                  <div className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-semibold flex items-center gap-3">
+                    <AlertCircle className="w-5 h-5 shrink-0 text-red-400" />
+                    <span>{manualSubmitError}</span>
+                  </div>
+                )}
+
+                {/* Slots Grid */}
+                <div className="max-h-[500px] overflow-y-auto space-y-2.5 pr-1">
+                  {filteredSlots.length > 0 ? (
+                    filteredSlots.map((slot) => {
+                      const input = manualInputs[slot.slotCode] || { inchargeName: '', mobileNumber: '' };
+                      const val = getValidation(input.mobileNumber);
+                      const isAssignedInDb = Boolean(slot.assignedUser);
+
+                      return (
+                        <div
+                          key={slot.slotIdentifier}
+                          className={`p-3.5 rounded-2xl border transition flex flex-col md:flex-row md:items-center justify-between gap-3 ${isAssignedInDb ? 'bg-slate-950/40 border-slate-800/60' : 'bg-slate-950 border-slate-800'}`}
+                        >
+                          {/* Slot Info */}
+                          <div className="min-w-0 md:w-5/12 space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs font-bold px-2 py-0.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shrink-0">
+                                {slot.slotCode}
+                              </span>
+                              <span className="text-xs font-bold text-white truncate">{slot.title}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-400 truncate flex items-center gap-2">
+                              <span>{slot.subtitle}</span>
+                              {slot.voterRange && (
+                                <span className="font-mono text-[10px] text-purple-400 px-1.5 py-0.2 rounded bg-purple-500/10 border border-purple-500/20">
+                                  Electors: {slot.voterRange} ({slot.voterCount})
+                                </span>
+                              )}
+                            </div>
+                            {isAssignedInDb && (
+                              <div className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1.5 pt-0.5">
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Assigned in DB: <strong>{slot.assignedUser?.name}</strong> (+91 {slot.assignedUser?.mobileNumber})</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Inputs: Incharge Name & Real Mobile */}
+                          <div className="flex flex-col sm:flex-row items-center gap-2 md:w-7/12">
+                            <input
+                              type="text"
+                              value={input.inchargeName}
+                              onChange={(e) => handleManualInputChange(slot.slotCode, 'inchargeName', e.target.value)}
+                              placeholder={isAssignedInDb ? slot.assignedUser?.name : 'Incharge Full Name (optional)'}
+                              className="w-full sm:w-1/2 bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-cyan-400"
+                            />
+
+                            <div className="w-full sm:w-1/2 relative">
+                              <input
+                                type="tel"
+                                maxLength={10}
+                                value={input.mobileNumber}
+                                onChange={(e) => handleManualInputChange(slot.slotCode, 'mobileNumber', e.target.value)}
+                                placeholder={isAssignedInDb ? slot.assignedUser?.mobileNumber : '10-Digit Real Mobile'}
+                                className={`w-full bg-slate-900 border text-xs font-mono rounded-xl px-3 py-2 pr-8 focus:outline-none ${val.status === 'valid' ? 'border-emerald-500/60 text-emerald-300' : val.status === 'mock' || (val.status === 'invalid' && input.mobileNumber.length >= 10) ? 'border-red-500/60 text-red-300' : 'border-slate-700 text-slate-200 focus:border-cyan-400'}`}
+                              />
+                              {val.status === 'valid' && (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400 absolute right-2.5 top-2.5" />
+                              )}
+                              {val.status === 'mock' && (
+                                <span title="Mock prefix 9101-9104 prohibited" className="absolute right-2.5 top-2.5">
+                                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="p-8 text-center text-slate-500 rounded-2xl bg-slate-950/40 border border-slate-800">
+                      <Users className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+                      <p className="font-bold text-slate-300">No slots match filter in this section.</p>
+                      <p className="text-xs text-slate-500 mt-1">Try clearing your search query or unchecking 'Only Unassigned'.</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Manual Section Submit Bar */}
+                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="text-xs text-slate-400">
+                    <strong className="text-cyan-400 font-mono">{activeFilledCount}</strong> valid mobile {activeFilledCount === 1 ? 'number' : 'numbers'} filled for this section.
+                  </div>
+
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualInputs((prev) => {
+                          const next = { ...prev };
+                          for (const s of currentSlots) {
+                            delete next[s.slotCode];
+                          }
+                          return next;
+                        });
+                      }}
+                      className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white font-semibold text-xs transition cursor-pointer"
+                    >
+                      Clear Section Inputs
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSubmitManualSection}
+                      disabled={isSubmittingManual || activeFilledCount === 0}
+                      className="px-6 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-500/20 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {isSubmittingManual ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                      <span>Register {activeFilledCount > 0 ? `(${activeFilledCount})` : ''} into Database</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* Preview Table — Sourced directly from PostgreSQL database */}
       <div className="p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-sm space-y-3">

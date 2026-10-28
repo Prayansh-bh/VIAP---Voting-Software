@@ -1,6 +1,6 @@
 import CreatedCredentialsModal from './CreatedCredentialsModal';
 import { getAppUrl } from '../lib/env';
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Sparkles,
@@ -43,7 +43,7 @@ import {
 } from 'lucide-react';
 import { useCms } from '../context/CmsContext';
 import { useNotification } from '../context/NotificationContext';
-import { AppScope, CmsParty, ConstituencyItem } from '../lib/cms';
+import { AppScope, CmsParty, ConstituencyItem, TierInchargeInput } from '../lib/cms';
 import { requestRegistrationOtp, verifyRegistrationOtp, updateApplication } from '../lib/api';
 import { AppInstance } from '../types';
 
@@ -715,31 +715,31 @@ export default function CmsStudio({
     setAccentColor(preset.accent);
   };
 
-  // Synchronize tier incharges state whenever loaded from server CMS config
+  const loadedAppKeyRef = useRef<string | null>(null);
+
+  // Synchronize tier incharges state when loaded from server CMS config for an application
   useEffect(() => {
-    if (config.tierIncharges && Array.isArray(config.tierIncharges) && config.tierIncharges.length > 0) {
-      setTierInchargesState((prev) => {
-        const next = { ...prev };
-        config.tierIncharges!.forEach((inc: any) => {
-          const k = (inc.tierLevel || inc.tier || '').toUpperCase();
-          if (k && next[k]) {
-            next[k] = {
-              name: inc.name || next[k].name,
-              mobileNumber: inc.mobileNumber || next[k].mobileNumber,
-              unitName: inc.unitName || next[k].unitName,
-            };
-          } else if (k) {
-            next[k] = {
-              name: inc.name || '',
-              mobileNumber: inc.mobileNumber || '',
-              unitName: inc.unitName || '',
-            };
-          }
+    const effectiveAppId = targetAppId || currentApp?.id || config.id || 'app';
+    if (loadedAppKeyRef.current !== effectiveAppId) {
+      if (config.tierIncharges && Array.isArray(config.tierIncharges) && config.tierIncharges.length > 0) {
+        loadedAppKeyRef.current = effectiveAppId;
+        setTierInchargesState((prev) => {
+          const next = { ...prev };
+          config.tierIncharges!.forEach((inc: any) => {
+            const k = (inc.tierLevel || inc.tier || '').toUpperCase();
+            if (k) {
+              next[k] = {
+                name: inc.name || next[k]?.name || '',
+                mobileNumber: (inc.mobileNumber || '').replace(/\D/g, '').slice(-10) || next[k]?.mobileNumber || '',
+                unitName: inc.unitName || next[k]?.unitName || '',
+              };
+            }
+          });
+          return next;
         });
-        return next;
-      });
+      }
     }
-  }, [config.tierIncharges]);
+  }, [currentApp?.id, config.id, targetAppId, config.tierIncharges]);
 
   // Synchronize form values in editor mode from currentApp or config
   useEffect(() => {
@@ -834,31 +834,50 @@ export default function CmsStudio({
         })),
       };
 
-      const initialActiveLevels = currentApp?.activeHierarchyLevels || config.activeHierarchyLevels || [];
-      const newlyAddedTiers = selectedHierarchyLevels.filter((lvl) => !initialActiveLevels.includes(lvl));
+      // Format incharge details for all selected tiers so that Dedicated Login Mobile
+      // and incharge name updates are cleanly sent to the backend and saved
+      const formattedTierIncharges = selectedHierarchyLevels
+        .map((tierKey) => {
+          const val = tierInchargesState[tierKey];
+          const meta = TIER_TO_ROLE_DEFAULT[tierKey] || {
+            role: 'CONSTITUENCY_INCHARGE',
+            roleName: tierKey,
+            defaultName: 'Incharge',
+            defaultUnit: tierKey,
+          };
+          const cleanNum = (val?.mobileNumber || '').replace(/\D/g, '').slice(-10);
+          return {
+            tierLevel: tierKey,
+            role: meta?.role,
+            name: (val?.name || '').trim() || meta?.defaultName || `${tierKey} Incharge`,
+            mobileNumber: cleanNum,
+            unitName: (val?.unitName || '').trim() || meta?.defaultUnit || tierKey,
+          };
+        })
+        .filter((inc) => inc.mobileNumber.length >= 10);
 
-      if (newlyAddedTiers.length > 0) {
-        const formattedNewIncharges = newlyAddedTiers
-          .map((tierKey) => {
-            const val = tierInchargesState[tierKey];
-            const meta = TIER_TO_ROLE_DEFAULT[tierKey];
-            const cleanNum = (val?.mobileNumber || '').replace(/\D/g, '').slice(-10);
-            return {
-              tierLevel: tierKey,
-              role: meta?.role,
-              name: (val?.name || '').trim() || meta?.defaultName || `${tierKey} Incharge`,
-              mobileNumber: cleanNum,
-              unitName: (val?.unitName || '').trim() || meta?.defaultUnit || tierKey,
-            };
-          })
-          .filter((inc) => inc.mobileNumber.length >= 10);
-
-        if (formattedNewIncharges.length > 0) {
-          updatePayload.newTierIncharges = formattedNewIncharges;
+      if (formattedTierIncharges.length > 0) {
+        updatePayload.tierIncharges = formattedTierIncharges;
+        updatePayload.newTierIncharges = formattedTierIncharges;
+        if (formattedTierIncharges[0]?.mobileNumber) {
+          updatePayload.candidateMobile = formattedTierIncharges[0].mobileNumber;
         }
       }
 
       const updatedApp = await updateApplication(resolvedTargetId, updatePayload);
+
+      // Keep local state in sync with updated numbers
+      setTierInchargesState((prev) => {
+        const next = { ...prev };
+        formattedTierIncharges.forEach((inc) => {
+          next[inc.tierLevel] = {
+            name: inc.name,
+            mobileNumber: inc.mobileNumber,
+            unitName: inc.unitName,
+          };
+        });
+        return next;
+      });
 
       await updateConfig({
         organisationName: title.trim(),
@@ -872,6 +891,7 @@ export default function CmsStudio({
         appScope,
         parliamentName: appScope === 'PARLIAMENT_MP' ? parliamentName.trim() : undefined,
         activeHierarchyLevels: selectedHierarchyLevels,
+        tierIncharges: formattedTierIncharges as unknown as TierInchargeInput[],
       });
       updateParties(partyList);
 
@@ -1712,7 +1732,7 @@ export default function CmsStudio({
                 <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2.5">
                   <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
                   <span>
-                    <strong>Edit Mode:</strong> Existing incharge phone numbers and assignments are safely preserved. Modifying numbers is optional and will not recreate or overwrite existing incharge user accounts.
+                    <strong>Edit Mode:</strong> Existing incharge assignments are safely preserved. Modifying a number updates that incharge's dedicated login mobile number directly in the database.
                   </span>
                 </div>
               ) : (
@@ -1780,10 +1800,13 @@ export default function CmsStudio({
                             value={currentVal.name}
                             onChange={(e) => {
                               const newName = e.target.value;
-                              setTierInchargesState((prev) => ({
-                                ...prev,
-                                [tierKey]: { ...currentVal, name: newName },
-                              }));
+                              setTierInchargesState((prev) => {
+                                const prevVal = prev[tierKey] || currentVal;
+                                return {
+                                  ...prev,
+                                  [tierKey]: { ...prevVal, name: newName },
+                                };
+                              });
                               if (isPrimary) {
                                 setCandidateName(newName);
                               }
@@ -1810,10 +1833,13 @@ export default function CmsStudio({
                               value={currentVal.mobileNumber}
                               onChange={(e) => {
                                 const newNum = e.target.value.replace(/\D/g, '').slice(0, 10);
-                                setTierInchargesState((prev) => ({
-                                  ...prev,
-                                  [tierKey]: { ...currentVal, mobileNumber: newNum },
-                                }));
+                                setTierInchargesState((prev) => {
+                                  const prevVal = prev[tierKey] || currentVal;
+                                  return {
+                                    ...prev,
+                                    [tierKey]: { ...prevVal, mobileNumber: newNum },
+                                  };
+                                });
                                 if (isPrimary) {
                                   setCandidateMobile(newNum);
                                   setRegIsVerified(false);
@@ -1839,10 +1865,13 @@ export default function CmsStudio({
                             value={currentVal.unitName}
                             onChange={(e) => {
                               const newUnit = e.target.value;
-                              setTierInchargesState((prev) => ({
-                                ...prev,
-                                [tierKey]: { ...currentVal, unitName: newUnit },
-                              }));
+                              setTierInchargesState((prev) => {
+                                const prevVal = prev[tierKey] || currentVal;
+                                return {
+                                  ...prev,
+                                  [tierKey]: { ...prevVal, unitName: newUnit },
+                                };
+                              });
                             }}
                             placeholder={meta.defaultUnit}
                             className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-600 focus:border-amber-400 focus:outline-none"

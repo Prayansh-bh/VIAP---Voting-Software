@@ -356,8 +356,9 @@ export async function updateApplication(id: string, formData: Partial<AppInstanc
   if (formData.featureToggles) backendPayload.featureToggles = formData.featureToggles;
   if (formData.dashboardConfig) backendPayload.dashboardConfig = formData.dashboardConfig;
   if (formData.analyticsConfig) backendPayload.analyticsConfig = formData.analyticsConfig;
-  if (formData.aiEnabled !== undefined) backendPayload.aiEnabled = formData.aiEnabled;
+  if (formData.candidateMobile) backendPayload.candidateMobile = formData.candidateMobile;
   if (formData.newTierIncharges) backendPayload.newTierIncharges = formData.newTierIncharges;
+  if (formData.tierIncharges) backendPayload.tierIncharges = formData.tierIncharges;
 
   const res: any = await request(`/applications/${id}`, {
     method: 'PUT',
@@ -687,5 +688,122 @@ export async function downloadInchargeRosterCsv(constituencyId: string): Promise
   a.remove();
   window.URL.revokeObjectURL(downloadUrl);
 }
+
+export interface CadreSlotItem {
+  slotIdentifier: string;
+  slotCode: string;
+  category: 'mandal' | 'pollingStation' | 'booth' | 'group';
+  level: string;
+  role: string;
+  title: string;
+  subtitle: string;
+  mandalName?: string;
+  villageName?: string;
+  boothNumber?: string | number;
+  voterRange?: string;
+  voterCount?: number;
+  assignedUser?: {
+    id: string;
+    name: string;
+    mobileNumber: string;
+  } | null;
+}
+
+export interface CadreRosterSlotsResponse {
+  constituencyId: string;
+  totalVoters: number;
+  summary: {
+    totalSlots: number;
+    assignedSlots: number;
+    unassignedSlots: number;
+    mandalCount: number;
+    pollingStationCount: number;
+    boothCount: number;
+    groupCount: number;
+  };
+  sections: {
+    mandals: CadreSlotItem[];
+    pollingStations: CadreSlotItem[];
+    booths: CadreSlotItem[];
+    groups: CadreSlotItem[];
+  };
+}
+
+export interface ManualRosterEntry {
+  slotCode: string;
+  inchargeName?: string;
+  mobileNumber: string;
+}
+
+export async function fetchInchargeRosterSlots(constituencyId: string): Promise<CadreRosterSlotsResponse> {
+  const res: any = await request(`/cadre/roster-slots/${encodeURIComponent(constituencyId)}`);
+  return res?.data || res;
+}
+
+export async function downloadInchargeRosterTemplate(
+  constituencyId: string,
+  format: 'xlsx' | 'csv' = 'xlsx'
+): Promise<void> {
+  const token = getAdminToken();
+  const url = `${API_BASE}/cadre/roster-template/${encodeURIComponent(constituencyId)}?format=${format}`;
+  const resp = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!resp.ok) {
+    throw new Error(`Failed to download template: ${resp.statusText}`);
+  }
+  const blob = await resp.blob();
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = downloadUrl;
+  a.download = `cadre_allocation_template_${constituencyId}.${format}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(downloadUrl);
+}
+
+export async function uploadInchargeRosterSpreadsheet(
+  constituencyId: string,
+  file: File,
+  partyCode?: string,
+  defaultPasscode?: string
+): Promise<any> {
+  const token = getAdminToken();
+  const formData = new FormData();
+  formData.append('file', file);
+  if (partyCode) formData.append('partyCode', partyCode);
+  if (defaultPasscode) formData.append('defaultPasscode', defaultPasscode);
+
+  const url = `${API_BASE}/cadre/roster-upload/${encodeURIComponent(constituencyId)}`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(data?.error?.message || data?.message || `Failed to upload roster spreadsheet (Status: ${resp.status})`);
+  }
+  return data?.data || data;
+}
+
+export async function submitManualInchargeRoster(
+  constituencyId: string,
+  entries: ManualRosterEntry[],
+  partyCode?: string,
+  defaultPasscode?: string
+): Promise<any> {
+  return request(`/cadre/roster-manual/${encodeURIComponent(constituencyId)}`, {
+    method: 'POST',
+    body: JSON.stringify({
+      partyCode,
+      defaultPasscode,
+      entries,
+    }),
+  });
+}
+
 
 

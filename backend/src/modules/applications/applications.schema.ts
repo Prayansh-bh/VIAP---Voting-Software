@@ -117,7 +117,15 @@ export const updateApplicationSchema = z.object({
     isActive: z.boolean().optional(),
     sortOrder: z.number().optional(),
   })).optional(),
+  candidateMobile: z.string().optional(),
   newTierIncharges: z.array(z.object({
+    tierLevel: z.string(),
+    role: z.string().optional(),
+    name: z.string().min(1, 'Incharge name is required'),
+    mobileNumber: z.string().min(10, 'Valid 10-digit mobile number is required'),
+    unitName: z.string().optional(),
+  })).optional(),
+  tierIncharges: z.array(z.object({
     tierLevel: z.string(),
     role: z.string().optional(),
     name: z.string().min(1, 'Incharge name is required'),
