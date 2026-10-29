@@ -37,9 +37,14 @@ import {
   TrendingUp,
   UserPlus
 } from 'lucide-react';
-import { UserSession, Voter, VoterPreference } from '../types';
+import { UserSession, Voter, VoterTask, GroundReport } from '../types';
 import { useCms } from '../context/CmsContext';
+import { fetchStateAnalytics, HierarchyAnalyticsResponse } from '../lib/api/analytics.api';
+import { fetchTasks, createTask, updateTaskStatus } from '../lib/api/tasks.api';
+import { fetchGroundReports } from '../lib/api/reports.api';
+import { fetchVoters, updateVoter } from '../lib/api/voters.api';
 import { fetchTrainingVideos } from '../lib/api/training.api';
+import { fetchApplicationIncharges, InchargeRecord } from '../lib/api/applications.api';
 import { apiFetch } from '../lib/api/client';
 
 export type PartyAdminTabType =
@@ -98,20 +103,7 @@ interface TrainingVideoItem {
   createdAt?: string;
 }
 
-interface HighCommandDirectiveItem {
-  id: string;
-  title: string;
-  category: string;
-  targetLevel: string;
-  priority: 'CRITICAL' | 'HIGH' | 'MEDIUM';
-  status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
-  dueDate?: string;
-  completionRate?: number;
-  createdAt?: string;
-  instructions?: string;
-}
-
-interface FakeVoterRecord {
+interface FakeVoterItem {
   id: string;
   name: string;
   epicNumber: string;
@@ -123,23 +115,9 @@ interface FakeVoterRecord {
   reason: string;
   evidenceUrl?: string;
   flaggedBy: string;
-  flaggedRole: string;
   flaggedAt: string;
   status: 'FLAGGED' | 'VERIFIED_FAKE' | 'DISMISSED';
   resolutionNotes?: string;
-}
-
-interface GroundReportItem {
-  id: string;
-  reportType: 'INCIDENT' | 'COMPLAINT' | 'GENERAL_UPDATE' | 'URGENT_ASSISTANCE';
-  priority: 'CRITICAL' | 'HIGH' | 'MEDIUM';
-  issueCategory: string;
-  description: string;
-  reportedBy: string;
-  reporterRole: string;
-  unitName: string;
-  status: 'PENDING' | 'IN_REVIEW' | 'RESOLVED';
-  reportedAt: string;
 }
 
 export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDashboardProps) {
@@ -163,8 +141,13 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
   };
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isRefreshingAll, setIsRefreshingAll] = useState(false);
 
-  // 1. Training state
+  // 1. Live Analytics / Telemetry from PostgreSQL
+  const [analytics, setAnalytics] = useState<HierarchyAnalyticsResponse | null>(null);
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
+
+  // 2. Live Training Videos from PostgreSQL
   const [videos, setVideos] = useState<TrainingVideoItem[]>([]);
   const [isLoadingVideos, setIsLoadingVideos] = useState(false);
   const [videoSuccessMsg, setVideoSuccessMsg] = useState('');
@@ -177,171 +160,121 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
   const [isSubmittingVideo, setIsSubmittingVideo] = useState(false);
   const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
 
-  // 2. Directives state
-  const [directives, setDirectives] = useState<HighCommandDirectiveItem[]>([
-    {
-      id: 'dir-1',
-      title: 'Voter Slip Verification in All Polling Stations',
-      category: 'FIELD_OPERATION',
-      targetLevel: 'MANDAL',
-      priority: 'HIGH',
-      status: 'ACTIVE',
-      dueDate: '2026-11-15',
-      completionRate: 68,
-      instructions: 'Cross-reference physically distributed slips against booth registers.',
-      createdAt: '2026-10-25'
-    },
-    {
-      id: 'dir-2',
-      title: 'Conduct Door-to-Door Outreach for 100-Voter Clusters',
-      category: 'CANVASSING',
-      targetLevel: 'VOTER_GROUP',
-      priority: 'CRITICAL',
-      status: 'ACTIVE',
-      dueDate: '2026-11-10',
-      completionRate: 84,
-      instructions: 'Ensure every designated family contact card is signed and delivered.',
-      createdAt: '2026-10-27'
-    },
-    {
-      id: 'dir-3',
-      title: 'EVM Mock Poll Readiness & Polling Agent Verification',
-      category: 'DEFENSE',
-      targetLevel: 'BOOTH',
-      priority: 'CRITICAL',
-      status: 'ACTIVE',
-      dueDate: '2026-11-20',
-      completionRate: 45,
-      instructions: 'Verify authorized Form 10 passes for all appointed booth polling agents.',
-      createdAt: '2026-10-28'
-    }
-  ]);
+  // 3. Live Directives / Tasks from PostgreSQL
+  const [directives, setDirectives] = useState<VoterTask[]>([]);
+  const [isLoadingDirectives, setIsLoadingDirectives] = useState(false);
   const [newDirectiveTitle, setNewDirectiveTitle] = useState('');
   const [newDirectiveInstructions, setNewDirectiveInstructions] = useState('');
-  const [newDirectivePriority, setNewDirectivePriority] = useState<'CRITICAL' | 'HIGH' | 'MEDIUM'>('HIGH');
+  const [newDirectivePriority, setNewDirectivePriority] = useState<'High' | 'Urgent' | 'Medium'>('High');
   const [newDirectiveTargetTier, setNewDirectiveTargetTier] = useState('MANDAL');
   const [newDirectiveDueDate, setNewDirectiveDueDate] = useState('');
+  const [isSubmittingDirective, setIsSubmittingDirective] = useState(false);
   const [directiveSuccessMsg, setDirectiveSuccessMsg] = useState('');
 
-  // 3. Fake Votes State
-  const [fakeVoters, setFakeVoters] = useState<FakeVoterRecord[]>([
-    {
-      id: 'fv-1',
-      name: 'Rameshwaram Rao G.',
-      epicNumber: 'AP192847192',
-      age: 48,
-      gender: 'MALE',
-      boothNumber: 'Booth 104 - ZPHS School',
-      mandalName: 'Kondapi',
-      villageName: 'Chinakandukur',
-      reason: 'Registered in two adjacent wards simultaneously (Duplicate EPIC)',
-      evidenceUrl: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=600&auto=format&fit=crop',
-      flaggedBy: 'K. Venkatesh (Booth President)',
-      flaggedRole: 'BOOTH_PRESIDENT',
-      flaggedAt: '2026-10-28 11:30 AM',
-      status: 'FLAGGED'
-    },
-    {
-      id: 'fv-2',
-      name: 'Sunita Devi S.',
-      epicNumber: 'AP993817441',
-      age: 52,
-      gender: 'FEMALE',
-      boothNumber: 'Booth 108 - Panchayat Office',
-      mandalName: 'Kondapi',
-      villageName: 'Kondapi Rural',
-      reason: 'Deceased voter record still active on published electoral roll',
-      evidenceUrl: 'https://images.unsplash.com/photo-1450133064473-71024230f91b?w=600&auto=format&fit=crop',
-      flaggedBy: 'M. Chennaiah (Village Incharge)',
-      flaggedRole: 'VILLAGE_INCHARGE',
-      flaggedAt: '2026-10-27 04:15 PM',
-      status: 'VERIFIED_FAKE',
-      resolutionNotes: 'Death certificate verified and submitted to ERO for Form 7 deletion.'
-    },
-    {
-      id: 'fv-3',
-      name: 'P. Balakrishna',
-      epicNumber: 'AP481928310',
-      age: 39,
-      gender: 'MALE',
-      boothNumber: 'Booth 112 - Community Hall',
-      mandalName: 'Kondapi',
-      villageName: 'Annavaram',
-      reason: 'Shifted permanently to Hyderabad 4 years ago without local residence',
-      evidenceUrl: '',
-      flaggedBy: 'S. Naresh (100-Voter Incharge)',
-      flaggedRole: 'VOTER_100_INCHARGE',
-      flaggedAt: '2026-10-29 09:10 AM',
-      status: 'FLAGGED'
-    }
-  ]);
+  // 4. Live Fake Votes Audit from PostgreSQL
+  const [fakeVoters, setFakeVoters] = useState<FakeVoterItem[]>([]);
+  const [isLoadingFakeVoters, setIsLoadingFakeVoters] = useState(false);
   const [fakeFilterStatus, setFakeFilterStatus] = useState<string>('ALL');
   const [fakeSearchTerm, setFakeSearchTerm] = useState('');
-  const [selectedFakeVoter, setSelectedFakeVoter] = useState<FakeVoterRecord | null>(null);
+  const [selectedFakeVoter, setSelectedFakeVoter] = useState<FakeVoterItem | null>(null);
   const [adjudicationNotes, setAdjudicationNotes] = useState('');
+  const [isAdjudicating, setIsAdjudicating] = useState(false);
   const [adjudicationSuccess, setAdjudicationSuccess] = useState('');
 
-  // 4. Ground Reports State
-  const [groundReports, setGroundReports] = useState<GroundReportItem[]>([
-    {
-      id: 'gr-1',
-      reportType: 'INCIDENT',
-      priority: 'CRITICAL',
-      issueCategory: 'EVM Malfunction',
-      description: 'EVM Machine #3 in Booth 105 showing battery low indicator and paper jam in mock poll.',
-      reportedBy: 'K. Rama Rao',
-      reporterRole: 'Booth President',
-      unitName: 'Booth 105',
-      status: 'IN_REVIEW',
-      reportedAt: '10 Mins Ago'
-    },
-    {
-      id: 'gr-2',
-      reportType: 'COMPLAINT',
-      priority: 'HIGH',
-      issueCategory: 'Opposition Malpractice',
-      description: 'Unlicensed campaign vehicle distributing unauthorized pamphlets near polling zone.',
-      reportedBy: 'V. Subrahmanyam',
-      reporterRole: 'Mandal President',
-      unitName: 'Kondapi Mandal HQ',
-      status: 'PENDING',
-      reportedAt: '1 Hour Ago'
-    },
-    {
-      id: 'gr-3',
-      reportType: 'GENERAL_UPDATE',
-      priority: 'MEDIUM',
-      issueCategory: 'Canvassing Complete',
-      description: 'Covered 12 out of 14 wards in village. Voter sentiment strongly leaning towards our manifesto.',
-      reportedBy: 'M. Bose',
-      reporterRole: 'Village Incharge',
-      unitName: 'Kondapi Village',
-      status: 'RESOLVED',
-      reportedAt: '3 Hours Ago'
-    }
-  ]);
+  // 5. Live Ground Reports from PostgreSQL
+  const [groundReports, setGroundReports] = useState<GroundReport[]>([]);
+  const [isLoadingReports, setIsLoadingReports] = useState(false);
   const [reportFilterStatus, setReportFilterStatus] = useState<string>('ALL');
 
-  // 5. Voter Directory State
+  // 6. Live Cadre Incharges from PostgreSQL
+  const [inchargesList, setInchargesList] = useState<InchargeRecord[]>([]);
+  const [isLoadingCadre, setIsLoadingCadre] = useState(false);
+
+  // 7. Live Electoral Roll Master from PostgreSQL
   const [votersList, setVotersList] = useState<Voter[]>([]);
+  const [votersTotal, setVotersTotal] = useState(0);
+  const [voterPage, setVoterPage] = useState(1);
   const [voterSearch, setVoterSearch] = useState('');
   const [voterFilterPref, setVoterFilterPref] = useState('ALL');
+  const [isLoadingVoters, setIsLoadingVoters] = useState(false);
 
-  // 6. Announcements State
-  const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; priority: string; createdAt: string }>>([
-    {
-      id: 'ann-1',
-      title: 'Apex Directives for General Polling Readiness',
-      content: 'All Mandal and Booth incharges must finalize their Form 10 submissions before Friday 5:00 PM.',
-      priority: 'CRITICAL',
-      createdAt: '2026-10-28'
-    }
-  ]);
+  // 8. Live Announcements from PostgreSQL
+  const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; priority: string; createdAt: string }>>([]);
+  const [isLoadingAnnouncements, setIsLoadingAnnouncements] = useState(false);
   const [newAnnTitle, setNewAnnTitle] = useState('');
   const [newAnnContent, setNewAnnContent] = useState('');
+  const [isSubmittingAnn, setIsSubmittingAnn] = useState(false);
   const [annSuccessMsg, setAnnSuccessMsg] = useState('');
 
-  // Load videos from backend
+  // =========================================================================
+  // DATA LOADERS CONNECTED DIRECTLY TO POSTGRESQL & FASTIFY APIS
+  // =========================================================================
+
+  // A. Load Real Analytics (Telemetry, Voters Count, Preferences, Caste)
+  const loadAnalytics = async () => {
+    setIsLoadingAnalytics(true);
+    try {
+      const data = await fetchStateAnalytics();
+      setAnalytics(data);
+    } catch (err: any) {
+      console.warn('Analytics API notice:', err.message);
+    } finally {
+      setIsLoadingAnalytics(false);
+    }
+  };
+
+  // B. Load Real Tasks / Directives
+  const loadDirectives = async () => {
+    setIsLoadingDirectives(true);
+    try {
+      const items = await fetchTasks();
+      if (Array.isArray(items)) {
+        setDirectives(items);
+      }
+    } catch (err: any) {
+      console.warn('Directives API notice:', err.message);
+    } finally {
+      setIsLoadingDirectives(false);
+    }
+  };
+
+  // C. Load Real Flagged / Doubtful Voters from DB
+  const loadFakeVoters = async () => {
+    setIsLoadingFakeVoters(true);
+    try {
+      // Query real voters flagged as FAKE or DOUBTFUL
+      const [fakeRes, doubtfulRes] = await Promise.all([
+        fetchVoters({ voterStatus: 'FAKE' as any, limit: 100 }),
+        fetchVoters({ voterStatus: 'DOUBTFUL' as any, limit: 100 })
+      ]);
+
+      const combined = [...(fakeRes?.items || []), ...(doubtfulRes?.items || [])];
+      const mapped: FakeVoterItem[] = combined.map((v) => ({
+        id: v.id,
+        name: v.name,
+        epicNumber: v.epicNumber,
+        age: v.age,
+        gender: v.gender,
+        boothNumber: v.boothNumber ? `Booth ${v.boothNumber}` : ((v as any).booth?.name || 'Assigned Booth'),
+        mandalName: (v as any).mandal?.name || (v as any).mandal || (v as any).mandalName || 'Constituency Mandal',
+        villageName: (v as any).village?.name || (v as any).village || (v as any).villageName || 'Village Ward',
+        reason: (v as any).notes || (v.voterStatus === 'Fake' ? 'Flagged as Duplicate or Invalid by Field Incharge' : 'Doubtful physical residency'),
+        evidenceUrl: (v as any).evidenceUrl || '',
+        flaggedBy: (v as any).flaggedBy?.name || 'Field Incharge',
+        flaggedAt: (v as any).updatedAt || v.lastUpdated || 'Recent',
+        status: v.voterStatus === 'Fake' ? 'VERIFIED_FAKE' : 'FLAGGED',
+        resolutionNotes: (v as any).resolutionNotes || ''
+      }));
+
+      setFakeVoters(mapped);
+    } catch (err: any) {
+      console.warn('Fake voters API notice:', err.message);
+    } finally {
+      setIsLoadingFakeVoters(false);
+    }
+  };
+
+  // D. Load Real Training Videos
   const loadVideos = async () => {
     setIsLoadingVideos(true);
     setVideoErrorMsg('');
@@ -351,30 +284,120 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
         setVideos(data as any);
       }
     } catch (err: any) {
-      console.warn('Backend videos fetch fallback:', err.message);
+      console.warn('Videos API notice:', err.message);
     } finally {
       setIsLoadingVideos(false);
     }
   };
 
-  // Load voters
-  const loadVoters = async () => {
+  // E. Load Real Ground Reports
+  const loadGroundReports = async () => {
+    setIsLoadingReports(true);
     try {
-      const res = await apiFetch<any>('/api/voters?limit=100');
-      if (res && res.voters && Array.isArray(res.voters)) {
-        setVotersList(res.voters);
+      const items = await fetchGroundReports();
+      if (Array.isArray(items)) {
+        setGroundReports(items);
       }
-    } catch (e) {
-      // Graceful fallback
+    } catch (err: any) {
+      console.warn('Ground reports API notice:', err.message);
+    } finally {
+      setIsLoadingReports(false);
     }
   };
 
-  useEffect(() => {
-    loadVideos();
-    loadVoters();
-  }, []);
+  // F. Load Real Incharges & Cadre Roster from CMS Config / DB
+  const loadCadre = async () => {
+    setIsLoadingCadre(true);
+    try {
+      const appId = config.id || (session as any).applicationId || 'default';
+      const incharges = await fetchApplicationIncharges(appId);
+      if (Array.isArray(incharges) && incharges.length > 0) {
+        setInchargesList(incharges);
+      } else if ((config as any).tierIncharges && Array.isArray((config as any).tierIncharges)) {
+        setInchargesList((config as any).tierIncharges as any);
+      }
+    } catch (err: any) {
+      if ((config as any).tierIncharges && Array.isArray((config as any).tierIncharges)) {
+        setInchargesList((config as any).tierIncharges as any);
+      }
+    } finally {
+      setIsLoadingCadre(false);
+    }
+  };
 
-  // Handle Video Submit
+  // G. Load Real Voters with Server Pagination & Filters
+  const loadVoters = async () => {
+    setIsLoadingVoters(true);
+    try {
+      const res = await fetchVoters({
+        page: voterPage,
+        limit: 20,
+        search: voterSearch.trim() || undefined,
+        politicalPreference: voterFilterPref === 'ALL' ? undefined : (voterFilterPref as any)
+      });
+      if (res && res.items) {
+        setVotersList(res.items);
+        setVotersTotal(res.total || 0);
+      }
+    } catch (err: any) {
+      console.warn('Voters master API notice:', err.message);
+    } finally {
+      setIsLoadingVoters(false);
+    }
+  };
+
+  // H. Load Real Announcements from DB
+  const loadAnnouncements = async () => {
+    setIsLoadingAnnouncements(true);
+    try {
+      const res = await apiFetch<any>('/api/notifications/announcements');
+      if (Array.isArray(res)) {
+        setAnnouncements(res);
+      } else if (res && Array.isArray(res.data)) {
+        setAnnouncements(res.data);
+      }
+    } catch (err: any) {
+      console.warn('Announcements API notice:', err.message);
+    } finally {
+      setIsLoadingAnnouncements(false);
+    }
+  };
+
+  // Initial Load on Mount
+  useEffect(() => {
+    loadAnalytics();
+    loadDirectives();
+    loadFakeVoters();
+    loadVideos();
+    loadGroundReports();
+    loadCadre();
+    loadAnnouncements();
+  }, [config.id]);
+
+  useEffect(() => {
+    loadVoters();
+  }, [voterPage, voterFilterPref]);
+
+  const handleRefreshAll = async () => {
+    setIsRefreshingAll(true);
+    await Promise.all([
+      loadAnalytics(),
+      loadDirectives(),
+      loadFakeVoters(),
+      loadVideos(),
+      loadGroundReports(),
+      loadCadre(),
+      loadVoters(),
+      loadAnnouncements()
+    ]);
+    setIsRefreshingAll(false);
+  };
+
+  // =========================================================================
+  // REAL MUTATION HANDLERS (PERSIST TO POSTGRESQL)
+  // =========================================================================
+
+  // 1. Publish Video to DB
   const handlePublishVideo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim() || !newUrl.trim()) return;
@@ -384,7 +407,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
     setVideoErrorMsg('');
 
     try {
-      const res = await apiFetch<any>('/api/training/videos', {
+      await apiFetch<any>('/api/training/videos', {
         method: 'POST',
         body: JSON.stringify({
           title: newTitle.trim(),
@@ -395,22 +418,11 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
         }),
       });
 
-      const added = res?.data || res || {
-        id: `vid-${Date.now()}`,
-        title: newTitle.trim(),
-        videoUrl: newUrl.trim(),
-        category: newCategory,
-        duration: '10:00',
-        targetTier: newTargetTier,
-        description: newDescription.trim(),
-        createdAt: new Date().toISOString()
-      };
-
-      setVideos((prev) => [added, ...prev]);
       setVideoSuccessMsg('Training video published successfully to cadre network!');
       setNewTitle('');
       setNewUrl('');
       setNewDescription('');
+      await loadVideos();
     } catch (err: any) {
       setVideoErrorMsg(err.message || 'Failed to publish video.');
     } finally {
@@ -418,82 +430,127 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
     }
   };
 
-  // Handle Directive Submit
-  const handleCreateDirective = (e: React.FormEvent) => {
+  // 2. Dispatch Directive to DB (POST /api/tasks)
+  const handleCreateDirective = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDirectiveTitle.trim()) return;
 
-    const item: HighCommandDirectiveItem = {
-      id: `dir-${Date.now()}`,
-      title: newDirectiveTitle.trim(),
-      category: 'OPERATIONAL',
-      targetLevel: newDirectiveTargetTier,
-      priority: newDirectivePriority,
-      status: 'ACTIVE',
-      dueDate: newDirectiveDueDate || '2026-11-30',
-      completionRate: 0,
-      instructions: newDirectiveInstructions.trim(),
-      createdAt: new Date().toISOString().split('T')[0]
-    };
+    setIsSubmittingDirective(true);
+    setDirectiveSuccessMsg('');
 
-    setDirectives([item, ...directives]);
-    setDirectiveSuccessMsg('Directive dispatched successfully across targeted cadre!');
-    setNewDirectiveTitle('');
-    setNewDirectiveInstructions('');
-    setTimeout(() => setDirectiveSuccessMsg(''), 4000);
+    try {
+      await createTask({
+        title: newDirectiveTitle.trim(),
+        instructions: newDirectiveInstructions.trim(),
+        priority: newDirectivePriority,
+        dueDate: newDirectiveDueDate ? new Date(newDirectiveDueDate).toISOString() : undefined,
+        targetHierarchyLevel: newDirectiveTargetTier,
+      } as any);
+
+      setDirectiveSuccessMsg('Operational directive dispatched to cadre network and saved in database!');
+      setNewDirectiveTitle('');
+      setNewDirectiveInstructions('');
+      setNewDirectiveDueDate('');
+      await loadDirectives();
+    } catch (err: any) {
+      console.error('Directive dispatch error:', err);
+    } finally {
+      setIsSubmittingDirective(false);
+    }
   };
 
-  // Handle Adjudication
-  const handleSaveAdjudication = (newStatus: 'VERIFIED_FAKE' | 'DISMISSED') => {
+  // 3. Adjudicate Fake Voter in DB (PATCH /api/voters/:id/status)
+  const handleSaveAdjudication = async (newStatus: 'VERIFIED_FAKE' | 'DISMISSED') => {
     if (!selectedFakeVoter) return;
-    setFakeVoters(prev => prev.map(item => {
-      if (item.id === selectedFakeVoter.id) {
-        return {
-          ...item,
-          status: newStatus,
-          resolutionNotes: adjudicationNotes.trim() || (newStatus === 'VERIFIED_FAKE' ? 'Verified as invalid entry by Party Legal Cell' : 'Dismissed following physical verification')
-        };
-      }
-      return item;
-    }));
-    setAdjudicationSuccess(`Voter record marked as ${newStatus}!`);
-    setTimeout(() => {
-      setAdjudicationSuccess('');
-      setSelectedFakeVoter(null);
-      setAdjudicationNotes('');
-    }, 1500);
+    setIsAdjudicating(true);
+    setAdjudicationSuccess('');
+
+    try {
+      const targetVoterStatus = newStatus === 'VERIFIED_FAKE' ? 'Fake' : 'Active';
+      await updateVoter(selectedFakeVoter.id, {
+        voterStatus: targetVoterStatus as any,
+        notes: adjudicationNotes.trim() || `Adjudicated as ${newStatus} by Party Legal Cell`
+      } as any);
+
+      setAdjudicationSuccess(`Voter status updated in PostgreSQL database to ${targetVoterStatus}!`);
+      setTimeout(() => {
+        setAdjudicationSuccess('');
+        setSelectedFakeVoter(null);
+        setAdjudicationNotes('');
+      }, 1500);
+
+      await Promise.all([loadFakeVoters(), loadAnalytics()]);
+    } catch (err: any) {
+      console.error('Adjudication update error:', err);
+    } finally {
+      setIsAdjudicating(false);
+    }
   };
 
-  // Handle Export Fake Votes Dossier
+  // 4. Resolve Ground Report in DB (PATCH /api/reports/ground/:id/status)
+  const handleResolveGroundReport = async (reportId: string) => {
+    try {
+      await apiFetch(`/api/reports/ground/${reportId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'RESOLVED', resolutionNotes: 'Reviewed & resolved by Party Admin HQ' })
+      });
+      await loadGroundReports();
+    } catch (err: any) {
+      console.error('Resolve report error:', err);
+    }
+  };
+
+  // 5. Post Announcement to DB (POST /api/notifications/announcements)
+  const handleCreateAnnouncement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAnnTitle.trim() || !newAnnContent.trim()) return;
+
+    setIsSubmittingAnn(true);
+    setAnnSuccessMsg('');
+
+    try {
+      await apiFetch('/api/notifications/announcements', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: newAnnTitle.trim(),
+          content: newAnnContent.trim(),
+          priority: 'HIGH'
+        })
+      });
+
+      setAnnSuccessMsg('Announcement broadcast saved in PostgreSQL and published!');
+      setNewAnnTitle('');
+      setNewAnnContent('');
+      await loadAnnouncements();
+    } catch (err: any) {
+      console.error('Announcement create error:', err);
+    } finally {
+      setIsSubmittingAnn(false);
+    }
+  };
+
+  // 6. Delete Announcement in DB
+  const handleDeleteAnnouncement = async (id: string) => {
+    try {
+      await apiFetch(`/api/notifications/announcements/${id}`, { method: 'DELETE' });
+      await loadAnnouncements();
+    } catch (err: any) {
+      console.error('Delete announcement error:', err);
+    }
+  };
+
+  // Export Fake Votes CSV
   const handleExportFakeDossier = () => {
     const csvContent = "data:text/csv;charset=utf-8," 
-      + "Name,EPIC Number,Age,Gender,Booth,Mandal,Village,Flagged Reason,Status,Flagged By\n"
-      + fakeVoters.map(v => `"${v.name}","${v.epicNumber}",${v.age},"${v.gender}","${v.boothNumber}","${v.mandalName}","${v.villageName}","${v.reason}","${v.status}","${v.flaggedBy}"`).join("\n");
+      + "Name,EPIC Number,Age,Gender,Booth,Mandal,Village,Flagged Reason,Status,Flagged At\n"
+      + fakeVoters.map(v => `"${v.name}","${v.epicNumber}",${v.age},"${v.gender}","${v.boothNumber}","${v.mandalName}","${v.villageName}","${v.reason}","${v.status}","${v.flaggedAt}"`).join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Legal_Fake_Voters_Dossier_${Date.now()}.csv`);
+    link.setAttribute("download", `Live_Fake_Voters_Dossier_${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  // Handle Announcement Submit
-  const handleCreateAnnouncement = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newAnnTitle.trim() || !newAnnContent.trim()) return;
-    const ann = {
-      id: `ann-${Date.now()}`,
-      title: newAnnTitle.trim(),
-      content: newAnnContent.trim(),
-      priority: 'HIGH',
-      createdAt: new Date().toISOString().split('T')[0]
-    };
-    setAnnouncements([ann, ...announcements]);
-    setNewAnnTitle('');
-    setNewAnnContent('');
-    setAnnSuccessMsg('High command broadcast posted successfully!');
-    setTimeout(() => setAnnSuccessMsg(''), 4000);
   };
 
   // Filtered Fake Voters
@@ -508,7 +565,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
     });
   }, [fakeVoters, fakeFilterStatus, fakeSearchTerm]);
 
-  // Active Parties Telemetry
+  // Active Parties Telemetry derived dynamically from CMS Studio & Analytics
   const activePartiesList = useMemo(() => {
     if (parties && parties.length > 0) return parties.filter(p => p.isActive);
     return [
@@ -519,6 +576,12 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
       { name: 'Indian National Congress', code: 'INC', primaryColor: '#0284c7' },
     ];
   }, [parties]);
+
+  // Real Counts from PostgreSQL
+  const totalElectorateCount = analytics?.summary?.totalVoters ?? votersTotal ?? 0;
+  const realPartyPreferences = analytics?.partyPreference || {};
+  const neutralVotesCount = realPartyPreferences['NEUTRAL'] || realPartyPreferences['Neutral'] || 0;
+  const casteDistribution = analytics?.demographics?.caste || {};
 
   return (
     <div className="w-full h-screen overflow-hidden flex flex-col md:flex-row bg-slate-50 text-slate-800" id="party-admin-container">
@@ -571,7 +634,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
               <p className="text-[9px] text-amber-400 font-bold truncate tracking-wide">PARTY ADMINISTRATOR (HQ)</p>
               <div className="text-[8px] text-slate-300 font-semibold mt-1 uppercase space-y-0.5">
                 <p className="truncate">Jurisdiction: <span className="text-slate-100 font-bold">Central Party Command</span></p>
-                <p className="truncate">Level: <span className="text-amber-300 font-bold">Party Apex Governance</span></p>
+                <p className="truncate">Database: <span className="text-emerald-400 font-bold">PostgreSQL Live</span></p>
               </div>
               <div className="flex items-center gap-1 mt-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -589,9 +652,9 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
               { id: 'dashboard', name: 'Dashboard', icon: Home },
               { id: 'fake_votes', name: 'Fake Votes Audit', icon: AlertTriangle, badge: fakeVoters.filter(v => v.status === 'FLAGGED').length },
               { id: 'training', name: 'Training Studio', icon: Video, badge: videos.length || undefined },
-              { id: 'tasks', name: 'High Command Tasks', icon: ListTodo, badge: directives.filter(d => d.status === 'ACTIVE').length },
-              { id: 'cadre_network', name: 'Cadre Network', icon: Users },
-              { id: 'ground_reports', name: 'Ground Reports', icon: FileText, badge: groundReports.filter(r => r.status === 'PENDING').length },
+              { id: 'tasks', name: 'High Command Tasks', icon: ListTodo, badge: directives.filter(d => (d as any).status !== 'COMPLETED' && (d as any).status !== 'CANCELLED').length },
+              { id: 'cadre_network', name: 'Cadre Network', icon: Users, badge: inchargesList.length || undefined },
+              { id: 'ground_reports', name: 'Ground Reports', icon: FileText, badge: groundReports.filter(r => (r as any).status === 'PENDING').length },
               { id: 'voters', name: 'Electoral Roll Master', icon: UserCheck },
               { id: 'caste_analytics', name: 'Caste Analytics', icon: BarChart3 },
               { id: 'announcements', name: 'Broadcast Ticker', icon: Megaphone }
@@ -677,10 +740,18 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                 {config.organisationName || session.organisationName || 'Party Administration'} • Independent Party Directives, Training Media & Legal Cadre War Room
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleRefreshAll}
+                disabled={isRefreshingAll}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingAll ? 'animate-spin' : ''}`} />
+                <span>Sync DB</span>
+              </button>
               <span className="flex items-center gap-2 text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                Postgres DB: Live
+                Postgres: Live
               </span>
             </div>
           </div>
@@ -690,58 +761,66 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
             <div className="bg-white border border-gray-200/80 rounded-2xl p-4 shadow-sm">
               <p className="text-[10px] uppercase tracking-wider text-slate-400 font-black">Total Electorate</p>
               <h3 className="text-2xl font-black text-slate-950 mt-1">
-                {votersList.length > 0 ? votersList.length.toLocaleString() : '2,40,000'}
+                {totalElectorateCount.toLocaleString()}
               </h3>
-              <p className="text-[10px] text-slate-400 mt-1 font-semibold">Scope: Entire Party Jurisdiction</p>
+              <p className="text-[10px] text-slate-400 mt-1 font-semibold">Postgres Scoped Aggregate</p>
             </div>
             <div className="bg-white border border-gray-200/80 rounded-2xl p-4 shadow-sm">
               <p className="text-[10px] uppercase tracking-wider text-slate-400 font-black">Active Tiers</p>
-              <h3 className="text-2xl font-black text-amber-500 mt-1">10 Levels</h3>
-              <p className="text-[10px] text-slate-400 mt-1 font-semibold">State HQ down to 100-Voter</p>
+              <h3 className="text-2xl font-black text-amber-500 mt-1">
+                {config.activeHierarchyLevels?.length || 10} Levels
+              </h3>
+              <p className="text-[10px] text-slate-400 mt-1 font-semibold">From State HQ to 100-Voter</p>
             </div>
             <div className="bg-white border border-gray-200/80 rounded-2xl p-4 shadow-sm">
               <p className="text-[10px] uppercase tracking-wider text-slate-400 font-black">Open Directives</p>
               <h3 className="text-2xl font-black text-blue-600 mt-1">
-                {directives.filter(d => d.status === 'ACTIVE').length} Active
+                {directives.filter(d => (d as any).status !== 'COMPLETED' && (d as any).status !== 'CANCELLED').length} Active
               </h3>
-              <p className="text-[10px] text-slate-400 mt-1 font-semibold">Dispatched to subordinate tiers</p>
+              <p className="text-[10px] text-slate-400 mt-1 font-semibold">Dispatched in database</p>
             </div>
             <div className="bg-white border border-gray-200/80 rounded-2xl p-4 shadow-sm">
               <p className="text-[10px] uppercase tracking-wider text-slate-400 font-black">Fake Votes Audit</p>
               <h3 className="text-2xl font-black text-red-600 mt-1">
                 {fakeVoters.filter(v => v.status === 'FLAGGED').length} Pending
               </h3>
-              <p className="text-[10px] text-slate-400 mt-1 font-semibold">Reported by Booth & Village IC</p>
+              <p className="text-[10px] text-slate-400 mt-1 font-semibold">Live flags in database</p>
             </div>
           </div>
 
-          {/* Dynamic Preference Breakdown Banner */}
+          {/* Dynamic Preference Breakdown Banner (Real PostgreSQL Counts) */}
           <div className="bg-white border border-gray-200/80 rounded-2xl p-5 shadow-sm space-y-3">
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
               <div>
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Telemetry & Projections</span>
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Live Telemetry & Projections</span>
                 <h3 className="text-sm font-black text-slate-900 uppercase">Party Political Preference Distribution</h3>
               </div>
-              <span className="text-xs font-bold text-slate-400">Derived dynamically from CMS Studio</span>
+              <span className="text-xs font-bold text-slate-400">Queried dynamically from PostgreSQL database</span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 pt-1">
-              {activePartiesList.map((p) => (
-                <div key={p.code} className="p-3 rounded-xl border border-gray-100 bg-slate-50/60">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.primaryColor || '#94a3b8' }}></span>
-                    <span className="text-xs font-black text-slate-800">{p.code}</span>
+              {activePartiesList.map((p) => {
+                const count = realPartyPreferences[p.code] || 0;
+                const pct = totalElectorateCount > 0 ? ((count / totalElectorateCount) * 100).toFixed(1) : '0.0';
+                return (
+                  <div key={p.code} className="p-3 rounded-xl border border-gray-100 bg-slate-50/60">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.primaryColor || '#94a3b8' }}></span>
+                      <span className="text-xs font-black text-slate-800">{p.code}</span>
+                    </div>
+                    <h4 className="text-lg font-black text-slate-900 mt-1">{count.toLocaleString()}</h4>
+                    <p className="text-[10px] text-slate-400 font-semibold">{pct}% of Electorate</p>
                   </div>
-                  <h4 className="text-lg font-black text-slate-900 mt-1">0</h4>
-                  <p className="text-[10px] text-slate-400 font-semibold">0.0% of Electorate</p>
-                </div>
-              ))}
+                );
+              })}
               <div className="p-3 rounded-xl border border-gray-100 bg-slate-50/60">
                 <div className="flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
                   <span className="text-xs font-black text-slate-800">Neutral</span>
                 </div>
-                <h4 className="text-lg font-black text-slate-900 mt-1">50</h4>
-                <p className="text-[10px] text-slate-400 font-semibold">100.0% Sample</p>
+                <h4 className="text-lg font-black text-slate-900 mt-1">{neutralVotesCount.toLocaleString()}</h4>
+                <p className="text-[10px] text-slate-400 font-semibold">
+                  {totalElectorateCount > 0 ? ((neutralVotesCount / totalElectorateCount) * 100).toFixed(1) : '0.0'}% Sample
+                </p>
               </div>
             </div>
           </div>
@@ -798,45 +877,53 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                 </button>
               </div>
 
-              {/* Hierarchy Operational Readiness Matrix */}
+              {/* Hierarchy Operational Readiness Matrix (Connected to CMS Config & DB Incharges) */}
               <div className="bg-white border border-gray-200/80 rounded-2xl p-5 shadow-sm space-y-4">
                 <div className="flex items-center justify-between border-b border-gray-100 pb-3">
                   <div>
                     <h3 className="text-base font-black text-slate-900">Hierarchy Operational Readiness</h3>
-                    <p className="text-xs text-slate-500">Chain of command deployment status across configured party tiers</p>
+                    <p className="text-xs text-slate-500">Live deployment status across active party tiers</p>
                   </div>
                   <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
-                    10 Active Tiers
+                    {config.activeHierarchyLevels?.length || 10} Tiers Configured
                   </span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                   {[
-                    { level: 'State HQ', code: 'L1: STATE', status: 'Deployed', color: 'emerald', ic: 'State Incharge User' },
-                    { level: 'Zone HQ', code: 'L2: ZONE', status: 'Deployed', color: 'emerald', ic: 'Zone Coordinator' },
-                    { level: 'Parliament MP', code: 'L3: PARLIAMENT', status: 'Deployed', color: 'emerald', ic: 'Parliament Incharge' },
-                    { level: 'Assembly MLA', code: 'L5: CONSTITUENCY', status: 'Deployed', color: 'emerald', ic: 'MLA Incharge' },
-                    { level: 'Mandal Block', code: 'L6: MANDAL', status: 'Deployed', color: 'emerald', ic: 'Mandal President' },
-                    { level: 'Village Ward', code: 'L7: VILLAGE', status: 'Deployed', color: 'emerald', ic: 'Village Incharge' },
-                    { level: 'Polling Booth', code: 'L8: BOOTH', status: 'Deployed', color: 'emerald', ic: 'Booth President' },
-                    { level: '100-Voter Unit', code: 'L9: VOTER_GROUP', status: 'Deployed', color: 'emerald', ic: '100-Voter Incharge' },
-                    { level: 'District DCC', code: 'L4: DISTRICT', status: 'Optional', color: 'slate', ic: 'District DCC Lead' },
-                    { level: 'Party Admin HQ', code: 'L10: PARTY_ADMIN', status: 'Apex Command', color: 'amber', ic: 'Party Admin HQ' },
-                  ].map((t) => (
-                    <div key={t.code} className="p-3 rounded-xl border border-gray-100 bg-slate-50/70">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-mono font-black text-slate-400">{t.code}</span>
-                        <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
-                          t.color === 'emerald' ? 'bg-emerald-100 text-emerald-800' :
-                          t.color === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-700'
-                        }`}>
-                          {t.status}
-                        </span>
+                    { level: 'State HQ', code: 'STATE', badge: 'L1' },
+                    { level: 'Zone HQ', code: 'ZONE', badge: 'L2' },
+                    { level: 'Parliament MP', code: 'PARLIAMENT', badge: 'L3' },
+                    { level: 'Assembly MLA', code: 'CONSTITUENCY', badge: 'L5' },
+                    { level: 'Mandal Block', code: 'MANDAL', badge: 'L6' },
+                    { level: 'Village Ward', code: 'VILLAGE', badge: 'L7' },
+                    { level: 'Polling Booth', code: 'BOOTH', badge: 'L8' },
+                    { level: '100-Voter Unit', code: 'VOTER_GROUP', badge: 'L9' },
+                    { level: 'District DCC', code: 'DISTRICT', badge: 'L4' },
+                    { level: 'Party Admin HQ', code: 'PARTY_ADMIN', badge: 'L10' },
+                  ].map((t) => {
+                    const isConfigured = !config.activeHierarchyLevels || config.activeHierarchyLevels.includes(t.code);
+                    const matchingIncharge = inchargesList.find(i => ((i as any).level || (i as any).tierLevel || (i as any).tier || i.role || i.jurisdictionType) === t.code);
+                    const isDeployed = Boolean(matchingIncharge);
+
+                    return (
+                      <div key={t.code} className="p-3 rounded-xl border border-gray-100 bg-slate-50/70">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-mono font-black text-slate-400">{t.badge}: {t.code}</span>
+                          <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
+                            !isConfigured ? 'bg-slate-200 text-slate-600' :
+                            isDeployed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {!isConfigured ? 'Inactive' : isDeployed ? 'Deployed' : 'Pending'}
+                          </span>
+                        </div>
+                        <h5 className="text-xs font-black text-slate-800 mt-1">{t.level}</h5>
+                        <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                          {matchingIncharge?.userName || (matchingIncharge as any)?.name || (isConfigured ? 'Pending Appointment' : 'Not Active in Scope')}
+                        </p>
                       </div>
-                      <h5 className="text-xs font-black text-slate-800 mt-1">{t.level}</h5>
-                      <p className="text-[10px] text-slate-500 truncate mt-0.5">{t.ic}</p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -847,40 +934,35 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                   <div className="flex items-center justify-between border-b border-gray-100 pb-3">
                     <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
                       <ListTodo className="w-4 h-4 text-blue-600" />
-                      Active Directives & Incharge Progress
+                      Active Directives in PostgreSQL ({directives.length})
                     </h3>
                     <button
                       onClick={() => setActiveTab('tasks')}
                       className="text-xs text-amber-500 font-bold hover:underline"
                     >
-                      View All ({directives.length})
+                      View All
                     </button>
                   </div>
-                  <div className="space-y-3">
-                    {directives.map(d => (
-                      <div key={d.id} className="p-3 rounded-xl border border-gray-100 bg-slate-50/60 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
-                            d.priority === 'CRITICAL' ? 'bg-red-100 text-red-700' :
-                            d.priority === 'HIGH' ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-700'
-                          }`}>
-                            {d.priority} Priority
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-mono">Due: {d.dueDate}</span>
-                        </div>
-                        <h4 className="text-xs font-bold text-slate-800">{d.title}</h4>
-                        <div className="space-y-1">
-                          <div className="flex justify-between text-[10px] font-bold text-slate-500">
-                            <span>Incharge Completion</span>
-                            <span>{d.completionRate || 0}%</span>
+                  {directives.length === 0 ? (
+                    <p className="text-center py-8 text-xs text-slate-400 font-medium">No operational directives dispatched yet. Create one from the Directives tab.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {directives.slice(0, 3).map(d => (
+                        <div key={d.id} className="p-3 rounded-xl border border-gray-100 bg-slate-50/60 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                              d.priority === 'Urgent' || d.priority === 'High' ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-700'
+                            }`}>
+                              {d.priority} Priority
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">Due: {d.dueDate ? String(d.dueDate).slice(0, 10) : 'Open'}</span>
                           </div>
-                          <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                            <div className="h-full bg-blue-600 rounded-full" style={{ width: `${d.completionRate || 0}%` }}></div>
-                          </div>
+                          <h4 className="text-xs font-bold text-slate-800">{d.title}</h4>
+                          <p className="text-[10px] text-slate-500 truncate">{d.instructions || 'Standard guidelines'}</p>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Flagged Fake Votes Widget */}
@@ -888,35 +970,39 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                   <div className="flex items-center justify-between border-b border-gray-100 pb-3">
                     <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
                       <AlertTriangle className="w-4 h-4 text-red-600" />
-                      Flagged Fake Votes Awaiting Audit
+                      Flagged Fake Votes in Database ({fakeVoters.length})
                     </h3>
                     <button
                       onClick={() => setActiveTab('fake_votes')}
                       className="text-xs text-amber-500 font-bold hover:underline"
                     >
-                      Review All ({fakeVoters.length})
+                      Audit Desk
                     </button>
                   </div>
-                  <div className="space-y-2.5">
-                    {fakeVoters.slice(0, 3).map(fv => (
-                      <div key={fv.id} className="p-3 rounded-xl border border-gray-100 bg-slate-50/60 flex items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <h5 className="text-xs font-black text-slate-900">{fv.name}</h5>
-                            <span className="text-[10px] font-mono text-amber-700 font-bold">{fv.epicNumber}</span>
+                  {fakeVoters.length === 0 ? (
+                    <p className="text-center py-8 text-xs text-slate-400 font-medium">No flagged fake voter records found in database.</p>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {fakeVoters.slice(0, 3).map(fv => (
+                        <div key={fv.id} className="p-3 rounded-xl border border-gray-100 bg-slate-50/60 flex items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <h5 className="text-xs font-black text-slate-900">{fv.name}</h5>
+                              <span className="text-[10px] font-mono text-amber-700 font-bold">{fv.epicNumber}</span>
+                            </div>
+                            <p className="text-[10px] text-slate-500">{fv.boothNumber} • {fv.villageName}</p>
+                            <p className="text-[11px] text-slate-700 font-medium">{fv.reason}</p>
                           </div>
-                          <p className="text-[10px] text-slate-500">{fv.boothNumber} • {fv.villageName}</p>
-                          <p className="text-[11px] text-slate-700 font-medium">{fv.reason}</p>
+                          <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full shrink-0 ${
+                            fv.status === 'VERIFIED_FAKE' ? 'bg-red-100 text-red-700' :
+                            fv.status === 'DISMISSED' ? 'bg-slate-200 text-slate-700' : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {fv.status}
+                          </span>
                         </div>
-                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full shrink-0 ${
-                          fv.status === 'VERIFIED_FAKE' ? 'bg-red-100 text-red-700' :
-                          fv.status === 'DISMISSED' ? 'bg-slate-200 text-slate-700' : 'bg-amber-100 text-amber-800'
-                        }`}>
-                          {fv.status}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -934,10 +1020,18 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                     Fake Votes Legal Cell & Audit Desk
                   </h2>
                   <p className="text-xs text-slate-400 font-medium mt-0.5">
-                    Review, adjudicate, and assemble official legal dossiers for Form 7 Election Commission deletion requests
+                    Live voter records flagged in PostgreSQL for official deletion procedures and Form 7 submissions
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={loadFakeVoters}
+                    disabled={isLoadingFakeVoters}
+                    className="p-2 border border-slate-200 bg-slate-50 hover:bg-slate-100 rounded-xl text-slate-600"
+                    title="Refresh Fake Voters"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingFakeVoters ? 'animate-spin' : ''}`} />
+                  </button>
                   <button
                     onClick={handleExportFakeDossier}
                     className="flex items-center gap-2 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
@@ -951,7 +1045,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
               {/* Status KPI Summary */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="p-4 rounded-xl border border-red-100 bg-red-50/30">
-                  <span className="text-[10px] font-black uppercase text-slate-400">Total Flagged</span>
+                  <span className="text-[10px] font-black uppercase text-slate-400">Total Flagged in DB</span>
                   <h4 className="text-xl font-black text-red-600 mt-1">{fakeVoters.length}</h4>
                 </div>
                 <div className="p-4 rounded-xl border border-amber-100 bg-amber-50/30">
@@ -1010,7 +1104,6 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                       <th className="py-2.5 px-3 font-bold uppercase text-[10px]">EPIC Number</th>
                       <th className="py-2.5 px-3 font-bold uppercase text-[10px]">Jurisdiction</th>
                       <th className="py-2.5 px-3 font-bold uppercase text-[10px]">Reason & Evidence</th>
-                      <th className="py-2.5 px-3 font-bold uppercase text-[10px]">Flagged By</th>
                       <th className="py-2.5 px-3 font-bold uppercase text-[10px]">Audit Status</th>
                       <th className="py-2.5 px-3 font-bold uppercase text-[10px] text-right">Action</th>
                     </tr>
@@ -1018,8 +1111,8 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                   <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                     {filteredFakeVoters.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="text-center py-12 text-slate-400 font-semibold">
-                          No fake voter records matching the selected filter.
+                        <td colSpan={6} className="text-center py-12 text-slate-400 font-semibold">
+                          {isLoadingFakeVoters ? 'Loading live fake voter records...' : 'No fake voter records matching the selected filter in PostgreSQL.'}
                         </td>
                       </tr>
                     ) : (
@@ -1048,10 +1141,6 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                                 <ExternalLink className="w-3 h-3" /> View Evidence Attachment
                               </a>
                             )}
-                          </td>
-                          <td className="py-3 px-3 text-slate-600">
-                            <p className="font-semibold text-slate-800">{fv.flaggedBy}</p>
-                            <p className="text-[10px] text-slate-400">{fv.flaggedAt}</p>
                           </td>
                           <td className="py-3 px-3">
                             <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
@@ -1086,7 +1175,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                     <div className="flex items-center justify-between border-b border-gray-100 pb-3">
                       <div>
                         <h3 className="text-base font-black text-slate-900">Adjudicate Flagged Voter Record</h3>
-                        <p className="text-xs text-slate-400">Official Decision by Party Legal Cell</p>
+                        <p className="text-xs text-slate-400">Official Decision written to PostgreSQL</p>
                       </div>
                       <button
                         onClick={() => setSelectedFakeVoter(null)}
@@ -1122,6 +1211,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                     <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
                       <button
                         type="button"
+                        disabled={isAdjudicating}
                         onClick={() => handleSaveAdjudication('DISMISSED')}
                         className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
                       >
@@ -1129,10 +1219,11 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                       </button>
                       <button
                         type="button"
+                        disabled={isAdjudicating}
                         onClick={() => handleSaveAdjudication('VERIFIED_FAKE')}
                         className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-sm"
                       >
-                        Confirm as Fake (File Form 7)
+                        {isAdjudicating ? 'Updating DB...' : 'Confirm as Fake (File Form 7)'}
                       </button>
                     </div>
                   </div>
@@ -1247,7 +1338,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                       className="flex items-center gap-2 px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl shadow-md transition-all cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
-                      <span>{isSubmittingVideo ? 'Publishing...' : 'Publish to Cadre Network'}</span>
+                      <span>{isSubmittingVideo ? 'Publishing to DB...' : 'Publish to Cadre Network'}</span>
                     </button>
                   </div>
                 </form>
@@ -1256,7 +1347,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
               {/* Published Videos List */}
               <div className="bg-white border border-gray-200/80 rounded-2xl p-6 shadow-sm space-y-4">
                 <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-                  <h3 className="text-base font-black text-slate-900">Published Modules in Party Library ({videos.length})</h3>
+                  <h3 className="text-base font-black text-slate-900">Published Modules in PostgreSQL Library ({videos.length})</h3>
                   <button
                     onClick={loadVideos}
                     disabled={isLoadingVideos}
@@ -1268,7 +1359,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                 </div>
 
                 {videos.length === 0 ? (
-                  <p className="text-center py-10 text-slate-400 text-xs font-semibold">No training videos published yet. Publish your first module above!</p>
+                  <p className="text-center py-10 text-slate-400 text-xs font-semibold">No training videos published in PostgreSQL database yet. Publish your first module above!</p>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {videos.map(v => (
@@ -1293,7 +1384,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                           >
                             <Play className="w-3.5 h-3.5" /> Watch Stream
                           </button>
-                          <span className="text-[10px] text-slate-400 font-semibold">Published</span>
+                          <span className="text-[10px] text-slate-400 font-semibold">Postgres Sync</span>
                         </div>
                       </div>
                     ))}
@@ -1338,7 +1429,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                       <ListTodo className="w-5 h-5 text-amber-500" />
                       Dispatch Operational Directive to Field Cadre
                     </h3>
-                    <p className="text-xs text-slate-400">Assign mandatory operational tasks with targeted scopes and deadlines</p>
+                    <p className="text-xs text-slate-400">Assign mandatory operational tasks in PostgreSQL with targeted scopes and deadlines</p>
                   </div>
                 </div>
 
@@ -1368,9 +1459,9 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                         onChange={(e) => setNewDirectivePriority(e.target.value as any)}
                         className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
                       >
-                        <option value="CRITICAL">🔴 Critical Priority</option>
-                        <option value="HIGH">🟡 High Priority</option>
-                        <option value="MEDIUM">🔵 Medium Priority</option>
+                        <option value="Urgent">🔴 Urgent Priority</option>
+                        <option value="High">🟡 High Priority</option>
+                        <option value="Medium">🔵 Medium Priority</option>
                       </select>
                     </div>
                   </div>
@@ -1414,10 +1505,11 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                   <div className="flex justify-end">
                     <button
                       type="submit"
+                      disabled={isSubmittingDirective}
                       className="flex items-center gap-2 px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl shadow-md transition-all cursor-pointer"
                     >
                       <Send className="w-4 h-4" />
-                      <span>Dispatch Directive</span>
+                      <span>{isSubmittingDirective ? 'Dispatching to DB...' : 'Dispatch Directive'}</span>
                     </button>
                   </div>
                 </form>
@@ -1425,41 +1517,54 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
 
               {/* Directives Directory */}
               <div className="bg-white border border-gray-200/80 rounded-2xl p-6 shadow-sm space-y-4">
-                <h3 className="text-base font-black text-slate-900 border-b border-gray-100 pb-3">Active Operational Directives ({directives.length})</h3>
-                <div className="space-y-3">
-                  {directives.map(d => (
-                    <div key={d.id} className="p-4 rounded-xl border border-gray-200 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="space-y-1.5 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
-                            d.priority === 'CRITICAL' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'
-                          }`}>
-                            {d.priority}
-                          </span>
-                          <span className="text-xs font-black text-slate-900">{d.title}</span>
-                        </div>
-                        <p className="text-[11px] text-slate-500">{d.instructions || 'Standard operational guidelines apply.'}</p>
-                        <div className="flex items-center gap-3 text-[10px] text-slate-400 font-semibold pt-1">
-                          <span>Target: <strong className="text-slate-700">{d.targetLevel}</strong></span>
-                          <span>•</span>
-                          <span>Due: <strong className="text-slate-700">{d.dueDate}</strong></span>
-                          <span>•</span>
-                          <span>Dispatched: <strong className="text-slate-700">{d.createdAt}</strong></span>
-                        </div>
-                      </div>
-
-                      <div className="w-full md:w-48 space-y-1.5 shrink-0">
-                        <div className="flex justify-between text-[11px] font-bold text-slate-700">
-                          <span>Cadre Compliance</span>
-                          <span className="text-blue-600 font-mono">{d.completionRate}%</span>
-                        </div>
-                        <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-                          <div className="h-full bg-blue-600 rounded-full" style={{ width: `${d.completionRate}%` }}></div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                  <h3 className="text-base font-black text-slate-900">Directives Stored in PostgreSQL ({directives.length})</h3>
+                  <button onClick={loadDirectives} disabled={isLoadingDirectives} className="text-xs text-slate-500 font-bold hover:text-slate-800">
+                    <RefreshCw className={`w-3.5 h-3.5 inline mr-1 ${isLoadingDirectives ? 'animate-spin' : ''}`} /> Refresh
+                  </button>
                 </div>
+                {directives.length === 0 ? (
+                  <p className="text-center py-10 text-slate-400 text-xs font-medium">No tasks found in PostgreSQL database. Create your first operational task above!</p>
+                ) : (
+                  <div className="space-y-3">
+                    {directives.map(d => (
+                      <div key={d.id} className="p-4 rounded-xl border border-gray-200 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="space-y-1.5 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                              d.priority === 'Urgent' || d.priority === 'High' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {d.priority} Priority
+                            </span>
+                            <span className="text-xs font-black text-slate-900">{d.title}</span>
+                          </div>
+                          <p className="text-[11px] text-slate-500">{d.instructions || 'Standard operational guidelines apply.'}</p>
+                          <div className="flex items-center gap-3 text-[10px] text-slate-400 font-semibold pt-1">
+                            <span>Status: <strong className="text-slate-700">{d.status}</strong></span>
+                            <span>•</span>
+                            <span>Target: <strong className="text-slate-700">{d.targetHierarchyLevel || 'All Levels'}</strong></span>
+                            <span>•</span>
+                            <span>Due: <strong className="text-slate-700">{d.dueDate ? String(d.dueDate).slice(0, 10) : 'Open'}</strong></span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {d.status !== 'Completed' && (
+                            <button
+                              onClick={async () => {
+                                await updateTaskStatus(d.id, 'Completed', 'Marked completed by Party Admin HQ');
+                                await loadDirectives();
+                              }}
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold cursor-pointer"
+                            >
+                              Mark Completed
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1475,43 +1580,42 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                     <Users className="w-5 h-5 text-emerald-600" />
                     Party Cadre Chain of Command Roster
                   </h3>
-                  <p className="text-xs text-slate-400">All provisioned hierarchy incharges appointed across the party's jurisdiction</p>
+                  <p className="text-xs text-slate-400">All appointed leadership and incharges provisioned in PostgreSQL database</p>
                 </div>
                 <span className="text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg">
-                  8 Appointed Incharges Active
+                  {inchargesList.length} Appointed Cadre Incharges Active
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {[
-                  { name: 'State Admin User', role: 'State Incharge', tier: 'STATE', unit: 'State Headquarters', phone: '+91 9348423885', score: 96 },
-                  { name: 'Zone Coordinator', role: 'Zone Coordinator', tier: 'ZONE', unit: 'Regional Zone HQ', phone: '+91 9888800001', score: 92 },
-                  { name: 'Parliament Incharge', role: 'Parliament Incharge', tier: 'PARLIAMENT', unit: 'Ongole MP Seat', phone: '+91 9888800002', score: 88 },
-                  { name: 'MLA Incharge', role: 'Constituency Incharge', tier: 'CONSTITUENCY', unit: 'Kondapi AC No. 107', phone: '+91 9888800003', score: 94 },
-                  { name: 'Mandal President', role: 'Mandal President', tier: 'MANDAL', unit: 'Kondapi Mandal', phone: '+91 9100088818', score: 90 },
-                  { name: 'Village Incharge', role: 'Village Incharge', tier: 'VILLAGE', unit: 'Kondapi Village Ward', phone: '+91 9888800005', score: 87 },
-                  { name: 'Booth President', role: 'Booth President', tier: 'BOOTH', unit: 'Booth 105 ZPHS', phone: '+91 9888800006', score: 85 },
-                  { name: '100-Voter Incharge', role: '100 Voter Incharge', tier: 'VOTER_GROUP', unit: 'Cluster 101', phone: '+91 9888800007', score: 89 },
-                ].map((c) => (
-                  <div key={c.tier} className="p-4 rounded-xl border border-gray-100 bg-slate-50/70 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-black bg-amber-400/20 text-amber-800">
-                        {c.tier}
-                      </span>
-                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
-                        Score: {c.score}%
-                      </span>
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-black text-slate-900">{c.name}</h4>
-                      <p className="text-xs text-slate-500 font-semibold">{c.role} • {c.unit}</p>
-                    </div>
-                    <p className="text-xs font-mono text-slate-700 pt-1 border-t border-slate-200/50">
-                      📱 {c.phone}
-                    </p>
-                  </div>
-                ))}
-              </div>
+              {inchargesList.length === 0 ? (
+                <p className="text-center py-10 text-slate-400 text-xs font-medium">No incharge cadre appointed yet. Incharges configured in CMS Studio Section 7 will appear here.</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {inchargesList.map((c, idx) => {
+                    const level = (c as any).level || (c as any).tierLevel || (c as any).tier || c.inchargeType || c.role || 'CADRE';
+                    const phone = (c as any).phone || c.mobileNumber || 'Not Registered';
+                    return (
+                      <div key={c.id || idx} className="p-4 rounded-xl border border-gray-100 bg-slate-50/70 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-black bg-amber-400/20 text-amber-800">
+                            {level}
+                          </span>
+                          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
+                            Active Incharge
+                          </span>
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900">{c.userName || (c as any).name || 'Tier Incharge'}</h4>
+                          <p className="text-xs text-slate-500 font-semibold">{c.role} • {c.jurisdictionName || (c as any).unitName || 'Jurisdiction Unit'}</p>
+                        </div>
+                        <p className="text-xs font-mono text-slate-700 pt-1 border-t border-slate-200/50">
+                          📱 +91 {phone.replace(/\D/g, '').slice(-10)}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -1526,7 +1630,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                     <FileText className="w-5 h-5 text-blue-600" />
                     Field Intelligence & Ground Reports Feed
                   </h3>
-                  <p className="text-xs text-slate-400">Incoming incident reports and feedback dispatched by ground incharges</p>
+                  <p className="text-xs text-slate-400">Incoming incident reports and feedback dispatched by ground incharges into PostgreSQL</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <select
@@ -1542,48 +1646,50 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                 </div>
               </div>
 
-              <div className="space-y-3">
-                {groundReports
-                  .filter(r => reportFilterStatus === 'ALL' || r.status === reportFilterStatus)
-                  .map(r => (
-                    <div key={r.id} className="p-4 rounded-xl border border-gray-100 bg-slate-50/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
-                            r.priority === 'CRITICAL' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'
-                          }`}>
-                            {r.priority}
-                          </span>
-                          <span className="text-xs font-black text-slate-900">{r.issueCategory}</span>
-                          <span className="text-[10px] text-slate-400">• {r.reportedAt}</span>
+              {groundReports.length === 0 ? (
+                <p className="text-center py-12 text-slate-400 text-xs font-semibold">No field incident reports in database yet. Reports submitted by ground incharges will appear here live.</p>
+              ) : (
+                <div className="space-y-3">
+                  {groundReports
+                    .filter(r => reportFilterStatus === 'ALL' || (r as any).status === reportFilterStatus)
+                    .map(r => (
+                      <div key={r.id} className="p-4 rounded-xl border border-gray-100 bg-slate-50/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                              (r as any).priority === 'CRITICAL' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {(r as any).priority || 'MEDIUM'}
+                            </span>
+                            <span className="text-xs font-black text-slate-900">{r.issueCategory || 'Field Incident'}</span>
+                            <span className="text-[10px] text-slate-400">• {(r as any).createdAt ? String((r as any).createdAt).slice(0, 10) : 'Recent'}</span>
+                          </div>
+                          <p className="text-xs text-slate-700 font-medium">{r.description}</p>
+                          <p className="text-[10px] text-slate-400 font-semibold">
+                            Reported by incharge unit: <strong className="text-slate-700">{r.unitId || 'Ground Unit'}</strong>
+                          </p>
                         </div>
-                        <p className="text-xs text-slate-700 font-medium">{r.description}</p>
-                        <p className="text-[10px] text-slate-400 font-semibold">
-                          Reported by: <strong className="text-slate-700">{r.reportedBy} ({r.reporterRole})</strong> from {r.unitName}
-                        </p>
-                      </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
-                          r.status === 'RESOLVED' ? 'bg-emerald-100 text-emerald-800' :
-                          r.status === 'IN_REVIEW' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'
-                        }`}>
-                          {r.status}
-                        </span>
-                        {r.status !== 'RESOLVED' && (
-                          <button
-                            onClick={() => {
-                              setGroundReports(prev => prev.map(item => item.id === r.id ? { ...item, status: 'RESOLVED' } : item));
-                            }}
-                            className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold cursor-pointer"
-                          >
-                            Mark Resolved
-                          </button>
-                        )}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                            (r as any).status === 'RESOLVED' ? 'bg-emerald-100 text-emerald-800' :
+                            (r as any).status === 'IN_REVIEW' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {(r as any).status || 'PENDING'}
+                          </span>
+                          {(r as any).status !== 'RESOLVED' && (
+                            <button
+                              onClick={() => handleResolveGroundReport(r.id)}
+                              className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold cursor-pointer"
+                            >
+                              Mark Resolved
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-              </div>
+                    ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -1596,18 +1702,24 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                 <div>
                   <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
                     <UserCheck className="w-5 h-5 text-indigo-600" />
-                    Electoral Roll Master Directory
+                    Electoral Roll Master Directory ({votersTotal.toLocaleString()} Voters)
                   </h3>
-                  <p className="text-xs text-slate-400">Search and audit registered electorate database</p>
+                  <p className="text-xs text-slate-400">Live electorate records from PostgreSQL database</p>
                 </div>
-                <div className="w-full sm:w-64">
-                  <input
-                    type="text"
-                    value={voterSearch}
-                    onChange={(e) => setVoterSearch(e.target.value)}
-                    placeholder="Search Name or EPIC..."
-                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
-                  />
+                <div className="flex items-center gap-2">
+                  <div className="w-full sm:w-64">
+                    <input
+                      type="text"
+                      value={voterSearch}
+                      onChange={(e) => setVoterSearch(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { setVoterPage(1); loadVoters(); } }}
+                      placeholder="Search Name or EPIC (Press Enter)..."
+                      className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                    />
+                  </div>
+                  <button onClick={() => { setVoterPage(1); loadVoters(); }} className="px-3 py-1.5 bg-slate-900 text-white text-xs font-bold rounded-lg">
+                    Search
+                  </button>
                 </div>
               </div>
 
@@ -1618,40 +1730,71 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                       <th className="py-2.5 px-3 font-bold uppercase text-[10px]">Voter Name</th>
                       <th className="py-2.5 px-3 font-bold uppercase text-[10px]">EPIC Number</th>
                       <th className="py-2.5 px-3 font-bold uppercase text-[10px]">Age / Gender</th>
+                      <th className="py-2.5 px-3 font-bold uppercase text-[10px]">Jurisdiction</th>
                       <th className="py-2.5 px-3 font-bold uppercase text-[10px]">Preference</th>
                       <th className="py-2.5 px-3 font-bold uppercase text-[10px]">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {(votersList.length > 0 ? votersList : [
-                      { id: '1', name: 'K. Subrahmanyam', epicNumber: 'AP10928301', age: 44, gender: 'MALE', politicalPreference: 'TDP', voterStatus: 'Active' },
-                      { id: '2', name: 'P. Lakshmi', epicNumber: 'AP10928302', age: 39, gender: 'FEMALE', politicalPreference: 'YSRCP', voterStatus: 'Active' },
-                      { id: '3', name: 'M. Venkat Rao', epicNumber: 'AP10928303', age: 52, gender: 'MALE', politicalPreference: 'Neutral', voterStatus: 'Active' }
-                    ]).map((v: any) => (
-                      <tr key={v.id} className="hover:bg-slate-50/60">
-                        <td className="py-2.5 px-3 font-bold text-slate-900">{v.name}</td>
-                        <td className="py-2.5 px-3 font-mono text-amber-700 font-bold">{v.epicNumber}</td>
-                        <td className="py-2.5 px-3 text-slate-600">{v.age} • {v.gender}</td>
-                        <td className="py-2.5 px-3">
-                          <span className="px-2 py-0.5 rounded font-black text-[10px] bg-slate-100 text-slate-800">
-                            {v.politicalPreference || 'Neutral'}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
-                            {v.voterStatus || 'Active'}
-                          </span>
+                    {votersList.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="text-center py-10 text-slate-400">
+                          {isLoadingVoters ? 'Loading voters from database...' : 'No voters found in database matching criteria.'}
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      votersList.map((v) => (
+                        <tr key={v.id} className="hover:bg-slate-50/60">
+                          <td className="py-2.5 px-3 font-bold text-slate-900">{v.name}</td>
+                          <td className="py-2.5 px-3 font-mono text-amber-700 font-bold">{v.epicNumber}</td>
+                          <td className="py-2.5 px-3 text-slate-600">{v.age} • {v.gender}</td>
+                          <td className="py-2.5 px-3 text-slate-600">
+                            {v.boothNumber ? `Booth ${v.boothNumber}` : (v.village || v.mandal || 'Assigned Unit')}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="px-2 py-0.5 rounded font-black text-[10px] bg-slate-100 text-slate-800">
+                              {v.politicalPreference || 'Neutral'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                              v.voterStatus === 'Fake' ? 'bg-red-100 text-red-700' : 'text-emerald-600 bg-emerald-50'
+                            }`}>
+                              {v.voterStatus || 'Active'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Server Pagination Controls */}
+              <div className="flex items-center justify-between text-xs text-slate-500 pt-2">
+                <span>Page {voterPage} of {Math.max(1, Math.ceil(votersTotal / 20))}</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={voterPage <= 1}
+                    onClick={() => setVoterPage(p => Math.max(1, p - 1))}
+                    className="px-3 py-1 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg font-bold"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    disabled={voterPage >= Math.ceil(votersTotal / 20)}
+                    onClick={() => setVoterPage(p => p + 1)}
+                    className="px-3 py-1 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg font-bold"
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
           {/* --------------------------------------------------------
-              TAB 8: CASTE & DEMOGRAPHIC ANALYTICS
+              TAB 8: CASTE & DEMOGRAPHIC ANALYTICS (REAL DATABASE)
              -------------------------------------------------------- */}
           {activeTab === 'caste_analytics' && (
             <div className="bg-white border border-gray-200/80 rounded-2xl p-6 shadow-sm space-y-6">
@@ -1660,31 +1803,36 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                   <BarChart3 className="w-5 h-5 text-indigo-600" />
                   Demographic & Caste Category Intelligence
                 </h3>
-                <p className="text-xs text-slate-400">Aggregated demographic composition across all Mandals and Constituencies</p>
+                <p className="text-xs text-slate-400">Aggregated directly from PostgreSQL voter database</p>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
-                  { name: 'Backward Classes (BC)', pct: '48.2%', voters: '1,15,680', color: 'bg-amber-400' },
-                  { name: 'Other Castes (OC)', pct: '26.4%', voters: '63,360', color: 'bg-blue-500' },
-                  { name: 'Scheduled Castes (SC)', pct: '18.1%', voters: '43,440', color: 'bg-emerald-500' },
-                  { name: 'Minorities & Others', pct: '7.3%', voters: '17,520', color: 'bg-purple-500' }
-                ].map((c) => (
-                  <div key={c.name} className="p-4 rounded-xl border border-gray-100 bg-slate-50/70 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-3 h-3 rounded-full ${c.color}`}></span>
-                      <span className="text-xs font-black text-slate-800">{c.name}</span>
-                    </div>
-                    <h3 className="text-2xl font-black text-slate-900">{c.pct}</h3>
-                    <p className="text-[11px] text-slate-500 font-semibold">{c.voters} Estimated Voters</p>
-                  </div>
-                ))}
-              </div>
+              {Object.keys(casteDistribution).length === 0 ? (
+                <div className="p-8 text-center bg-slate-50 rounded-xl space-y-2">
+                  <p className="text-xs font-bold text-slate-600">No categorized caste records populated in PostgreSQL yet.</p>
+                  <p className="text-[11px] text-slate-400">As voters are tagged with caste categories in the voter database, demographic distributions will dynamically populate here.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {Object.entries(casteDistribution).map(([casteName, count]) => {
+                    const pct = totalElectorateCount > 0 ? ((count / totalElectorateCount) * 100).toFixed(1) : '0.0';
+                    return (
+                      <div key={casteName} className="p-4 rounded-xl border border-gray-100 bg-slate-50/70 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded-full bg-amber-400"></span>
+                          <span className="text-xs font-black text-slate-800">{casteName}</span>
+                        </div>
+                        <h3 className="text-2xl font-black text-slate-900">{pct}%</h3>
+                        <p className="text-[11px] text-slate-500 font-semibold">{count.toLocaleString()} Recorded Voters</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
           {/* --------------------------------------------------------
-              TAB 9: BROADCAST TICKER & ANNOUNCEMENTS
+              TAB 9: BROADCAST TICKER & ANNOUNCEMENTS (REAL DATABASE)
              -------------------------------------------------------- */}
           {activeTab === 'announcements' && (
             <div className="space-y-6">
@@ -1725,34 +1873,45 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                   <div className="flex justify-end">
                     <button
                       type="submit"
+                      disabled={isSubmittingAnn}
                       className="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl shadow-md cursor-pointer"
                     >
-                      Post High Command Broadcast
+                      {isSubmittingAnn ? 'Posting to DB...' : 'Post High Command Broadcast'}
                     </button>
                   </div>
                 </form>
               </div>
 
               <div className="bg-white border border-gray-200/80 rounded-2xl p-6 shadow-sm space-y-3">
-                <h4 className="text-sm font-black text-slate-900 border-b border-gray-100 pb-2">Active Broadcasts ({announcements.length})</h4>
-                {announcements.map(a => (
-                  <div key={a.id} className="p-4 rounded-xl border border-amber-200 bg-amber-50/30 flex items-start justify-between gap-4">
-                    <div className="space-y-1">
-                      <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-amber-400 text-slate-950">
-                        Active Alert
-                      </span>
-                      <h5 className="text-sm font-bold text-slate-900">{a.title}</h5>
-                      <p className="text-xs text-slate-700">{a.content}</p>
-                      <p className="text-[10px] text-slate-400">Posted on: {a.createdAt}</p>
+                <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                  <h4 className="text-sm font-black text-slate-900">Active Broadcasts in PostgreSQL ({announcements.length})</h4>
+                  <button onClick={loadAnnouncements} disabled={isLoadingAnnouncements} className="text-xs text-slate-500 font-bold hover:text-slate-800">
+                    <RefreshCw className={`w-3.5 h-3.5 inline mr-1 ${isLoadingAnnouncements ? 'animate-spin' : ''}`} /> Refresh
+                  </button>
+                </div>
+                {announcements.length === 0 ? (
+                  <p className="text-center py-8 text-slate-400 text-xs font-medium">No announcements posted in database yet.</p>
+                ) : (
+                  announcements.map(a => (
+                    <div key={a.id} className="p-4 rounded-xl border border-amber-200 bg-amber-50/30 flex items-start justify-between gap-4">
+                      <div className="space-y-1">
+                        <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-amber-400 text-slate-950">
+                          Active Alert
+                        </span>
+                        <h5 className="text-sm font-bold text-slate-900">{a.title}</h5>
+                        <p className="text-xs text-slate-700">{a.content}</p>
+                        <p className="text-[10px] text-slate-400">Posted on: {String(a.createdAt).slice(0, 10)}</p>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteAnnouncement(a.id)}
+                        className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
+                        title="Delete from database"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => setAnnouncements(prev => prev.filter(item => item.id !== a.id))}
-                      className="text-slate-400 hover:text-red-600 p-1 cursor-pointer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           )}

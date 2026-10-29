@@ -169,6 +169,20 @@ export async function reportsRoutes(fastify: FastifyInstance) {
     return reply.status(201).send(successResponse(report, 'Ground report submitted'));
   });
 
+  // Update ground report status
+  fastify.patch('/ground/:id/status', async (req: FastifyRequest<{ Params: { id: string }; Body: { status: GroundReportStatus; resolutionNotes?: string } }>, reply: FastifyReply) => {
+    const { id } = req.params;
+    const { status, resolutionNotes } = req.body || {};
+    const updated = await prisma.groundReport.update({
+      where: { id },
+      data: {
+        status: status || GroundReportStatus.RESOLVED,
+        resolutionNotes: resolutionNotes || undefined,
+      },
+    });
+    return reply.send(successResponse(updated, 'Ground report status updated'));
+  });
+
   // List polling booth reports
   fastify.get('/polling', async (req: FastifyRequest<{ Querystring: { unitId?: string; page?: string; limit?: string } }>, reply: FastifyReply) => {
     const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
