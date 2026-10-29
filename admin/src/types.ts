@@ -7,7 +7,8 @@ export type HierarchyLevelKey =
   | 'MANDAL'
   | 'VILLAGE'
   | 'BOOTH'
-  | 'VOTER_GROUP';
+  | 'VOTER_GROUP'
+  | 'PARTY_ADMIN';
 
 export type VoterPreference = 'TDP' | 'YSRCP' | 'JSP' | 'BJP' | 'INC' | 'Neutral' | 'OTH';
 

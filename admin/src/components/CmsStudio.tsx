@@ -139,6 +139,14 @@ const ALL_HIERARCHY_TIERS: HierarchyTierDefinition[] = [
     levelBadge: 'L9',
     icon: Users,
   },
+  {
+    key: 'PARTY_ADMIN',
+    name: 'Party Admin / Central HQ',
+    roleName: 'Party Administrator',
+    subtitle: 'Central operations, video training, directives & cadre management',
+    levelBadge: 'L10',
+    icon: ShieldCheck,
+  },
 ];
 
 const TIER_TO_ROLE_DEFAULT: Record<string, { role: string; roleName: string; defaultName: string; defaultUnit: string }> = {
@@ -150,6 +158,7 @@ const TIER_TO_ROLE_DEFAULT: Record<string, { role: string; roleName: string; def
   VILLAGE: { role: 'VILLAGE_INCHARGE', roleName: 'Village Incharge', defaultName: 'Village Incharge', defaultUnit: 'Village Ward Unit' },
   BOOTH: { role: 'BOOTH_PRESIDENT', roleName: 'Booth President', defaultName: 'Booth President', defaultUnit: 'Polling Booth Station' },
   VOTER_GROUP: { role: 'VOTER_100_INCHARGE', roleName: '100 Voter Incharge', defaultName: '100-Voter Incharge', defaultUnit: '100-Voter Cluster Committee' },
+  PARTY_ADMIN: { role: 'PARTY_ADMIN', roleName: 'Party Administrator', defaultName: 'Party Admin HQ', defaultUnit: 'Central Command' },
 };
 
 const PRESET_THEMES = [
@@ -354,6 +363,7 @@ export default function CmsStudio({
       VILLAGE: { name: 'Village Incharge', mobileNumber: '', unitName: 'Village Unit' },
       BOOTH: { name: 'Booth President', mobileNumber: '', unitName: 'Booth Station' },
       VOTER_GROUP: { name: '100-Voter Incharge', mobileNumber: '', unitName: 'Cluster Unit' },
+      PARTY_ADMIN: { name: 'Party Admin HQ', mobileNumber: '', unitName: 'Central Command' },
     };
     const existing = (config as any).tierIncharges;
     if (Array.isArray(existing)) {

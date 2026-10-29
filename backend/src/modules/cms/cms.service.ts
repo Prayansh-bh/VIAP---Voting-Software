@@ -26,6 +26,7 @@ const DEFAULT_FEATURE_TOGGLES = {
 };
 
 const DEFAULT_HIERARCHY_LABELS: Record<string, string> = {
+  PARTY_ADMIN: 'Party Administrator',
   STATE: 'State Incharge',
   ZONE: 'Zone Coordinator',
   PARLIAMENT: 'Parliament Incharge',
@@ -530,6 +531,8 @@ export async function loadCmsBundle(options?: {
     });
 
     const roleToTier: Record<string, string> = {
+      HIGH_COMMAND: 'PARTY_ADMIN',
+      PARTY_ADMIN: 'PARTY_ADMIN',
       STATE_ADMIN: 'STATE',
       ZONE_INCHARGE: 'ZONE',
       PARLIAMENT_INCHARGE: 'PARLIAMENT',
@@ -543,7 +546,8 @@ export async function loadCmsBundle(options?: {
 
     const seenTiers = new Set<string>();
     for (const a of assignments) {
-      const tierLevel = a.stateId && !a.zoneId ? 'STATE'
+      const tierLevel = (a.roleType === RoleType.HIGH_COMMAND || (a.roleType as any) === 'PARTY_ADMIN') ? 'PARTY_ADMIN'
+        : a.stateId && !a.zoneId && a.roleType === 'STATE_ADMIN' ? 'STATE'
         : a.zoneId && !a.parliamentId ? 'ZONE'
         : a.parliamentId && !a.constituencyId ? 'PARLIAMENT'
         : a.constituencyId && !a.mandalId ? 'CONSTITUENCY'
@@ -639,7 +643,7 @@ export const buildApplicationSchema = z.object({
   accentColor: z.string().nullish().default('#3b82f6'),
   activePartyCode: z.string().nullish().default('TDP'),
   appScope: z.enum(['SINGLE_MLA', 'PARLIAMENT_MP', 'ZONE', 'STATE']).default('SINGLE_MLA'),
-  activeHierarchyLevels: z.array(z.string()).default(['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP']),
+  activeHierarchyLevels: z.array(z.string()).default(['PARTY_ADMIN', 'STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP']),
   parliamentName: z.string().nullish(),
   parliamentCode: z.string().nullish(),
   constituencies: z.array(z.object({
@@ -1198,6 +1202,11 @@ export async function provisionApplication(
         });
 
         const tierDataMap: Record<string, { unit: any; role: RoleType; assignment: any }> = {
+          PARTY_ADMIN: {
+            unit: stateUnitRecord,
+            role: RoleType.HIGH_COMMAND,
+            assignment: { stateId: state.id },
+          },
           STATE: {
             unit: stateUnitRecord,
             role: RoleType.STATE_ADMIN,

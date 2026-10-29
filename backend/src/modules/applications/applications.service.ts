@@ -1446,6 +1446,7 @@ export class ApplicationsService {
 
         if (incomingIncharges.length > 0 && config.organisationId) {
           const TIER_TO_ROLE: Record<string, RoleType> = {
+            PARTY_ADMIN: RoleType.HIGH_COMMAND,
             STATE: RoleType.STATE_ADMIN,
             ZONE: RoleType.ZONE_INCHARGE,
             PARLIAMENT: RoleType.PARLIAMENT_INCHARGE,
@@ -1692,6 +1693,7 @@ export class ApplicationsService {
       : ['STATE', 'ZONE', 'PARLIAMENT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
 
     const hierarchyLabels = (config.hierarchyLabels as Record<string, string>) || {
+      PARTY_ADMIN: 'Party Administrator',
       STATE: 'State',
       ZONE: 'Zone',
       PARLIAMENT: 'Parliament',
