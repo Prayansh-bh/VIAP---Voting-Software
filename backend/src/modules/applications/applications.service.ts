@@ -1466,7 +1466,12 @@ export class ApplicationsService {
             if (cleanMobile.length < 10) continue;
 
             const tierKey = (inc.tierLevel || '').toUpperCase();
-            const role = inc.role ? (inc.role as RoleType) : (TIER_TO_ROLE[tierKey] || RoleType.CONSTITUENCY_INCHARGE);
+            let role: RoleType = (inc.role && (inc.role as string) !== 'PARTY_ADMIN' && Object.values(RoleType).includes(inc.role as RoleType))
+              ? (inc.role as RoleType)
+              : (TIER_TO_ROLE[tierKey] || RoleType.CONSTITUENCY_INCHARGE);
+            if ((role as any) === 'PARTY_ADMIN' || tierKey === 'PARTY_ADMIN') {
+              role = RoleType.HIGH_COMMAND;
+            }
             const incName = (inc.name || '').trim();
 
             // Find existing active hierarchy assignment for this tier/role in this organization

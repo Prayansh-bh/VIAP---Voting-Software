@@ -1260,7 +1260,12 @@ export async function provisionApplication(
           const cleanMobile = incharge.mobileNumber.replace(/\D/g, '').slice(-10);
           const tierKey = ((incharge as any).tierLevel || incharge.tier || 'CONSTITUENCY').toUpperCase();
           const tierData = tierDataMap[tierKey] || tierDataMap.CONSTITUENCY;
-          const inchargeRole = incharge.role || tierData.role;
+          let inchargeRole: RoleType = (incharge.role && (incharge.role as string) !== 'PARTY_ADMIN' && Object.values(RoleType).includes(incharge.role as RoleType))
+            ? (incharge.role as RoleType)
+            : tierData.role;
+          if ((inchargeRole as any) === 'PARTY_ADMIN' || tierKey === 'PARTY_ADMIN') {
+            inchargeRole = RoleType.HIGH_COMMAND;
+          }
           const resolvedUnitId = incharge.unitId || tierData.unit?.id || null;
 
           let userCode = `LEADER-${inchargeRole.slice(0, 3)}-${cleanMobile.slice(-4)}`;
