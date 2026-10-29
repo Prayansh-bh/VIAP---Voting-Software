@@ -67,6 +67,24 @@ export async function verifyOtp(
   const user = data.user || {};
   const assignment = user.hierarchyAssignment;
 
+  const authoritativeUnitId =
+    assignment?.voterGroupId ||
+    assignment?.boothId ||
+    assignment?.villageId ||
+    assignment?.pollingStationId ||
+    assignment?.mandalId ||
+    assignment?.constituencyId ||
+    assignment?.parliamentId ||
+    assignment?.zoneId ||
+    assignment?.stateId ||
+    assignment?.mandal?.id ||
+    assignment?.village?.id ||
+    assignment?.booth?.id ||
+    assignment?.voterGroup?.id ||
+    user.unitId ||
+    assignment?.unitId ||
+    '';
+
   return {
     token: data.token,
     deviceId: data.deviceId,
@@ -75,7 +93,7 @@ export async function verifyOtp(
       userName: user.name || user.userCode || 'In-Charge',
       mobileNumber: user.mobileNumber || '',
       role: user.role || 'CONSTITUENCY_INCHARGE',
-      unitId: user.unitId || assignment?.unitId || '',
+      unitId: authoritativeUnitId,
       assignedConstituency: assignment?.constituency?.name || '',
       assignedMandal: assignment?.mandal?.name || user.unitName,
       assignedVillage: assignment?.village?.name,
@@ -133,6 +151,24 @@ export async function loginAsDemoRole(
   const user = data.user || {};
   const assignment = user.hierarchyAssignment;
 
+  const authoritativeUnitId =
+    assignment?.voterGroupId ||
+    assignment?.boothId ||
+    assignment?.villageId ||
+    assignment?.pollingStationId ||
+    assignment?.mandalId ||
+    assignment?.constituencyId ||
+    assignment?.parliamentId ||
+    assignment?.zoneId ||
+    assignment?.stateId ||
+    assignment?.mandal?.id ||
+    assignment?.village?.id ||
+    assignment?.booth?.id ||
+    assignment?.voterGroup?.id ||
+    user.unitId ||
+    assignment?.unitId ||
+    '';
+
   return {
     token: data.token,
     deviceId: data.deviceId,
@@ -141,7 +177,7 @@ export async function loginAsDemoRole(
       userName: user.name || user.userCode || 'In-Charge',
       mobileNumber: user.mobileNumber || '',
       role: user.role || role,
-      unitId: user.unitId || assignment?.unitId || '',
+      unitId: authoritativeUnitId,
       assignedConstituency: assignment?.constituency?.name || '',
       assignedMandal: assignment?.mandal?.name || user.unitName,
       assignedVillage: assignment?.village?.name,

@@ -89,17 +89,17 @@ type TabType =
   | 'cadre_network' 
   | 'training';
 
-const PARTY_COLORS: Record<VoterPreference, string> = {
-  TDP: '#eab308',     // Yellow-500
-  YSRCP: '#2563eb',   // Blue-600
-  JSP: '#dc2626',     // Red-600
-  BJP: '#f97316',     // Orange-500
-  INC: '#38bdf8',     // Sky-400
-  Neutral: '#64748b', // Slate-500
-  OTH: '#a855f7'      // Purple-500
+const BASE_PARTY_COLORS: Record<string, string> = {
+  TDP: '#eab308',
+  YSRCP: '#2563eb',
+  JSP: '#dc2626',
+  BJP: '#f97316',
+  INC: '#38bdf8',
+  Neutral: '#64748b',
+  OTH: '#a855f7'
 };
 
-const PARTY_NAMES: Record<VoterPreference, string> = {
+const BASE_PARTY_NAMES: Record<string, string> = {
   TDP: 'TDP',
   YSRCP: 'YSRCP',
   JSP: 'JSP',
@@ -109,7 +109,7 @@ const PARTY_NAMES: Record<VoterPreference, string> = {
   OTH: 'OTH'
 };
 
-const PARTY_TEXT_COLORS: Record<VoterPreference, string> = {
+const BASE_PARTY_TEXT_COLORS: Record<string, string> = {
   TDP: 'text-amber-600',
   YSRCP: 'text-blue-600',
   JSP: 'text-red-600',
@@ -119,7 +119,7 @@ const PARTY_TEXT_COLORS: Record<VoterPreference, string> = {
   OTH: 'text-purple-600'
 };
 
-const PARTY_BG_COLORS: Record<VoterPreference, string> = {
+const BASE_PARTY_BG_COLORS: Record<string, string> = {
   TDP: 'bg-amber-50 text-amber-800 border-amber-200',
   YSRCP: 'bg-blue-50 text-blue-800 border-blue-200',
   JSP: 'bg-red-50 text-red-800 border-red-200',
@@ -128,6 +128,22 @@ const PARTY_BG_COLORS: Record<VoterPreference, string> = {
   Neutral: 'bg-slate-50 text-slate-800 border-slate-200',
   OTH: 'bg-purple-50 text-purple-800 border-purple-200'
 };
+
+const PARTY_COLORS: Record<any, string> = new Proxy(BASE_PARTY_COLORS, {
+  get: (target, prop: string) => target[prop] || '#64748b'
+});
+
+const PARTY_NAMES: Record<any, string> = new Proxy(BASE_PARTY_NAMES, {
+  get: (target, prop: string) => target[prop] || prop
+});
+
+const PARTY_TEXT_COLORS: Record<any, string> = new Proxy(BASE_PARTY_TEXT_COLORS, {
+  get: (target, prop: string) => target[prop] || 'text-slate-700'
+});
+
+const PARTY_BG_COLORS: Record<any, string> = new Proxy(BASE_PARTY_BG_COLORS, {
+  get: (target, prop: string) => target[prop] || 'bg-slate-50 text-slate-800 border-slate-200'
+});
 
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -160,10 +176,32 @@ const VILLAGE_PATH_TO_TAB: Record<string, TabType> = {
 };
 
 export default function VillageInchargeDashboard({ session, onLogout }: VillageInchargeDashboardProps) {
-  const { config } = useCms();
+  const { config, parties, partyThemes } = useCms();
   const { notify } = useNotification();
   const location = useLocation();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    (parties || []).forEach(p => {
+      if (p.code) {
+        if (p.primaryColor) BASE_PARTY_COLORS[p.code] = p.primaryColor;
+        BASE_PARTY_NAMES[p.code] = p.shortName || p.name || p.code;
+        const theme = partyThemes?.[p.code as VoterPreference];
+        if (theme) {
+          BASE_PARTY_TEXT_COLORS[p.code] = theme.text;
+          BASE_PARTY_BG_COLORS[p.code] = theme.lightBg ? `${theme.lightBg} ${theme.darkText} ${theme.border}` : BASE_PARTY_BG_COLORS[p.code];
+        }
+      }
+    });
+  }, [parties, partyThemes]);
+
+  const activePartyList: VoterPreference[] = useMemo(() => {
+    if (parties && parties.length > 0) {
+      const active = parties.filter(p => p.isActive).map(p => p.code as VoterPreference);
+      return Array.from(new Set([...active, 'Neutral' as VoterPreference, 'OTH' as VoterPreference]));
+    }
+    return ['TDP', 'YSRCP', 'JSP', 'BJP', 'INC', 'Neutral', 'OTH'] as VoterPreference[];
+  }, [parties]);
 
   const subPath = location.pathname.replace(/^\/village\/?/, '').split('/')[0] || '';
   const isKnownSubPath = subPath === '' || subPath in VILLAGE_PATH_TO_TAB;
@@ -1511,7 +1549,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                     className="w-full p-2 bg-white border border-slate-200 rounded-lg text-xs font-bold focus:outline-none"
                   >
                     <option value="All">All Preferences</option>
-                    {(Object.keys(PARTY_COLORS) as VoterPreference[]).map(p => (
+                    {activePartyList.map(p => (
                       <option key={p} value={p}>{p}</option>
                     ))}
                   </select>
@@ -2072,7 +2110,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                 
                 {/* Custom Styled Party Legend */}
                 <div className="flex flex-wrap items-center gap-2.5 text-[10px] font-black uppercase">
-                  {(Object.keys(PARTY_COLORS) as VoterPreference[]).map(p => (
+                  {activePartyList.map(p => (
                     <span key={p} className="flex items-center gap-1 shrink-0">
                       <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: PARTY_COLORS[p] }}></span>
                       {p}
@@ -2109,7 +2147,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                       
                       {/* Segmented Progress Bar representing political preferences */}
                       <div className="w-full bg-slate-100 h-3 rounded-lg border border-slate-100 overflow-hidden flex">
-                        {(Object.keys(PARTY_COLORS) as VoterPreference[]).map((p) => {
+                        {activePartyList.map((p) => {
                           const count = item.prefs[p] || 0;
                           const pct = item.total > 0 ? (count / item.total) * 100 : 0;
                           if (pct <= 0) return null;
@@ -2143,7 +2181,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                       </div>
                       
                       <div className="w-full bg-slate-100 h-3 rounded-lg border border-slate-100 overflow-hidden flex">
-                        {(Object.keys(PARTY_COLORS) as VoterPreference[]).map((p) => {
+                        {activePartyList.map((p) => {
                           const count = item.prefs[p] || 0;
                           const pct = item.total > 0 ? (count / item.total) * 100 : 0;
                           if (pct <= 0) return null;
@@ -2174,7 +2212,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                       </div>
                       
                       <div className="w-full bg-slate-100 h-3 rounded-lg border border-slate-100 overflow-hidden flex">
-                        {(Object.keys(PARTY_COLORS) as VoterPreference[]).map((p) => {
+                        {activePartyList.map((p) => {
                           const count = item.prefs[p] || 0;
                           const pct = item.total > 0 ? (count / item.total) * 100 : 0;
                           if (pct <= 0) return null;
@@ -2205,7 +2243,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                       </div>
                       
                       <div className="w-full bg-slate-100 h-3 rounded-lg border border-slate-100 overflow-hidden flex">
-                        {(Object.keys(PARTY_COLORS) as VoterPreference[]).map((p) => {
+                        {activePartyList.map((p) => {
                           const count = item.prefs[p] || 0;
                           const pct = item.total > 0 ? (count / item.total) * 100 : 0;
                           if (pct <= 0) return null;
@@ -2602,7 +2640,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                   <div className="space-y-1.5">
                     <label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Political Preference</label>
                     <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
-                      {(Object.keys(PARTY_COLORS) as VoterPreference[]).map((pref) => {
+                      {activePartyList.map((pref) => {
                         const active = editPreference === pref;
                         return (
                           <button

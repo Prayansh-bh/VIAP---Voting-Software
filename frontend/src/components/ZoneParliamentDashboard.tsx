@@ -235,19 +235,15 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
 
   const relevantAssemblies = useMemo(() => {
     if (config.constituencies && config.constituencies.length > 0) {
-      return config.constituencies.map((c, idx) => ({
+      return config.constituencies.map((c: any, idx: number) => ({
         id: idx + 1,
         name: c.name,
         parliament: c.parliamentName || config.parliamentName || (isZone ? 'Zone Command' : 'Parliament Segment'),
-        incharge: c.mlaName || c.candidateName || 'Assigned Incharge',
+        incharge: c.inchargeName || c.mlaName || c.candidateName || 'Assigned Incharge',
         voters: totalVotersCount > 0 ? (c.totalVoters || c._count?.voters || 0) : 0,
-        incVotes: 0,
-        brsVotes: 0,
-        bjpVotes: 0,
-        mimVotes: 0,
         status: totalVotersCount > 0 ? ('WINNING' as const) : ('AWAITING_INGESTION' as const),
-        margin: totalVotersCount > 0 ? '+12.4%' : '0',
-        phone: '+91 00000 00000'
+        margin: totalVotersCount > 0 ? 'Lead' : '-',
+        phone: c.inchargePhone || c.phone || 'Contact Incharge'
       }));
     }
     return [];

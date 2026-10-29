@@ -33,16 +33,49 @@ export interface PaginatedVotersResponse {
 }
 
 export function normalizeVoter(v: any): Voter {
+  const rawStatus = String(v.voterStatus || '').toUpperCase();
+  const statusMap: Record<string, VoterStatus> = {
+    ACTIVE: 'Active',
+    SHIFTED: 'Shifted',
+    DECEASED: 'Deceased',
+    DUPLICATE: 'Duplicate',
+    FAKE: 'Fake',
+    DOUBTFUL: 'Doubtful',
+    UNKNOWN: 'Unknown',
+  };
+
+  const rawRel = String(v.relationType || '').toUpperCase();
+  const relationMap: Record<string, 'Father' | 'Husband' | 'Mother' | 'Other'> = {
+    FATHER: 'Father',
+    HUSBAND: 'Husband',
+    MOTHER: 'Mother',
+    OTHER: 'Other',
+  };
+
+  const rawGender = String(v.gender || '').toUpperCase();
+  const genderMap: Record<string, 'Male' | 'Female' | 'Other'> = {
+    MALE: 'Male',
+    FEMALE: 'Female',
+    OTHER: 'Other',
+  };
+
+  const rawSurvey = String(v.surveyStatus || '').toUpperCase();
+  const surveyMap: Record<string, SurveyStatus> = {
+    NOT_SURVEYED: 'Not Surveyed',
+    SURVEYED: 'Surveyed',
+    VERIFIED: 'Verified',
+  };
+
   return {
     id: String(v.id || ''),
     serialNumber: Number(v.serialNumber || 0),
     epicNumber: String(v.epicNumber || ''),
     name: String(v.name || ''),
     fatherHusbandName: String(v.fatherHusbandName || ''),
-    relationType: v.relationType || 'Other',
+    relationType: relationMap[rawRel] || (v.relationType as any) || 'Other',
     houseNumber: String(v.houseNumber || ''),
     age: Number(v.age || 18),
-    gender: v.gender || 'Other',
+    gender: genderMap[rawGender] || (v.gender as any) || 'Other',
     mobileNumber: String(v.mobileNumber || ''),
     assemblyConstituency: typeof v.constituency === 'object' ? String(v.constituency?.name || '') : String(v.constituency || ''),
     mandal: typeof v.mandal === 'object' ? String(v.mandal?.name || '') : String(v.mandal || ''),
@@ -51,8 +84,8 @@ export function normalizeVoter(v: any): Voter {
     assignedVoterGroup: typeof v.voterGroup === 'object' ? String(v.voterGroup?.name || '') : String(v.assignedVoterGroup || ''),
     assignedInchargeId: String(v.assignedInchargeId || ''),
     politicalPreference: (v.politicalPreference || 'Neutral') as VoterPreference,
-    voterStatus: (v.voterStatus || 'Active') as VoterStatus,
-    surveyStatus: (v.surveyStatus || 'Surveyed') as SurveyStatus,
+    voterStatus: statusMap[rawStatus] || (v.voterStatus as VoterStatus) || 'Active',
+    surveyStatus: surveyMap[rawSurvey] || (v.surveyStatus as SurveyStatus) || 'Not Surveyed',
     notes: String(v.notes || ''),
     lastUpdated: v.updatedAt ? new Date(v.updatedAt).toISOString().split('T')[0] : (v.lastUpdated || ''),
     updatedBy: String(v.updatedBy || ''),

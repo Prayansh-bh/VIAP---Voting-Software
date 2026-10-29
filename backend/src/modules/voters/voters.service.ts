@@ -1,4 +1,4 @@
-import { AuditAction, FakeVoterStatus, NotificationType, Prisma, VoterLocationStatus, VoterStatus, VoteStatus } from '@prisma/client';
+import { AuditAction, FakeVoterStatus, NotificationType, OrgHierarchyLevel, Prisma, VoterLocationStatus, VoterStatus, VoteStatus } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { logAudit } from '../../middleware/audit.js';
 import { emitHierarchyEvent } from '../../lib/socket.js';
@@ -194,8 +194,53 @@ export class VotersService {
     }
 
     if (unitId && !boothId && !villageId && !mandalId && !constituencyId && !voterGroupId) {
+      // Dual-Hierarchy Bridge: resolve OrganizationUnit to geographic entity if needed
+      const resolvedGeographicIds: string[] = [];
+      try {
+        const orgUnit = await prisma.organizationUnit.findUnique({
+          where: { id: unitId },
+          select: { id: true, name: true, level: true, code: true },
+        });
+
+        if (orgUnit) {
+          if (orgUnit.level === OrgHierarchyLevel.MANDAL) {
+            const matchedMandals = await prisma.mandal.findMany({
+              where: { name: { equals: orgUnit.name, mode: 'insensitive' } },
+              select: { id: true },
+            });
+            resolvedGeographicIds.push(...matchedMandals.map((m) => m.id));
+          } else if (orgUnit.level === OrgHierarchyLevel.CONSTITUENCY) {
+            const matchedConstituencies = await prisma.constituency.findMany({
+              where: { name: { equals: orgUnit.name, mode: 'insensitive' } },
+              select: { id: true },
+            });
+            resolvedGeographicIds.push(...matchedConstituencies.map((c) => c.id));
+          } else if (orgUnit.level === OrgHierarchyLevel.VILLAGE) {
+            const matchedVillages = await prisma.village.findMany({
+              where: { name: { equals: orgUnit.name, mode: 'insensitive' } },
+              select: { id: true },
+            });
+            resolvedGeographicIds.push(...matchedVillages.map((v) => v.id));
+          } else if (orgUnit.level === OrgHierarchyLevel.BOOTH) {
+            const cleanNum = orgUnit.name.replace(/^Booth\s*/i, '').trim();
+            const matchedBooths = await prisma.booth.findMany({
+              where: {
+                OR: [
+                  { name: { equals: orgUnit.name, mode: 'insensitive' } },
+                  { boothNumber: { equals: cleanNum, mode: 'insensitive' } },
+                ],
+              },
+              select: { id: true },
+            });
+            resolvedGeographicIds.push(...matchedBooths.map((b) => b.id));
+          }
+        }
+      } catch (e) {
+        // Fallback safely to direct unit matching
+      }
+
       if (scope && !scope.isGlobalScope) {
-        // Confirm unitId is accessible within user hierarchy scope to prevent horizontal or cross-tenant leakage
+        // Confirm unitId or resolved geographic entity is accessible within user hierarchy scope
         const isAccessible =
           scope.accessibleUnitIds.has(unitId) ||
           scope.accessibleBoothIds.has(unitId) ||
@@ -209,39 +254,59 @@ export class VotersService {
           scope.boothId === unitId ||
           scope.villageId === unitId ||
           scope.mandalId === unitId ||
-          scope.constituencyId === unitId;
+          scope.constituencyId === unitId ||
+          resolvedGeographicIds.some(
+            (gId) =>
+              scope.accessibleMandalIds.has(gId) ||
+              scope.accessibleConstituencyIds.has(gId) ||
+              scope.accessibleVillageIds.has(gId) ||
+              scope.accessibleBoothIds.has(gId) ||
+              scope.mandalId === gId ||
+              scope.constituencyId === gId
+          );
 
         if (!isAccessible) {
           where.unitId = '00000000-0000-0000-0000-000000000000';
         } else {
-          where.AND = [
-            ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
-            {
-              OR: [
-                { unitId },
-                { boothId: unitId },
-                { villageId: unitId },
-                { mandalId: unitId },
-                { constituencyId: unitId },
-                { voterGroupId: unitId },
-              ],
-            },
-          ];
-        }
-      } else {
-        const unitCondition: Prisma.VoterWhereInput = {
-          OR: [
+          const orList: Prisma.VoterWhereInput[] = [
             { unitId },
             { boothId: unitId },
             { villageId: unitId },
             { mandalId: unitId },
             { constituencyId: unitId },
             { voterGroupId: unitId },
-          ],
-        };
+          ];
+          for (const gId of resolvedGeographicIds) {
+            orList.push({ mandalId: gId });
+            orList.push({ constituencyId: gId });
+            orList.push({ villageId: gId });
+            orList.push({ boothId: gId });
+          }
+
+          where.AND = [
+            ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+            { OR: orList },
+          ];
+        }
+      } else {
+        const orList: Prisma.VoterWhereInput[] = [
+          { unitId },
+          { boothId: unitId },
+          { villageId: unitId },
+          { mandalId: unitId },
+          { constituencyId: unitId },
+          { voterGroupId: unitId },
+        ];
+        for (const gId of resolvedGeographicIds) {
+          orList.push({ mandalId: gId });
+          orList.push({ constituencyId: gId });
+          orList.push({ villageId: gId });
+          orList.push({ boothId: gId });
+        }
+
         where.AND = [
           ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
-          unitCondition,
+          { OR: orList },
         ];
       }
     }

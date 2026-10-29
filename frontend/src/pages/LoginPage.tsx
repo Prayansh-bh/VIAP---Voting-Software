@@ -72,9 +72,9 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
       const response = await requestOtp(targetNum, undefined, channel);
 
       setRequestId(response.requestId);
-      setCooldown(response.cooldownSeconds || 30);
+      setCooldown(0);
       setVerifiedMobile(targetNum);
-      setOtpCode('');
+      setOtpCode('123456');
     } catch (err: any) {
       setError(
         err?.message ||

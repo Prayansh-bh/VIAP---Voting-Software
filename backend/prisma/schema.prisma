@@ -1454,3 +1454,49 @@ model PollVote {
   @@index([userId])
 }
 
+// ----------------------------------------------------------------------------
+// 34. APPROVAL REQUESTS
+// ----------------------------------------------------------------------------
+
+model ApprovalRequest {
+  id                String    @id @default(uuid()) @db.Uuid
+  partyId           String?   @map("party_id") @db.VarChar(255)
+  type              String    @db.VarChar(100)
+  status            String    @default("PENDING") @db.VarChar(50)
+  title             String    @db.VarChar(255)
+  description       String?   @db.Text
+  entityId          String?   @map("entity_id") @db.VarChar(255)
+  entityType        String?   @map("entity_type") @db.VarChar(100)
+  payload           Json?     @default("{}")
+  requestedByName   String?   @map("requested_by_name") @db.VarChar(255)
+  requestedByRole   String?   @map("requested_by_role") @db.VarChar(100)
+  requestedByMobile String?   @map("requested_by_mobile") @db.VarChar(50)
+  actionedByName    String?   @map("actioned_by_name") @db.VarChar(255)
+  actionedAt        DateTime? @map("actioned_at") @db.Timestamptz(6)
+  rejectionReason   String?   @map("rejection_reason") @db.Text
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([partyId, status], name: "idx_approval_party_status")
+  @@index([type], name: "idx_approval_type")
+  @@map("approval_requests")
+}
+
+// ----------------------------------------------------------------------------
+// 35. DEVELOPMENT & WELFARE PROJECTS MONITOR
+// ----------------------------------------------------------------------------
+
+model DevelopmentProject {
+  id             String    @id @default(uuid()) @db.Uuid
+  project        String    @db.VarChar(255)
+  dept           String    @db.VarChar(100)
+  location       String    @db.VarChar(255)
+  mandal         String    @db.VarChar(100)
+  status         String    @default("ONGOING") @db.VarChar(50)
+  source         String    @db.VarChar(255)
+  date           String    @db.VarChar(50)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("development_projects")
+}
+

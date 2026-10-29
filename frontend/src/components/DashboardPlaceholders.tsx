@@ -17,6 +17,8 @@ export default function DashboardPlaceholders({ session, onLogout }: DashboardPl
   // Mapping roles to readable names
   const roleNameMap: Record<RoleType, string> = {
     SUPER_ADMIN: "Platform Super Administrator",
+    PARTY_ADMIN: "Party Administrator (HQ)",
+    HIGH_COMMAND: "High Command Directive Desk",
     STATE_ADMIN: "State Administrator",
     ZONE_INCHARGE: "Zone In-Charge",
     PARLIAMENT_INCHARGE: "Parliament In-Charge",

@@ -245,4 +245,52 @@ export class TrainingService {
       completionRate,
     };
   }
+
+  static async listProgress(userId?: string, organisationId?: string | null, isSuperAdmin = false) {
+    const where: Prisma.TrainingProgressWhereInput = {};
+    if (userId) {
+      where.userId = userId;
+    }
+    if (!isSuperAdmin && organisationId) {
+      where.user = { organisationId };
+    }
+    return prisma.trainingProgress.findMany({
+      where,
+      include: {
+        video: { select: { id: true, title: true } },
+        user: { select: { id: true, userCode: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  static async listProgressForUnit(unitId: string, organisationId?: string | null, isSuperAdmin = false) {
+    const where: Prisma.TrainingProgressWhereInput = {
+      user: {
+        unitId,
+        ...((!isSuperAdmin && organisationId) ? { organisationId } : {}),
+      },
+    };
+    return prisma.trainingProgress.findMany({
+      where,
+      include: {
+        video: { select: { id: true, title: true } },
+        user: { select: { id: true, userCode: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  static async ensureAssigned(userId: string, videoId: string, actorId: string) {
+    return prisma.trainingProgress.upsert({
+      where: { userId_videoId: { userId, videoId } },
+      update: {},
+      create: {
+        userId,
+        videoId,
+        status: TrainingStatus.ASSIGNED,
+        assignedById: actorId,
+      },
+    });
+  }
 }

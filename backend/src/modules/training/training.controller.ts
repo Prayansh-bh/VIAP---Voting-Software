@@ -55,4 +55,26 @@ export class TrainingController {
     );
     return reply.send(successResponse(data));
   }
+
+  static async listProgress(req: FastifyRequest, reply: FastifyReply) {
+    const query = req.query as { userId?: string };
+    const targetUserId = query.userId || req.user?.userId;
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const items = await TrainingService.listProgress(targetUserId, req.user?.organisationId, isSuperAdmin);
+    return reply.send(successResponse(items));
+  }
+
+  static async listProgressForUnit(req: FastifyRequest, reply: FastifyReply) {
+    const params = req.params as { unitId: string };
+    const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+    const items = await TrainingService.listProgressForUnit(params.unitId, req.user?.organisationId, isSuperAdmin);
+    return reply.send(successResponse(items));
+  }
+
+  static async ensureAssigned(req: FastifyRequest, reply: FastifyReply) {
+    const body = req.body as { userId?: string; videoId: string };
+    const targetUserId = body.userId || req.user!.userId;
+    const item = await TrainingService.ensureAssigned(targetUserId, body.videoId, req.user!.userId);
+    return reply.send(successResponse(item));
+  }
 }

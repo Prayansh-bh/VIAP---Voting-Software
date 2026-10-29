@@ -476,7 +476,7 @@ export class BulkUploadService {
           name: constituency.name,
           code: constituency.code,
           level: OrgHierarchyLevel.CONSTITUENCY,
-          totalVoters: 228000,
+          totalVoters: 0,
         },
       });
     }
@@ -531,22 +531,36 @@ export class BulkUploadService {
       return Gender.OTHER;
     };
 
-    const parseRelation = (val?: string, gender?: Gender, age?: number): RelationType => {
+    const parseRelation = (val?: string, _gender?: Gender, _age?: number): RelationType => {
       const r = (val || '').trim().toUpperCase();
       if (r.includes('HUSBAND') || r === 'H') return RelationType.HUSBAND;
       if (r.includes('MOTHER') || r === 'M') return RelationType.MOTHER;
       if (r.includes('FATHER') || r === 'F') return RelationType.FATHER;
-      if (gender === Gender.FEMALE && (age || 0) > 23) return RelationType.HUSBAND;
-      return RelationType.FATHER;
+      return RelationType.OTHER;
     };
 
+    // Pre-load active political parties dynamically
+    const activeDbParties = await prisma.politicalParty.findMany({
+      where: { isActive: true },
+      select: { code: true, name: true, shortName: true },
+    });
+    const partyCodeSet = new Set(activeDbParties.map((p) => p.code.toUpperCase()));
+    const partyNameMap = new Map<string, string>();
+    for (const p of activeDbParties) {
+      partyNameMap.set(p.code.toUpperCase(), p.code);
+      if (p.shortName) partyNameMap.set(p.shortName.toUpperCase(), p.code);
+      partyNameMap.set(p.name.toUpperCase(), p.code);
+    }
+
     const parsePreference = (val?: string): string => {
-      const p = (val || '').trim().toUpperCase();
-      if (p.includes('TDP')) return 'TDP';
-      if (p.includes('YSR')) return 'YSRCP';
-      if (p.includes('JSP') || p.includes('JANASENA')) return 'JSP';
-      if (p.includes('BJP')) return 'BJP';
-      if (p.includes('INC') || p.includes('CONG')) return 'INC';
+      if (!val) return 'NEUTRAL';
+      const clean = val.trim().toUpperCase();
+      if (clean === 'NEUTRAL' || clean === 'UNDECIDED') return 'NEUTRAL';
+      if (partyCodeSet.has(clean)) return clean;
+      if (partyNameMap.has(clean)) return partyNameMap.get(clean)!;
+      for (const [key, code] of partyNameMap.entries()) {
+        if (clean.includes(key)) return code;
+      }
       return 'NEUTRAL';
     };
 
@@ -626,7 +640,7 @@ export class BulkUploadService {
             constituencyId: constituency.id,
             name: mandalName,
             code: mandalCode,
-            totalVoters: 38000,
+            totalVoters: 0,
           },
         });
         await prisma.organizationUnit.create({
@@ -657,7 +671,7 @@ export class BulkUploadService {
             mandalId: mandalRecord.id,
             name: villageName,
             code: villageCode,
-            totalVoters: 3500,
+            totalVoters: 0,
           },
         });
         await prisma.organizationUnit.create({
@@ -693,7 +707,7 @@ export class BulkUploadService {
             name: boothNumberStr,
             code: boothCode,
             pollingStation: boothNumberStr,
-            totalVoters: 1000,
+            totalVoters: 0,
           },
         });
         await prisma.organizationUnit.create({
@@ -1115,7 +1129,7 @@ export class BulkUploadService {
       newVotersAdded = newVoterPayloads.length;
     }
 
-    // Update total voters count on Constituency record
+    // Update total voters count on Constituency and OrganizationUnit records
     const totalVotersInAC = await prisma.voter.count({
       where: { constituencyId: constituency.id },
     });
@@ -1123,6 +1137,18 @@ export class BulkUploadService {
       where: { id: constituency.id },
       data: { totalVoters: totalVotersInAC },
     });
+    if (constUnit) {
+      await prisma.organizationUnit.update({
+        where: { id: constUnit.id },
+        data: { totalVoters: totalVotersInAC },
+      }).catch(() => {});
+    }
+
+    // Synchronize actual voter counts for affected mandals
+    for (const m of mandalMap.values()) {
+      const mandalCount = await prisma.voter.count({ where: { mandalId: m.id } });
+      await prisma.mandal.update({ where: { id: m.id }, data: { totalVoters: mandalCount } }).catch(() => {});
+    }
 
     // Mark DataImport as SUCCESS
     await prisma.dataImport.update({

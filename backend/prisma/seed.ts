@@ -7,22 +7,27 @@ import { PrismaClient, RoleType, Gender, VoterStatus, SurveyStatus, VoterLocatio
 
 const prisma = new PrismaClient();
 
+const TARGET_ORG_CODE = process.env.SEED_ORG_CODE || 'TPCC-ORG';
+const TARGET_ORG_NAME = process.env.SEED_ORG_NAME || 'Telangana Pradesh Congress Committee (TPCC)';
+const TARGET_STATE = process.env.SEED_STATE_NAME || 'Telangana';
+const TARGET_APP_TITLE = process.env.SEED_APP_TITLE || `${TARGET_STATE} Command Connect`;
+
 async function main() {
   if (process.env.NODE_ENV === 'production' && !process.env.ALLOW_PROD_SEED) {
     console.error('⛔ ABORTED: prisma seed cannot be executed in production environment without explicit ALLOW_PROD_SEED=1');
     process.exit(1);
   }
-  console.log('🚀 Starting Telangana Congress Connect full data seed...\n');
+  console.log(`🚀 Starting data seed for ${TARGET_ORG_NAME} (${TARGET_STATE})...\n`);
 
   // ─── 1. ORGANISATION ──────────────────────────────────────────────────────
-  let org = await prisma.organisation.findFirst({ where: { code: 'TPCC-ORG' } });
+  let org = await prisma.organisation.findFirst({ where: { code: TARGET_ORG_CODE } });
   if (!org) {
     org = await prisma.organisation.create({
       data: {
-        name: 'Telangana Pradesh Congress Committee (TPCC)',
-        code: 'TPCC-ORG',
-        description: 'Integrated Voter Management & Command Center for Telangana Congress (INC)',
-        website: 'https://telangana-congress.in',
+        name: TARGET_ORG_NAME,
+        code: TARGET_ORG_CODE,
+        description: `Integrated Voter Management & Command Center for ${TARGET_ORG_NAME}`,
+        website: `https://${TARGET_ORG_CODE.toLowerCase()}.in`,
         isActive: true,
       },
     });
@@ -35,14 +40,14 @@ async function main() {
   await prisma.cMSConfiguration.upsert({
     where: { configKey: 'default' },
     update: {
-      organisationName: 'Telangana Congress Connect',
-      stateName: 'Telangana',
+      organisationName: TARGET_APP_TITLE,
+      stateName: TARGET_STATE,
     },
     create: {
       organisationId: org.id,
       configKey: 'default',
-      organisationName: 'Telangana Congress Connect',
-      stateName: 'Telangana',
+      organisationName: TARGET_APP_TITLE,
+      stateName: TARGET_STATE,
       defaultLanguage: 'te-IN',
       hierarchyLabels: {
         STATE: 'State Incharge',
@@ -290,10 +295,10 @@ async function main() {
   if (trainingCount === 0) {
     await prisma.trainingVideo.createMany({
       data: [
-        { title: 'TPCC Congress Connect App — Complete Guide for Field Workers', description: 'Step-by-step walkthrough for Booth Presidents, Mandal Presidents, and 100-Voter Indiramma Incharges.', videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', duration: '14 mins', category: 'APP_TRAINING', sortOrder: 1 },
-        { title: 'Election Day Live Vote Tracking — TPCC Protocol', description: 'How to mark voters, flag fake/doubtful voters, and submit real-time booth reports.', videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', duration: '20 mins', category: 'ELECTION_PROCEDURE', sortOrder: 2 },
-        { title: 'Telangana Constituency Demographics — Congress Analysis', description: 'Understanding Telangana voter demographics, OBC/SC/ST data interpretation for TPCC.', videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', duration: '16 mins', category: 'STRATEGY', sortOrder: 3 },
-        { title: 'Fake Voter Identification — How to Flag & Report', description: 'TPCC guide for identifying and reporting fake/duplicate voters to the Election Commission.', videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', duration: '12 mins', category: 'ELECTION_PROCEDURE', sortOrder: 4 },
+        { title: 'Field Worker Application — Complete User Guide', description: 'Step-by-step walkthrough for Booth Presidents, Mandal Incharges, and 100-Voter Incharges.', videoUrl: 'https://www.youtube.com/watch?v=k1BneeJTDcU', duration: '14 mins', category: 'APP_TRAINING', sortOrder: 1 },
+        { title: 'Election Day Live Vote Tracking Protocol', description: 'How to mark surveyed voters, flag doubtful records, and submit real-time booth turnout reports.', videoUrl: 'https://www.youtube.com/watch?v=EngW7tLk6R8', duration: '20 mins', category: 'ELECTION_PROCEDURE', sortOrder: 2 },
+        { title: 'Constituency Demographics & Sentiment Analysis', description: 'Understanding voter demographics, caste analytics, and data interpretation.', videoUrl: 'https://www.youtube.com/watch?v=kJQP7kiw5Fk', duration: '16 mins', category: 'STRATEGY', sortOrder: 3 },
+        { title: 'Duplicate & Shifted Voter Verification Guidelines', description: 'Field manual for identifying and reporting duplicate EPIC records to the returning officer.', videoUrl: 'https://www.youtube.com/watch?v=9bZkp7q19f0', duration: '12 mins', category: 'ELECTION_PROCEDURE', sortOrder: 4 },
       ],
     });
     console.log('✅ Training Videos seeded (4)');

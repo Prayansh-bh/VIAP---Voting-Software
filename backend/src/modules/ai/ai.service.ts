@@ -237,4 +237,53 @@ export class AIService {
 
     return report;
   }
+
+  static async crawlConstituencyNews(query: string = 'Andhra Pradesh Election') {
+    try {
+      const feedUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-IN&gl=IN&ceid=IN:en`;
+      const res = await fetch(feedUrl);
+      if (!res.ok) return 0;
+      const xml = await res.text();
+      
+      const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+      let count = 0;
+      for (const itemXml of items.slice(0, 10)) {
+        const titleMatch = itemXml.match(/<title>([\s\S]*?)<\/title>/);
+        const linkMatch = itemXml.match(/<link>([\s\S]*?)<\/link>/);
+        const pubDateMatch = itemXml.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
+        const sourceMatch = itemXml.match(/<source[^>]*>([\s\S]*?)<\/source>/);
+
+        if (titleMatch && linkMatch) {
+          const headline = titleMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim();
+          const articleUrl = linkMatch[1].trim();
+          const sourceName = sourceMatch ? sourceMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : 'News Agency';
+          const pubDate = pubDateMatch ? new Date(pubDateMatch[1]) : new Date();
+
+          const lower = headline.toLowerCase();
+          let sentiment = 'NEUTRAL';
+          if (lower.includes('lead') || lower.includes('win') || lower.includes('support') || lower.includes('ahead') || lower.includes('rally')) sentiment = 'POSITIVE';
+          if (lower.includes('protest') || lower.includes('clash') || lower.includes('loss') || lower.includes('allegation') || lower.includes('defeat')) sentiment = 'NEGATIVE';
+
+          const existing = await prisma.newsArticle.findFirst({ where: { articleUrl } });
+          if (!existing) {
+            await prisma.newsArticle.create({
+              data: {
+                headline,
+                articleUrl,
+                sourceName,
+                snippet: headline,
+                sentiment,
+                publishedAt: pubDate,
+              }
+            });
+            count++;
+          }
+        }
+      }
+      return count;
+    } catch (err) {
+      console.warn('News crawler notice:', err);
+      return 0;
+    }
+  }
 }

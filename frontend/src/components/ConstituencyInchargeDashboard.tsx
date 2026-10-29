@@ -63,25 +63,31 @@ import Pagination from './common/Pagination';
 
 function mapMandalRollup(item: ChildAnalyticsItem) {
   const prefs = item?.snapshot?.politicalPreference ?? {};
-  const tdp = prefs.TDP ?? 0;
-  const ysrcp = prefs.YSRCP ?? 0;
-  const neutral = prefs.NEUTRAL ?? 0;
   const voters = item?.snapshot?.summary?.totalVoters ?? 0;
-  const lead = Math.abs(tdp - ysrcp);
-  const leading = tdp > ysrcp ? ('TDP' as VoterPreference) : ('YSRCP' as VoterPreference);
+  
+  // Dynamically sort all party preferences descending (excluding NEUTRAL)
+  const sortedParties = Object.entries(prefs)
+    .filter(([p]) => p.toUpperCase() !== 'NEUTRAL')
+    .map(([party, count]) => ({ party, count: Number(count) || 0 }))
+    .sort((a, b) => b.count - a.count);
+
+  const topParty = sortedParties[0] || { party: 'Neutral', count: 0 };
+  const secondParty = sortedParties[1] || { party: 'Others', count: 0 };
+  const lead = topParty.count - secondParty.count;
+  const leading = (topParty.count > 0 ? topParty.party : 'Neutral') as VoterPreference;
   const diffPct = voters > 0 ? (lead / voters) * 100 : 0;
   const status = diffPct < 4
     ? ('CLOSE CONTEST' as const)
-    : (tdp > ysrcp ? ('WINNING' as const) : ('TRAILING' as const));
+    : (lead > 0 ? ('WINNING' as const) : ('TRAILING' as const));
 
   return {
     name: item.name,
     voters,
     villages: item?.snapshot?.hierarchyCounts?.VILLAGE ?? 0,
     booths: item?.snapshot?.hierarchyCounts?.BOOTH ?? 0,
-    tdp,
-    ysrcp,
-    neutral,
+    tdp: prefs.TDP ?? 0,
+    ysrcp: prefs.YSRCP ?? 0,
+    neutral: prefs.NEUTRAL ?? 0,
     jsp: prefs.JSP ?? 0,
     bjp: prefs.BJP ?? 0,
     inc: prefs.INC ?? 0,

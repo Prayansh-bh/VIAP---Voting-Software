@@ -22,43 +22,11 @@ export interface ApprovalRecord {
 }
 
 export class ApprovalsService {
-  private static tableInitialized = false;
+  private static tableInitialized = true;
 
   private static async ensureTable() {
-    if (this.tableInitialized) return;
-    try {
-      await prisma.$executeRawUnsafe(`
-        CREATE TABLE IF NOT EXISTS approval_requests (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          party_id VARCHAR(255),
-          type VARCHAR(100) NOT NULL,
-          status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
-          title VARCHAR(255) NOT NULL,
-          description TEXT,
-          entity_id VARCHAR(255),
-          entity_type VARCHAR(100),
-          payload JSONB DEFAULT '{}'::jsonb,
-          requested_by_name VARCHAR(255),
-          requested_by_role VARCHAR(100),
-          requested_by_mobile VARCHAR(50),
-          actioned_by_name VARCHAR(255),
-          actioned_at TIMESTAMPTZ,
-          rejection_reason TEXT,
-          created_at TIMESTAMPTZ DEFAULT NOW(),
-          updated_at TIMESTAMPTZ DEFAULT NOW()
-        )
-      `);
-      try {
-        await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS idx_approval_party_status ON approval_requests(party_id, status)`);
-        await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS idx_approval_type ON approval_requests(type)`);
-      } catch (idxErr) {
-        // Indices are optional optimizations
-      }
-
-      this.tableInitialized = true;
-    } catch (err) {
-      console.warn('Approvals table init note:', err);
-    }
+    // Formally managed by Prisma (model ApprovalRequest in schema.prisma)
+    return;
   }
 
   private static async seedInitialApprovals() {

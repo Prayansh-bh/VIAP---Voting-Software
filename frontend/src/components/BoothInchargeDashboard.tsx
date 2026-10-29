@@ -97,8 +97,6 @@ export function getVoterCategory(v: Voter): 'SC' | 'ST' | 'BC' | 'OC' | 'OBC' | 
   if (['yadava', 'goud', 'rajaka', 'nayee brahmin', 'vaddera', 'devanga', 'padmasali', 'viswabrahmin', 'mudhiraj', 'munnuru kapu'].includes(cLower)) return 'BC';
   if (['kamma', 'reddy', 'kapu', 'balija', 'telaga', 'brahmin', 'arya vysya', 'velama'].includes(cLower)) return 'OC';
   if (['obc'].includes(cLower)) return 'OBC';
-  if (cLower === 'muslim') return 'BC';
-  if (cLower === 'christian') return 'OC';
   
   return 'Unknown';
 }
@@ -415,18 +413,26 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   const fakeCount = backendSummary?.snapshot?.summary?.fakeVoters ?? voters.filter(v => v.voterStatus === 'Fake').length;
   const doubtfulCount = voters.filter(v => v.voterStatus === 'Doubtful').length;
 
-  // Forecast leading calculation
+  // Dynamic competitive leading party forecast calculation across any parties
   const forecast = useMemo(() => {
     if (totalVoters === 0) {
       return { status: "AWAITING DATA INGESTION", lead: 0 };
     }
-    const tdpVotes = (partyStats.TDP as number) + (partyStats.JSP as number) + (partyStats.BJP as number); // NDA alliance
-    const ysrcpVotes = partyStats.YSRCP as number;
-    
-    if (tdpVotes > ysrcpVotes) {
-      return { status: "TDP LEADS", lead: tdpVotes - ysrcpVotes };
-    } else if (ysrcpVotes > tdpVotes) {
-      return { status: "YSRCP LEADS", lead: ysrcpVotes - tdpVotes };
+    const sortedParties = Object.entries(partyStats)
+      .filter(([party]) => party !== 'Neutral')
+      .map(([party, count]) => ({ party, count: Number(count) || 0 }))
+      .sort((a, b) => b.count - a.count);
+
+    if (sortedParties.length === 0 || sortedParties[0].count === 0) {
+      return { status: "TOO CLOSE TO CALL", lead: 0 };
+    }
+
+    const topParty = sortedParties[0];
+    const secondParty = sortedParties[1] || { party: 'Others', count: 0 };
+    const lead = topParty.count - secondParty.count;
+
+    if (lead > 0) {
+      return { status: `${topParty.party} LEADS`, lead };
     } else {
       return { status: "TOO CLOSE TO CALL", lead: 0 };
     }

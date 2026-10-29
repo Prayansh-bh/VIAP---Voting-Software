@@ -242,6 +242,7 @@ export async function fetchApplications(): Promise<AppInstance[]> {
         isDefault: c.isDefault || false,
         createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-IN') : 'Active',
         activeHierarchyLevels: c.activeHierarchyLevels || ['VOTER_GROUP', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY'],
+        politicalParties: Array.isArray(c.parties) && c.parties.length > 0 ? c.parties : (c.politicalParties || []),
       }));
     }
   } catch (err) {
@@ -382,6 +383,7 @@ export async function updateApplication(id: string, formData: Partial<AppInstanc
     isDefault: res?.configKey === 'default' || formData.isDefault || false,
     createdAt: res?.createdAt ? new Date(res.createdAt).toLocaleDateString('en-IN') : 'Active',
     activeHierarchyLevels: res?.activeHierarchyLevels || formData.activeHierarchyLevels,
+    politicalParties: Array.isArray(res?.parties) && res.parties.length > 0 ? res.parties : (res?.politicalParties || formData.politicalParties || []),
   };
 }
 

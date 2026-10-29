@@ -4,6 +4,7 @@ import { HIERARCHY_LEVEL_WEIGHT, ROLE_HIERARCHY_MAP } from '../config/constants.
 import { errorResponse } from '../common/response.js';
 import { prisma } from '../lib/prisma.js';
 import { UserHierarchyScope } from '../common/types.js';
+import { getRedisClient } from '../lib/redis.js';
 
 export const ROLE_RANK_WEIGHT: Record<RoleType | 'PARTY_ADMIN', number> = {
   [RoleType.SUPER_ADMIN]: 100,
@@ -79,6 +80,32 @@ export async function computeUserHierarchyScope(
   userId: string,
   roleOverride?: RoleType | 'PARTY_ADMIN',
 ): Promise<UserHierarchyScope> {
+  const redis = getRedisClient();
+  const cacheKey = `rbac:scope:${userId}:${roleOverride || 'default'}`;
+
+  if (redis) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        const p = JSON.parse(cached);
+        return {
+          ...p,
+          accessibleUnitIds: new Set(p.accessibleUnitIds),
+          accessibleStateIds: new Set(p.accessibleStateIds),
+          accessibleZoneIds: new Set(p.accessibleZoneIds),
+          accessibleParliamentIds: new Set(p.accessibleParliamentIds),
+          accessibleConstituencyIds: new Set(p.accessibleConstituencyIds),
+          accessibleMandalIds: new Set(p.accessibleMandalIds),
+          accessibleVillageIds: new Set(p.accessibleVillageIds),
+          accessibleBoothIds: new Set(p.accessibleBoothIds),
+          accessibleVoterGroupIds: new Set(p.accessibleVoterGroupIds),
+        };
+      }
+    } catch {
+      // Non-blocking fallback to database query
+    }
+  }
+
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: {
@@ -509,7 +536,7 @@ export async function computeUserHierarchyScope(
     }
   }
 
-  return {
+  const resultScope: UserHierarchyScope = {
     userId: user.id,
     role,
     organisationId: user.organisationId,
@@ -534,6 +561,45 @@ export async function computeUserHierarchyScope(
     boothId: assignment?.boothId,
     voterGroupId: assignment?.voterGroupId,
   };
+
+  if (redis) {
+    try {
+      const serialized = {
+        ...resultScope,
+        accessibleUnitIds: Array.from(accessibleUnitIds),
+        accessibleStateIds: Array.from(accessibleStateIds),
+        accessibleZoneIds: Array.from(accessibleZoneIds),
+        accessibleParliamentIds: Array.from(accessibleParliamentIds),
+        accessibleConstituencyIds: Array.from(accessibleConstituencyIds),
+        accessibleMandalIds: Array.from(accessibleMandalIds),
+        accessibleVillageIds: Array.from(accessibleVillageIds),
+        accessibleBoothIds: Array.from(accessibleBoothIds),
+        accessibleVoterGroupIds: Array.from(accessibleVoterGroupIds),
+      };
+      await redis.set(cacheKey, JSON.stringify(serialized), 'EX', 900);
+    } catch {
+      // Non-blocking catch
+    }
+  }
+
+  return resultScope;
+}
+
+/**
+ * Invalidate user hierarchy scope cache in Redis
+ */
+export async function invalidateUserHierarchyScope(userId: string): Promise<void> {
+  const redis = getRedisClient();
+  if (redis) {
+    try {
+      const keys = await redis.keys(`rbac:scope:${userId}:*`);
+      if (keys.length > 0) {
+        await redis.del(...keys);
+      }
+    } catch {
+      // Non-blocking
+    }
+  }
 }
 
 /**

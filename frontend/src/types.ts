@@ -5,6 +5,8 @@
 
 export type RoleType = 
   | 'SUPER_ADMIN'
+  | 'PARTY_ADMIN'
+  | 'HIGH_COMMAND'
   | 'STATE_ADMIN'
   | 'ZONE_INCHARGE'
   | 'PARLIAMENT_INCHARGE'

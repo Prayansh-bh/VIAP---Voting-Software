@@ -758,6 +758,14 @@ export default function CmsStudio({
         if (currentApp.activeHierarchyLevels && currentApp.activeHierarchyLevels.length > 0) {
           setSelectedHierarchyLevels(currentApp.activeHierarchyLevels);
         }
+        if (currentApp.politicalParties && currentApp.politicalParties.length > 0) {
+          const clean = currentApp.politicalParties.filter(
+            (p: any) => !p.code?.startsWith('TEST_') && p.name !== 'Democratic Progressive Front'
+          );
+          if (clean.length > 0) {
+            setPartyList(clean);
+          }
+        }
       } else if (config) {
         if (config.organisationName) setTitle(config.organisationName);
         if (config.slogan) setTagline(config.slogan);
@@ -892,8 +900,12 @@ export default function CmsStudio({
         parliamentName: appScope === 'PARLIAMENT_MP' ? parliamentName.trim() : undefined,
         activeHierarchyLevels: selectedHierarchyLevels,
         tierIncharges: formattedTierIncharges as unknown as TierInchargeInput[],
-      });
+        politicalParties: partyList,
+      } as any);
       updateParties(partyList);
+      if (updatedApp?.politicalParties && updatedApp.politicalParties.length > 0) {
+        setPartyList(updatedApp.politicalParties);
+      }
 
       try {
         localStorage.setItem(`kdp_custom_parties_${resolvedTargetId}`, JSON.stringify(partyList));

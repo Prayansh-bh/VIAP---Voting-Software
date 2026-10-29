@@ -590,6 +590,7 @@ export async function saveCmsConfig(config: Partial<CmsConfig>, token?: string):
         dashboardConfig: config.dashboardConfig,
         analyticsConfig: config.analyticsConfig,
         aiEnabled: config.aiEnabled,
+        politicalParties: (config as any).politicalParties || (config as any).parties,
       }),
     });
     return true;

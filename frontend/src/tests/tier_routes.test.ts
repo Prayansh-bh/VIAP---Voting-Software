@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { describe, it } from 'vitest';
 
 // Helper to simulate router resolution logic used across dashboard components
 function resolveTab(baseRoute: string, pathname: string, pathToTab: Record<string, string>): { tab: string; isKnown: boolean } {
@@ -9,12 +10,17 @@ function resolveTab(baseRoute: string, pathname: string, pathToTab: Record<strin
   return { tab, isKnown };
 }
 
-console.log('🧪 Starting Tier Routes & Sub-Path Navigation Verification Test Suite...');
+describe('Tier Routes & Sub-Path Navigation Verification', () => {
+  it('correctly resolves all 8 tier routes and sub-paths', () => {
+    runTierRouteTests();
+  });
+});
 
-// 1. VOTER_100_INCHARGE
-{
-  const PATH_TO_TAB: Record<string, string> = {
-    '': 'dashboard',
+function runTierRouteTests() {
+  // 1. VOTER_100_INCHARGE
+  {
+    const PATH_TO_TAB: Record<string, string> = {
+      '': 'dashboard',
     dashboard: 'dashboard',
     voters: 'voters',
     'live-track': 'live-track',
@@ -295,7 +301,6 @@ console.log('🧪 Starting Tier Routes & Sub-Path Navigation Verification Test S
   assert.equal(resolveTab('/super-admin', '/super-admin/parties', SUPER_ADMIN_PATH_TO_TAB).tab, 'parties');
   assert.equal(resolveTab('/super-admin', '/super-admin/ai', SUPER_ADMIN_PATH_TO_TAB).tab, 'ai');
   assert.equal(resolveTab('/super-admin', '/super-admin/health', SUPER_ADMIN_PATH_TO_TAB).tab, 'health');
-  console.log('  ✅ 8. Super Admin: all 7 tabs resolved correctly');
+    console.log('  ✅ 8. Super Admin: all 7 tabs resolved correctly');
+  }
 }
-
-console.log('\n🎉 ALL TIER ROUTING & SUB-PATH RESOLUTION TESTS PASSED SUCCESSFULLY!\n');

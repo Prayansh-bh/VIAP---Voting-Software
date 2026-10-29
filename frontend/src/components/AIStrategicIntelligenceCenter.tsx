@@ -35,6 +35,8 @@ import { VoterPreference } from '../types';
 import { useNotification } from '../context/NotificationContext';
 import { useCms } from '../context/CmsContext';
 import { fetchNewsArticles, fetchSocialTrends, askAiStrategy, generateStrategicReport } from '../lib/api/ai.api';
+import { fetchCadreNetwork } from '../lib/api/cadre.api';
+import { apiFetch } from '../lib/api/client';
 
 export interface AIStrategicIntelligenceCenterProps {
   session?: any;
@@ -150,14 +152,25 @@ export default function AIStrategicIntelligenceCenter({
     detected: string;
     updated: string;
   }>>([]);
+  const [cadreList, setCadreList] = useState<any[]>([]);
+  const [liveProjects, setLiveProjects] = useState<any[]>([]);
 
   useEffect(() => {
     let active = true;
     Promise.all([
       fetchNewsArticles().catch(() => []),
       fetchSocialTrends().catch(() => []),
-    ]).then(([newsRes, trendsRes]) => {
+      fetchCadreNetwork().catch(() => ({ items: [] })),
+      apiFetch<any[]>('/api/ai/development-projects').catch(() => []),
+    ]).then(([newsRes, trendsRes, cadreRes, projectsRes]) => {
       if (!active) return;
+      if (Array.isArray(projectsRes) && projectsRes.length > 0) {
+        setLiveProjects(projectsRes);
+      }
+      if (cadreRes) {
+        const items = cadreRes?.items || (Array.isArray(cadreRes) ? cadreRes : []);
+        setCadreList(items);
+      }
       if (Array.isArray(newsRes) && newsRes.length > 0) {
         setLiveNews(newsRes.map((n: any) => ({
           id: n.id,
@@ -340,31 +353,48 @@ export default function AIStrategicIntelligenceCenter({
   const socialTrends = liveTrends;
 
   // --- 6. GOVERNMENT & DEVELOPMENT MONITOR ---
-  const govtProjects = useMemo<Array<{
-    project: string;
-    dept: string;
-    location: string;
-    date: string;
-    status: string;
-    mandal: string;
-    source: string;
-  }>>(() => [], []);
+  const govtProjects = liveProjects;
 
   // --- 7. CADRE HEALTH RATIOS ---
   const cadreHealth = useMemo(() => {
+    const totalMandals = mandalsData.length || 0;
+    const assignedMandals = cadreList.filter((c: any) => c.role === 'MANDAL_INCHARGE').length;
+
+    const totalVillages = villagesData.length || 0;
+    const assignedVillages = cadreList.filter((c: any) => c.role === 'VILLAGE_INCHARGE').length;
+
+    const totalBooths = constituencyStats.booths || 0;
+    const assignedBooths = cadreList.filter((c: any) => c.role === 'BOOTH_PRESIDENT' || c.role === 'BOOTH_INCHARGE').length;
+
+    const totalVoter100 = Math.ceil((constituencyStats.voters || 0) / 100);
+    const assignedVoter100 = cadreList.filter((c: any) => c.role === 'VOTER_100_INCHARGE').length;
+
+    const mandalCov = totalMandals > 0 
+      ? Math.min(100, Math.round((assignedMandals / totalMandals) * 100)) 
+      : (assignedMandals > 0 ? 100 : 0);
+    const villageCov = totalVillages > 0 
+      ? Math.min(100, Math.round((assignedVillages / totalVillages) * 100)) 
+      : (assignedVillages > 0 ? 100 : 0);
+    const boothCov = totalBooths > 0 
+      ? Math.min(100, Math.round((assignedBooths / totalBooths) * 100)) 
+      : (assignedBooths > 0 ? 100 : 0);
+    const voter100Cov = totalVoter100 > 0 
+      ? Math.min(100, Math.round((assignedVoter100 / totalVoter100) * 100)) 
+      : (assignedVoter100 > 0 ? 100 : 0);
+
     return {
-      mandalInchargeCoverage: mandalsData.length > 0 ? 100 : 0,
-      villageInchargeCoverage: villagesData.length > 0 ? 100 : 0,
-      boothInchargeCoverage: constituencyStats.booths > 0 ? 100 : 0,
-      voter100Coverage: constituencyStats.voters > 0 ? 100 : 0,
+      mandalInchargeCoverage: mandalCov,
+      villageInchargeCoverage: villageCov,
+      boothInchargeCoverage: boothCov,
+      voter100Coverage: voter100Cov,
       unfilledPositions: {
-        mandal: 0,
-        village: 0,
-        booth: 0,
-        voter100: 0,
+        mandal: Math.max(0, totalMandals - assignedMandals),
+        village: Math.max(0, totalVillages - assignedVillages),
+        booth: Math.max(0, totalBooths - assignedBooths),
+        voter100: Math.max(0, totalVoter100 - assignedVoter100),
       }
     };
-  }, [mandalsData, villagesData, constituencyStats]);
+  }, [mandalsData, villagesData, constituencyStats, cadreList]);
 
   // --- 8. REAL AI CHAT BOT RESPONSES ---
   const handleChatSubmit = async (e: React.FormEvent) => {
@@ -1402,26 +1432,42 @@ export default function AIStrategicIntelligenceCenter({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-bold text-slate-700">
                 <div className="p-4 bg-slate-50 border border-slate-150 rounded-xl text-center space-y-1">
                   <span className="text-[10px] text-slate-400 uppercase">Mandal Incharge</span>
-                  <span className="text-xl font-black text-slate-950 block mt-1">100%</span>
-                  <span className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide block w-max mx-auto">FULL COVERAGE</span>
+                  <span className="text-xl font-black text-slate-950 block mt-1">{cadreHealth.mandalInchargeCoverage}%</span>
+                  {cadreHealth.unfilledPositions.mandal === 0 ? (
+                    <span className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide block w-max mx-auto">FULL COVERAGE</span>
+                  ) : (
+                    <span className="text-amber-600 font-black text-[10px]">{cadreHealth.unfilledPositions.mandal} unfilled</span>
+                  )}
                 </div>
 
                 <div className="p-4 bg-slate-50 border border-slate-150 rounded-xl text-center space-y-1">
                   <span className="text-[10px] text-slate-400 uppercase">Village Incharge</span>
-                  <span className="text-xl font-black text-slate-950 block mt-1">95.8%</span>
-                  <span className="text-slate-400 text-[10px]">2 vacancies in Marripudi</span>
+                  <span className="text-xl font-black text-slate-950 block mt-1">{cadreHealth.villageInchargeCoverage}%</span>
+                  {cadreHealth.unfilledPositions.village === 0 ? (
+                    <span className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide block w-max mx-auto">FULL COVERAGE</span>
+                  ) : (
+                    <span className="text-slate-500 font-bold text-[10px]">{cadreHealth.unfilledPositions.village} vacancies</span>
+                  )}
                 </div>
 
                 <div className="p-4 bg-slate-50 border border-slate-150 rounded-xl text-center space-y-1">
                   <span className="text-[10px] text-slate-400 uppercase">Booth Presidents</span>
-                  <span className="text-xl font-black text-slate-950 block mt-1">91.1%</span>
-                  <span className="text-red-600 font-black text-[10px]">25 Booths vacant</span>
+                  <span className="text-xl font-black text-slate-950 block mt-1">{cadreHealth.boothInchargeCoverage}%</span>
+                  {cadreHealth.unfilledPositions.booth === 0 ? (
+                    <span className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide block w-max mx-auto">FULL COVERAGE</span>
+                  ) : (
+                    <span className="text-red-600 font-black text-[10px]">{cadreHealth.unfilledPositions.booth} Booths vacant</span>
+                  )}
                 </div>
 
                 <div className="p-4 bg-slate-50 border border-slate-150 rounded-xl text-center space-y-1">
                   <span className="text-[10px] text-slate-400 uppercase">100-Voter Incharges</span>
-                  <span className="text-xl font-black text-slate-950 block mt-1">87.0%</span>
-                  <span className="text-red-600 font-black text-[10px]">324 spots unfilled</span>
+                  <span className="text-xl font-black text-slate-950 block mt-1">{cadreHealth.voter100Coverage}%</span>
+                  {cadreHealth.unfilledPositions.voter100 === 0 ? (
+                    <span className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide block w-max mx-auto">FULL COVERAGE</span>
+                  ) : (
+                    <span className="text-red-600 font-black text-[10px]">{cadreHealth.unfilledPositions.voter100} spots unfilled</span>
+                  )}
                 </div>
               </div>
 
@@ -1429,8 +1475,16 @@ export default function AIStrategicIntelligenceCenter({
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-3 font-bold text-xs text-slate-700">
                 <h4 className="text-slate-950 uppercase text-xs font-black">AI Recommendations for Cadre Recruitment</h4>
                 <ul className="list-disc pl-4 space-y-2 leading-relaxed">
-                  <li>**Target Marripudi**: Direct Singarayakonda youth supervisors to assist Marripudi local incharge. Singarayakonda has surplus trained members who can be cross-deployed.</li>
-                  <li>**Booth Committee Gaps**: Focus on the 25 unstaffed booths. 14 are in Ponnaluru Mandal where local coordination has been slow. Scheduled a recruitment drive next Monday.</li>
+                  {cadreHealth.unfilledPositions.booth > 0 ? (
+                    <li>**Priority Booth Committees**: Focus recruitment on the {cadreHealth.unfilledPositions.booth} unstaffed polling booths. Dispatch constituency supervisors to assign verified booth presidents before election week.</li>
+                  ) : (
+                    <li>**Booth Coverage Secured**: All polling stations have designated booth presidents. Maintain active coordination checks.</li>
+                  )}
+                  {cadreHealth.unfilledPositions.voter100 > 0 ? (
+                    <li>**100-Voter Clusters**: Activate local youth cadre to cover the {cadreHealth.unfilledPositions.voter100} pending voter clusters for door-to-door survey delivery.</li>
+                  ) : (
+                    <li>**Voter Cluster Coverage**: 100-voter coordinators are fully appointed across all clusters.</li>
+                  )}
                 </ul>
               </div>
             </div>

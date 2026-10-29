@@ -97,6 +97,79 @@ export async function aiRoutes(fastify: FastifyInstance) {
     return reply.send(successResponse(items));
   });
 
+  // Trigger live news crawling & ingestion
+  fastify.post('/crawl-news', async (req: FastifyRequest, reply: FastifyReply) => {
+    const body = req.body as { query?: string };
+    const inserted = await AIService.crawlConstituencyNews(body?.query || 'Andhra Pradesh Election');
+    return reply.send(successResponse({ inserted }, `Crawled and indexed ${inserted} new headlines`));
+  });
+
+  // Publish news article / war room bulletin
+  fastify.post('/news', async (req: FastifyRequest, reply: FastifyReply) => {
+    const body = req.body as any;
+    if (!body?.headline) {
+      return reply.status(400).send(errorResponse('Headline is required', 'VALIDATION_ERROR'));
+    }
+    const created = await prisma.newsArticle.create({
+      data: {
+        headline: body.headline,
+        sourceName: body.sourceName || 'War Room Dispatch',
+        snippet: body.snippet || null,
+        articleUrl: body.articleUrl || null,
+        sentiment: body.sentiment || 'POSITIVE',
+        constituencyId: body.constituencyId || null,
+      },
+    });
+    return reply.status(201).send(successResponse(created, 'News alert published'));
+  });
+
+  // Publish social trend
+  fastify.post('/social-trends', async (req: FastifyRequest, reply: FastifyReply) => {
+    const body = req.body as any;
+    if (!body?.hashtag) {
+      return reply.status(400).send(errorResponse('Hashtag is required', 'VALIDATION_ERROR'));
+    }
+    const created = await prisma.socialTrend.create({
+      data: {
+        hashtag: body.hashtag,
+        platform: body.platform || 'X / Twitter',
+        mentionCount: Number(body.mentionCount) || 0,
+        sentimentPct: Number(body.sentimentPct) || 70,
+        trendingRank: Number(body.trendingRank) || 1,
+        constituencyId: body.constituencyId || null,
+      },
+    });
+    return reply.status(201).send(successResponse(created, 'Social trend published'));
+  });
+
+  // Development and welfare projects monitor
+  fastify.get('/development-projects', async (_req: FastifyRequest, reply: FastifyReply) => {
+    const projects = await prisma.developmentProject.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    return reply.send(successResponse(projects));
+  });
+
+  fastify.post('/development-projects', async (req: FastifyRequest, reply: FastifyReply) => {
+    const body = req.body as any;
+    if (!body?.project || !body?.dept) {
+      return reply.status(400).send(errorResponse('Project title and department are required', 'VALIDATION_ERROR'));
+    }
+    const created = await prisma.developmentProject.create({
+      data: {
+        project: body.project,
+        dept: body.dept,
+        location: body.location || 'Constituency Wide',
+        mandal: body.mandal || 'All Mandals',
+        status: body.status || 'SANCTIONED',
+        source: body.source || 'Official Gazette',
+        date: body.date || new Date().toISOString().split('T')[0],
+      },
+    });
+    return reply.status(201).send(successResponse(created, 'Development project registered'));
+  });
+
   // Election scenario projections
   fastify.get('/projections', async (req: FastifyRequest<{ Querystring: { constituencyId?: string } }>, reply: FastifyReply) => {
     const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';

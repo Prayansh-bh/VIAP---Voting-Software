@@ -126,6 +126,7 @@ const cmsConfigUpdateSchema = z.object({
   dashboardConfig: z.record(z.string(), z.any()).optional(),
   analyticsConfig: z.record(z.string(), z.any()).optional(),
   aiEnabled: z.boolean().optional(),
+  politicalParties: z.array(z.any()).optional(),
 });
 
 const uploadAssetSchema = z
@@ -308,6 +309,66 @@ export async function cmsRoutes(fastify: FastifyInstance) {
             logoUrl: body.logoUrl,
           },
         });
+      }
+
+      if (Array.isArray(body.politicalParties) && body.politicalParties.length > 0 && targetOrgId) {
+        const incomingCodes = new Set<string>();
+        for (let i = 0; i < body.politicalParties.length; i++) {
+          const p = body.politicalParties[i];
+          const pCode = p.code?.trim().toUpperCase();
+          if (!pCode) continue;
+          incomingCodes.add(pCode);
+          const existing = await prisma.politicalParty.findFirst({
+            where: {
+              OR: [
+                { code: pCode },
+                { organisationId: targetOrgId, shortName: p.shortName || pCode },
+              ],
+            },
+          });
+          if (existing) {
+            await prisma.politicalParty.update({
+              where: { id: existing.id },
+              data: {
+                name: p.name,
+                shortName: p.shortName || pCode,
+                primaryColor: p.primaryColor || '#eab308',
+                secondaryColor: p.secondaryColor !== undefined ? p.secondaryColor : existing.secondaryColor,
+                accentColor: p.accentColor !== undefined ? p.accentColor : existing.accentColor,
+                symbolName: p.symbolName !== undefined ? p.symbolName : existing.symbolName,
+                logoUrl: p.logoUrl !== undefined ? p.logoUrl : existing.logoUrl,
+                isActive: true,
+                sortOrder: p.sortOrder ?? i + 1,
+                ...(!existing.organisationId ? { organisationId: targetOrgId } : {}),
+              },
+            });
+          } else {
+            await prisma.politicalParty.create({
+              data: {
+                organisationId: targetOrgId,
+                name: p.name,
+                code: pCode,
+                shortName: p.shortName || pCode,
+                primaryColor: p.primaryColor || '#eab308',
+                secondaryColor: p.secondaryColor || null,
+                accentColor: p.accentColor || null,
+                symbolName: p.symbolName || null,
+                logoUrl: p.logoUrl || null,
+                isActive: true,
+                sortOrder: p.sortOrder ?? i + 1,
+              },
+            });
+          }
+        }
+        if (incomingCodes.size > 0) {
+          await prisma.politicalParty.updateMany({
+            where: {
+              organisationId: targetOrgId,
+              code: { notIn: Array.from(incomingCodes) as string[] },
+            },
+            data: { isActive: false },
+          });
+        }
       }
 
       await logAudit({

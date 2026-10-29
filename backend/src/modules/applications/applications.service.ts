@@ -1370,15 +1370,24 @@ export class ApplicationsService {
           }
         }
 
-        // 5. Sync politicalParties if provided
-        if (Array.isArray(payload.politicalParties) && payload.politicalParties.length > 0 && config.organisationId) {
+        // 5. Sync politicalParties if provided (Active Party Sync with Safe Deactivation)
+        if (Array.isArray(payload.politicalParties) && payload.politicalParties.length > 0) {
+          const orgIdToUse = config.organisationId || party?.organisationId || undefined;
+          const incomingCodes = new Set<string>();
+
           for (let i = 0; i < payload.politicalParties.length; i++) {
             const p = payload.politicalParties[i];
             const pCode = p.code?.trim().toUpperCase();
             if (!pCode) continue;
+            incomingCodes.add(pCode);
 
-            const existingP = await tx.politicalParty.findUnique({
-              where: { code: pCode },
+            const existingP = await tx.politicalParty.findFirst({
+              where: {
+                OR: [
+                  { code: pCode },
+                  ...(orgIdToUse ? [{ organisationId: orgIdToUse, shortName: p.shortName || pCode }] : []),
+                ],
+              },
             });
 
             if (existingP) {
@@ -1392,15 +1401,15 @@ export class ApplicationsService {
                   ...(p.accentColor !== undefined ? { accentColor: p.accentColor } : {}),
                   ...(p.symbolName !== undefined ? { symbolName: p.symbolName } : {}),
                   ...(p.logoUrl !== undefined ? { logoUrl: p.logoUrl } : {}),
-                  ...(p.isActive !== undefined ? { isActive: p.isActive } : {}),
-                  ...(p.sortOrder !== undefined ? { sortOrder: p.sortOrder } : {}),
-                  ...(!existingP.organisationId ? { organisationId: config.organisationId } : {}),
+                  isActive: true,
+                  sortOrder: p.sortOrder !== undefined && p.sortOrder !== null ? p.sortOrder : i + 1,
+                  ...(orgIdToUse && !existingP.organisationId ? { organisationId: orgIdToUse } : {}),
                 },
               });
             } else {
               await tx.politicalParty.create({
                 data: {
-                  organisationId: config.organisationId,
+                  organisationId: orgIdToUse,
                   name: p.name,
                   code: pCode,
                   shortName: p.shortName || pCode,
@@ -1409,11 +1418,24 @@ export class ApplicationsService {
                   accentColor: p.accentColor || null,
                   symbolName: p.symbolName || null,
                   logoUrl: p.logoUrl || null,
-                  isActive: p.isActive !== false,
+                  isActive: true,
                   sortOrder: p.sortOrder ?? i + 1,
                 },
               });
             }
+          }
+
+          // Mark parties for this organisation not included in the payload as inactive
+          if (orgIdToUse && incomingCodes.size > 0) {
+            await tx.politicalParty.updateMany({
+              where: {
+                organisationId: orgIdToUse,
+                code: { notIn: Array.from(incomingCodes) as string[] },
+              },
+              data: {
+                isActive: false,
+              },
+            });
           }
         }
 
@@ -1583,7 +1605,19 @@ export class ApplicationsService {
           }
         }
 
-        return updatedConfig;
+        const savedParties = await tx.politicalParty.findMany({
+          where: {
+            isActive: true,
+            ...(config.organisationId ? { organisationId: config.organisationId } : {}),
+          },
+          orderBy: { sortOrder: 'asc' },
+        });
+
+        return {
+          ...updatedConfig,
+          parties: savedParties,
+          politicalParties: savedParties,
+        };
       },
       { timeout: 15000 },
     );
