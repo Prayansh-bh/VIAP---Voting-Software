@@ -23,7 +23,14 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
+  let url: string;
+  if (endpoint.startsWith('http')) {
+    url = endpoint;
+  } else {
+    const pathWithoutApi = endpoint.replace(/^\/?api\/?/, '/');
+    const cleanPath = pathWithoutApi.startsWith('/') ? pathWithoutApi : `/${pathWithoutApi}`;
+    url = `${API_BASE}${cleanPath}`;
+  }
 
   const res = await fetch(url, {
     ...options,

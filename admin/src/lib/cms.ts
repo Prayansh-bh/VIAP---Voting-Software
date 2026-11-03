@@ -1,7 +1,6 @@
 import { VoterPreference } from '../types';
 import { getAdminToken } from './auth';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+import { getApiUrl } from './env';
 
 export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}): Promise<T> {
   const token = getAdminToken();
@@ -13,8 +12,17 @@ export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const normalized = endpoint.startsWith('/api') ? endpoint.slice(4) : endpoint;
-  const url = normalized.startsWith('http') ? normalized : `${API_BASE}${normalized.startsWith('/') ? '' : '/'}${normalized}`;
+  let url: string;
+  if (endpoint.startsWith('http')) {
+    url = endpoint;
+  } else {
+    // getApiUrl() guarantees no trailing slash and ends with '/api'
+    const base = getApiUrl();
+    // Strip leading '/api' from endpoint to prevent duplicate '/api/api'
+    const pathWithoutApi = endpoint.replace(/^\/?api\/?/, '/');
+    const cleanPath = pathWithoutApi.startsWith('/') ? pathWithoutApi : `/${pathWithoutApi}`;
+    url = `${base}${cleanPath}`;
+  }
 
   const res = await fetch(url, {
     ...init,

@@ -56,7 +56,7 @@ export default function CmsBrandStudio({ currentApp, onRefreshApps }: CmsBrandSt
       setLoading(true);
       try {
         const token = getAdminToken();
-        const res = await fetch('${getApiUrl()}/cms/config', {
+        const res = await fetch(`${getApiUrl()}/cms/config`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (res.ok) {
@@ -98,7 +98,7 @@ export default function CmsBrandStudio({ currentApp, onRefreshApps }: CmsBrandSt
 
     try {
       const token = getAdminToken();
-      const res = await fetch('${getApiUrl()}/cms/config', {
+      const res = await fetch(`${getApiUrl()}/cms/config`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
