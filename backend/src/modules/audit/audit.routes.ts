@@ -70,4 +70,54 @@ export async function auditRoutes(fastify: FastifyInstance) {
 
     return reply.send(paginatedResponse(items, total, page, limit));
   });
+
+  fastify.get('/stats', async (req: FastifyRequest, reply: FastifyReply) => {
+    const where: any = {};
+    const isGlobal =
+      req.user?.role === RoleType.SUPER_ADMIN ||
+      req.user?.role === RoleType.HIGH_COMMAND ||
+      req.hierarchyScope?.isGlobalScope;
+
+    if (!isGlobal) {
+      const accessibleUnitIds = req.hierarchyScope?.accessibleUnitIds ? Array.from(req.hierarchyScope.accessibleUnitIds) : [];
+      if (accessibleUnitIds.length > 0) {
+        where.OR = [
+          { userId: req.user!.userId },
+          { unitId: { in: accessibleUnitIds } },
+        ];
+      } else {
+        where.userId = req.user!.userId;
+      }
+    }
+
+    const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const [total, inLast24h, byActionGroup, byEntityGroup] = await Promise.all([
+      prisma.auditLog.count({ where }),
+      prisma.auditLog.count({ where: { ...where, createdAt: { gte: last24h } } }),
+      prisma.auditLog.groupBy({
+        by: ['action'],
+        where,
+        _count: { action: true },
+      }),
+      prisma.auditLog.groupBy({
+        by: ['entityType'],
+        where,
+        _count: { entityType: true },
+      }),
+    ]);
+
+    const byAction = Object.fromEntries(byActionGroup.map((g) => [g.action, g._count.action]));
+    const byEntityType = Object.fromEntries(byEntityGroup.map((g) => [g.entityType, g._count.entityType]));
+
+    return reply.send({
+      success: true,
+      data: {
+        total,
+        inLast24h,
+        byAction,
+        byEntityType,
+      },
+    });
+  });
 }

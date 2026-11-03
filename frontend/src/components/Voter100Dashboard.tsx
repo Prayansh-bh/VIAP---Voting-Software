@@ -56,10 +56,15 @@ import {
   fetchTrainingProgress,
   fetchTrainingVideos,
   fetchVotersForIncharge,
+  fetchVoterGroupAnalytics,
   flagFakeVoter,
   markNotVoted,
   markVoteDone,
   syncVoter,
+  createApprovalRequest,
+  updateVoterStatusApi,
+  getVoterById,
+  updateVoterMigration,
   type TrainingProgressItem,
   updateTaskStatus,
   updateTrainingProgress,
@@ -126,7 +131,27 @@ const PATH_TO_TAB: Record<string, Voter100Tab> = {
 };
 
 export default function Voter100Dashboard({ session, onLogout }: Voter100DashboardProps) {
-  const { config } = useCms();
+  const { config, parties } = useCms();
+
+  const primaryPartyCode = config?.activePartyCode || 'SDS';
+  const primaryPartyName = config?.organisationName || config?.headerTitle || primaryPartyCode;
+  const primaryPartyColor = config?.primaryColor || '#a31de2';
+
+  const activePartiesList = useMemo(() => {
+    const list: Array<{ name: string; code: string; primaryColor?: string }> = [];
+    const seen = new Set<string>();
+    list.push({ name: primaryPartyName, code: primaryPartyCode, primaryColor: primaryPartyColor });
+    seen.add(primaryPartyCode);
+    if (parties && parties.length > 0) {
+      for (const p of parties) {
+        if (p.isActive && !seen.has(p.code)) {
+          seen.add(p.code);
+          list.push({ name: p.name || p.code, code: p.code, primaryColor: p.primaryColor || '#94a3b8' });
+        }
+      }
+    }
+    return list;
+  }, [parties, primaryPartyCode, primaryPartyName, primaryPartyColor]);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -175,6 +200,7 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
           fetchReportsForUser(session.userId).catch(() => null),
           fetchTrainingVideos().catch(() => null),
           fetchTrainingProgress(session.userId).catch(() => null),
+          fetchVoterGroupAnalytics(session.unitId).catch(() => null),
         ]);
         if (!isActive) {
           return;
@@ -265,6 +291,40 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
     void syncVoter(nextVoter, session.userId).catch(() => {
       setBackendSyncStatus('offline');
     });
+
+    if (nextVoter.voterLocationStatus === 'Migrated') {
+      void updateVoterMigration(nextVoter.id, {
+        locationStatus: 'MIGRATED',
+        migrationCity: nextVoter.currentLocation || 'MIGRATED',
+      }).catch(() => {});
+    }
+
+    // Dispatch survey verification request to Central Approval Management Engine
+    void createApprovalRequest({
+      partyId: (session as any).partyId || session.organisationId || 'SDS',
+      type: 'SURVEY_APPROVAL',
+      title: `Field Survey: ${updatedVoter.name} (EPIC: ${updatedVoter.epicNumber || 'N/A'})`,
+      description: `Field survey assessment submitted. Preference: ${updatedVoter.politicalPreference || 'Neutral'}. Location: ${updatedVoter.voterLocationStatus || 'Local'}.`,
+      entityId: updatedVoter.id,
+      entityType: 'Voter',
+      payload: {
+        voterId: updatedVoter.id,
+        surveyData: {
+          politicalPreference: updatedVoter.politicalPreference,
+          mobileNumber: updatedVoter.mobileNumber,
+          caste: updatedVoter.caste,
+          subCaste: updatedVoter.subCaste,
+          profession: updatedVoter.profession,
+          voterLocationStatus: updatedVoter.voterLocationStatus,
+          currentLocation: updatedVoter.currentLocation,
+        },
+      },
+      requestedByName: session.userName,
+      requestedByRole: session.role,
+      requestedByMobile: session.mobileNumber || '',
+    }).catch((err) => {
+      console.warn('Failed to dispatch survey approval request:', err);
+    });
   };
 
   // Handle reporting voter status directly
@@ -285,8 +345,39 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
       return updatedVoter;
     }));
     if (updatedVoter) {
+      if (status === 'Fake') {
+        void flagFakeVoter(voterId, notes || 'Flagged as fake voter').catch(() => {
+          setBackendSyncStatus('offline');
+        });
+      } else {
+        void updateVoterStatusApi(voterId, status.toUpperCase(), notes).catch(() => {
+          setBackendSyncStatus('offline');
+        });
+      }
       void syncVoter(updatedVoter, session.userId).catch(() => {
         setBackendSyncStatus('offline');
+      });
+
+      // Dispatch audit correction request into Central Approval Management Engine
+      void createApprovalRequest({
+        partyId: (session as any).partyId || session.organisationId || 'SDS',
+        type: 'DATA_CORRECTION',
+        title: `Voter Audit Flag: ${(updatedVoter as Voter).name} marked as ${status.toUpperCase()}`,
+        description: `100-Voter Incharge flagged voter as ${status}. EPIC: ${(updatedVoter as Voter).epicNumber || 'N/A'}. Audit Notes: ${notes || 'Flagged during field verification.'}`,
+        entityId: voterId,
+        entityType: 'Voter',
+        payload: {
+          voterId,
+          updates: {
+            voterStatus: status.toUpperCase(),
+            notes,
+          },
+        },
+        requestedByName: session.userName,
+        requestedByRole: session.role,
+        requestedByMobile: session.mobileNumber || '',
+      }).catch((err) => {
+        console.warn('Failed to dispatch approval request:', err);
       });
     }
   };
@@ -300,9 +391,9 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
       inchargeId: session.userId,
       inchargeName: session.userName,
       constituency: session.assignedConstituency,
-      mandal: session.assignedMandal || "Jarugumalli",
-      village: session.assignedVillage || "Jarugumalli Village",
-      booth: session.assignedBooth || "Booth 76 (ZPH School)",
+      mandal: session.assignedMandal || voters[0]?.mandal || "Marripudi",
+      village: session.assignedVillage || voters[0]?.village || "Rajupalem",
+      booth: session.assignedBooth || (voters[0]?.boothNumber ? `Booth ${voters[0].boothNumber}` : "Booth 1"),
       date: now.toISOString().split('T')[0],
       time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       status: 'Pending'
@@ -327,8 +418,14 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
 
   // Update Task Status
   const handleUpdateTaskStatus = (taskId: string, newStatus: 'Pending' | 'In Progress' | 'Completed') => {
+    const apiStatusMap: Record<string, string> = {
+      'Pending': 'PENDING',
+      'In Progress': 'IN_PROGRESS',
+      'Completed': 'COMPLETED',
+    };
+    const normalizedStatus = apiStatusMap[newStatus] || String(newStatus).toUpperCase();
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
-    void updateTaskStatus(taskId, newStatus).catch(() => {
+    void updateTaskStatus(taskId, normalizedStatus).catch(() => {
       setBackendSyncStatus('offline');
     });
   };
@@ -342,7 +439,7 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
         return;
       }
 
-      void updateTrainingProgress(existing.id, 'WATCHED')
+      void updateTrainingProgress(video.id, 'WATCHED')
         .then(() => {
           setTrainingProgress((prev) => ({
             ...prev,
@@ -356,7 +453,7 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
     }
 
     void ensureTrainingAssigned(session.userId, video.id)
-      .then((progress) => updateTrainingProgress(progress.id, 'WATCHED').then(() => progress))
+      .then((progress) => updateTrainingProgress(video.id, 'WATCHED').then(() => progress))
       .then((progress) => {
         setTrainingProgress((prev) => ({
           ...prev,
@@ -381,14 +478,21 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
 
   // Count preferences
   const stats = useMemo(() => {
-    const counts: Record<VoterPreference, number> = {
-      TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0
+    const counts: Record<string, number> = {
+      [primaryPartyCode]: 0,
+      Neutral: 0,
+      OTH: 0,
     };
+    activePartiesList.forEach(p => {
+      counts[p.code] = 0;
+    });
     voters.forEach(v => {
-      counts[v.politicalPreference]++;
+      const raw = (v.politicalPreference as any) === 'NEUTRAL' ? 'Neutral' : v.politicalPreference;
+      const pref = raw in counts ? raw : (raw || 'Neutral');
+      counts[pref] = (counts[pref] || 0) + 1;
     });
     return counts;
-  }, [voters]);
+  }, [voters, primaryPartyCode, activePartiesList]);
 
   // Fake / Doubtful counts
   const fakeDoubtfulCount = useMemo(() => {
@@ -397,28 +501,31 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
 
   // Calculate election forecast
   const forecast = useMemo(() => {
-    // Compare ONLY: TDP, YSRCP, JSP, BJP, INC, OTH
-    // Neutral voters must NOT be counted.
-    const candidates: { party: VoterPreference; votes: number }[] = [
-      { party: 'TDP', votes: stats.TDP },
-      { party: 'YSRCP', votes: stats.YSRCP },
-      { party: 'JSP', votes: stats.JSP },
-      { party: 'BJP', votes: stats.BJP },
-      { party: 'INC', votes: stats.INC },
-      { party: 'OTH', votes: stats.OTH }
-    ];
+    const candidates: { party: string; votes: number }[] = [];
+    for (const p of activePartiesList) {
+      candidates.push({ party: p.code, votes: stats[p.code] || 0 });
+    }
+    if (!candidates.some(c => c.party === 'OTH')) {
+      candidates.push({ party: 'OTH', votes: stats.OTH || 0 });
+    }
 
     // Sort descending
     candidates.sort((a, b) => b.votes - a.votes);
 
-    const highest = candidates[0];
-    const runnerUp = candidates[1];
+    const highest = candidates[0] || { party: primaryPartyCode, votes: 0 };
+    const runnerUp = candidates[1] || { party: 'Others', votes: 0 };
 
-    if (highest.votes === runnerUp.votes) {
+    if (highest.votes === 0) {
+      return {
+        status: 'SURVEY IN PROGRESS',
+        lead: 0,
+        winner: null as string | null
+      };
+    } else if (highest.votes === runnerUp.votes) {
       return {
         status: 'TOO CLOSE TO CALL',
         lead: 0,
-        winner: null as VoterPreference | null
+        winner: null as string | null
       };
     } else {
       return {
@@ -427,31 +534,33 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
         winner: highest.party
       };
     }
-  }, [stats]);
+  }, [stats, activePartiesList, primaryPartyCode]);
 
 
   // --------------------------------------------------------
   // SUB-COMPONENT: DONUT CHART (SVG-based)
   // --------------------------------------------------------
   const donutChartData = useMemo(() => {
-    const dataKeys: VoterPreference[] = ['TDP', 'YSRCP', 'JSP', 'BJP', 'INC', 'Neutral', 'OTH'];
+    const dataKeys: string[] = [...activePartiesList.map(p => p.code), 'Neutral', 'OTH'];
     let cumulativeValue = 0;
     
     return dataKeys.map((key) => {
-      const value = stats[key];
+      const value = stats[key] || 0;
       const percentage = totalVoters > 0 ? (value / totalVoters) * 100 : 0;
       const startValue = cumulativeValue;
       cumulativeValue += percentage;
+      const partyObj = activePartiesList.find(p => p.code === key);
+      const colorHex = key === 'Neutral' ? '#9ca3af' : key === 'OTH' ? '#9333ea' : (partyObj?.primaryColor || (PARTY_COLORS[key as VoterPreference]?.hex ?? primaryPartyColor));
       return {
         key,
         value,
         percentage,
         startValue,
         endValue: cumulativeValue,
-        color: PARTY_COLORS[key].hex
+        color: colorHex
       };
     });
-  }, [stats, totalVoters]);
+  }, [stats, totalVoters, activePartiesList, primaryPartyColor]);
 
   const [hoveredSlice, setHoveredSlice] = useState<string | null>(null);
 
@@ -478,7 +587,7 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
         (v.mobileNumber || '').includes(searchQuery);
 
       // Category Filters
-      const matchesPref = prefFilter === 'ALL' || v.politicalPreference === prefFilter;
+      const matchesPref = prefFilter === 'ALL' || v.politicalPreference === prefFilter || (prefFilter === 'Neutral' && (v.politicalPreference as any) === 'NEUTRAL');
       const matchesStatus = voterStatusFilter === 'ALL' || (v.voterStatus || '').toUpperCase() === voterStatusFilter.toUpperCase();
       const matchesLocation = 
         locationFilter === 'ALL' || 
@@ -511,16 +620,23 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
   // Live Voter Track calculations
   const liveAssessmentStats = useMemo(() => {
     const counts: Record<string, number> = {
-      TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0, Unknown: 0
+      [primaryPartyCode]: 0,
+      Neutral: 0,
+      OTH: 0,
+      Unknown: 0
     };
+    activePartiesList.forEach(p => {
+      counts[p.code] = 0;
+    });
     voters.forEach(v => {
       if (v.voteStatus === 'VOTE DONE') {
-        const ass = v.inchargeAssessment || 'Unknown';
+        const rawAss = v.inchargeAssessment || 'Unknown';
+        const ass = (rawAss as any) === 'NEUTRAL' ? 'Neutral' : rawAss;
         counts[ass] = (counts[ass] || 0) + 1;
       }
     });
     return counts;
-  }, [voters]);
+  }, [voters, primaryPartyCode, activePartiesList]);
 
   // Live Voter Track Pagination
   const [livePage, setLivePage] = useState<number>(1);
@@ -603,9 +719,9 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
             <h4 className="text-xs font-bold text-slate-100">{session.userName}</h4>
             <div className="text-[10px] text-slate-400 flex flex-col gap-0.5 font-mono">
               <span title={session.userId}>ID: {session.userId?.slice(-8).toUpperCase() || 'AGENT'}</span>
-              <span>Village: {session.assignedVillage}</span>
-              <span>Booth: {session.assignedBooth?.split(' ')[1] || '76'}</span>
-              <span>Group: {session.assignedVoterGroup}</span>
+              <span>Village: {session.assignedVillage || voters[0]?.village || 'Rajupalem'}</span>
+              <span>Booth: {session.assignedBooth ? (session.assignedBooth.startsWith('Booth') ? session.assignedBooth : `Booth ${session.assignedBooth}`) : (voters[0]?.boothNumber ? `Booth ${voters[0].boothNumber}` : 'Booth 1')}</span>
+              <span>Group: {session.assignedVoterGroup || voters[0]?.assignedVoterGroup || 'Group 1'}</span>
             </div>
           </div>
 
@@ -774,7 +890,9 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                   </div>
                   
                   <h2 className="text-3xl font-black tracking-tight" id="forecast-lead-title">
-                    {forecast.status === 'TOO CLOSE TO CALL' ? (
+                    {forecast.status === 'SURVEY IN PROGRESS' ? (
+                      <span className="text-amber-400 font-black">SURVEY IN PROGRESS</span>
+                    ) : forecast.status === 'TOO CLOSE TO CALL' ? (
                       <span className="text-orange-400">TOO CLOSE TO CALL</span>
                     ) : (
                       <>
@@ -785,7 +903,9 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                   </h2>
                   
                   <p className="text-lg font-bold text-gray-300">
-                    {forecast.status === 'TOO CLOSE TO CALL' ? (
+                    {forecast.status === 'SURVEY IN PROGRESS' ? (
+                      <span className="text-amber-400 font-black">SURVEY IN PROGRESS</span>
+                    ) : forecast.status === 'TOO CLOSE TO CALL' ? (
                       "Voter support is perfectly split."
                     ) : (
                       <>by <span className="text-yellow-400 text-xl font-extrabold">{forecast.lead}</span> Votes</>
@@ -817,13 +937,13 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                 </div>
               </div>
 
-              {/* Card 2: TDP Supporters */}
+              {/* Card 2: Tenant Party Supporters */}
               <div className="bg-amber-50/50 border border-amber-200 rounded-xl p-5 shadow-sm flex flex-col justify-between space-y-3">
-                <p className="text-xs font-black text-amber-700 uppercase tracking-wider">TDP Supporters</p>
-                <h3 className="text-3xl font-black text-amber-500">{stats.TDP}</h3>
+                <p className="text-xs font-black text-amber-700 uppercase tracking-wider">{primaryPartyCode} Supporters</p>
+                <h3 className="text-3xl font-black text-amber-500">{stats[primaryPartyCode] || 0}</h3>
                 <div className="pt-2 border-t border-amber-200/60 flex items-center justify-between text-xs font-bold text-amber-600">
-                  <span className="text-amber-600 font-black">{((stats.TDP / totalVoters) * 100).toFixed(1)}% of total</span>
-                  <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-black uppercase font-mono">TDP</span>
+                  <span className="text-amber-600 font-black">{totalVoters > 0 ? (((stats[primaryPartyCode] || 0) / totalVoters) * 100).toFixed(1) : '0.0'}% of total</span>
+                  <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-black uppercase font-mono">{primaryPartyCode}</span>
                 </div>
               </div>
 
@@ -863,10 +983,12 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-                    {(['TDP', 'YSRCP', 'JSP', 'BJP', 'INC', 'Neutral', 'OTH'] as VoterPreference[]).map((key) => {
-                      const count = stats[key];
-                      const pct = Math.round((count / totalVoters) * 100);
-                      const colorInfo = PARTY_COLORS[key];
+                    {[...activePartiesList.map(p => p.code), 'Neutral', 'OTH'].map((key) => {
+                      const count = stats[key] || 0;
+                      const pct = totalVoters > 0 ? Math.round((count / totalVoters) * 100) : 0;
+                      const partyObj = activePartiesList.find(p => p.code === key);
+                      const colorHex = key === 'Neutral' ? '#9ca3af' : key === 'OTH' ? '#9333ea' : (partyObj?.primaryColor || (PARTY_COLORS[key as VoterPreference]?.hex ?? primaryPartyColor));
+                      const bgCol = key === 'Neutral' ? 'bg-slate-400' : key === 'OTH' ? 'bg-purple-600' : (PARTY_COLORS[key as VoterPreference]?.bg ?? 'bg-amber-500');
                       
                       return (
                         <div 
@@ -874,7 +996,7 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                           className="bg-slate-50 border border-gray-100 hover:border-gray-200 rounded-xl p-3 flex flex-col items-center justify-between text-center space-y-2 transition-all shadow-sm"
                         >
                           <div className="flex items-center gap-1.5">
-                            <span className={`w-2.5 h-2.5 rounded-full ${colorInfo.bg}`}></span>
+                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colorHex }}></span>
                             <span className="text-xs font-bold text-slate-700">{key}</span>
                           </div>
                           
@@ -883,7 +1005,7 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                             <p className="text-[10px] text-slate-500 font-bold">Votes</p>
                           </div>
                           
-                          <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${colorInfo.lightBg || 'bg-slate-100'} ${colorInfo.darkText || 'text-slate-800'}`}>
+                          <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-slate-100 text-slate-800">
                             {pct}%
                           </span>
                         </div>
@@ -1023,11 +1145,9 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                     className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-700 focus:outline-none focus:border-yellow-400 cursor-pointer"
                   >
                     <option value="ALL">All</option>
-                    <option value="TDP">TDP</option>
-                    <option value="YSRCP">YSRCP</option>
-                    <option value="JSP">JSP</option>
-                    <option value="BJP">BJP</option>
-                    <option value="INC">INC</option>
+                    {activePartiesList.map(p => (
+                      <option key={p.code} value={p.code}>{p.code}</option>
+                    ))}
                     <option value="Neutral">Neutral</option>
                     <option value="OTH">OTH</option>
                   </select>
@@ -1160,6 +1280,28 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                           {/* PREFERENCE */}
                           <td className="px-6 py-5">
                             {(() => {
+                              const pref = String(v.politicalPreference || 'Neutral');
+                              if (pref === primaryPartyCode) {
+                                return (
+                                  <span
+                                    className="inline-flex px-2.5 py-1 text-[10px] font-black tracking-wider uppercase rounded text-white shadow-sm"
+                                    style={{ backgroundColor: primaryPartyColor }}
+                                  >
+                                    {primaryPartyCode}
+                                  </span>
+                                );
+                              }
+                              const compParty = activePartiesList.find(p => p.code === pref);
+                              if (compParty) {
+                                return (
+                                  <span
+                                    className="inline-flex px-2.5 py-1 text-[10px] font-black tracking-wider uppercase rounded text-white shadow-sm"
+                                    style={{ backgroundColor: compParty.primaryColor || '#64748b' }}
+                                  >
+                                    {compParty.code}
+                                  </span>
+                                );
+                              }
                               switch (v.politicalPreference) {
                                 case 'TDP':
                                   return <span className="inline-flex px-2.5 py-1 text-[10px] font-black tracking-wider uppercase rounded bg-yellow-400 text-slate-950 shadow-sm">TDP</span>;
@@ -1172,6 +1314,7 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                                 case 'INC':
                                   return <span className="inline-flex px-2.5 py-1 text-[10px] font-black tracking-wider uppercase rounded bg-sky-400 text-sky-950 shadow-sm">INC</span>;
                                 case 'Neutral':
+                                case 'NEUTRAL' as any:
                                   return <span className="inline-flex px-2.5 py-1 text-[10px] font-black tracking-wider uppercase rounded bg-slate-300 text-slate-800 shadow-sm">Neutral</span>;
                                 case 'OTH':
                                 default:
@@ -1227,7 +1370,10 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
 
                               {/* Edit button */}
                               <button
-                                onClick={() => setEditingVoter(v)}
+                                onClick={() => {
+                                  setEditingVoter(v);
+                                  void getVoterById(v.id).then(f => { if (f) setEditingVoter(f); }).catch(() => {});
+                                }}
                                 className="w-9 h-9 rounded-full border border-slate-200 flex items-center justify-center hover:bg-slate-50 text-slate-500 hover:text-slate-800 active:scale-90 hover:scale-105 transition-all cursor-pointer"
                                 title="Edit Voter Details"
                               >
@@ -1305,19 +1451,10 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                   <h4 className="font-bold text-xs text-slate-900 uppercase tracking-wide">Live Field Assessment</h4>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-                  {(['TDP', 'YSRCP', 'JSP', 'BJP', 'INC', 'Neutral', 'OTH', 'Unknown'] as const).map((key) => {
+                  {[...activePartiesList.map(p => p.code), 'Neutral', 'OTH', 'Unknown'].map((key) => {
                     const count = liveAssessmentStats[key] || 0;
-                    
-                    // Style logic based on colors requested
-                    let colorBg = 'bg-slate-500';
-                    let colorText = 'text-slate-800';
-                    if (key === 'TDP') { colorBg = 'bg-yellow-400'; colorText = 'text-yellow-800'; }
-                    else if (key === 'YSRCP') { colorBg = 'bg-blue-600'; colorText = 'text-white'; }
-                    else if (key === 'JSP') { colorBg = 'bg-red-600'; colorText = 'text-white'; }
-                    else if (key === 'BJP') { colorBg = 'bg-orange-500'; colorText = 'text-white'; }
-                    else if (key === 'INC') { colorBg = 'bg-sky-400'; colorText = 'text-sky-950'; }
-                    else if (key === 'Neutral') { colorBg = 'bg-gray-400'; colorText = 'text-gray-800'; }
-                    else if (key === 'OTH') { colorBg = 'bg-purple-600'; colorText = 'text-white'; }
+                    const partyObj = activePartiesList.find(p => p.code === key);
+                    const colorHex = key === 'Neutral' ? '#9ca3af' : key === 'OTH' ? '#9333ea' : key === 'Unknown' ? '#64748b' : (partyObj?.primaryColor || (PARTY_COLORS[key as VoterPreference]?.hex ?? primaryPartyColor));
 
                     return (
                       <div 
@@ -1325,7 +1462,7 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                         className="bg-slate-50 border border-gray-100 rounded-lg p-2.5 flex flex-col items-center justify-center text-center space-y-1 hover:border-gray-200 transition-all shadow-sm"
                       >
                         <div className="flex items-center gap-1.5">
-                          <span className={`w-2 h-2 rounded-full ${colorBg}`}></span>
+                          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: colorHex }}></span>
                           <span className="text-[10px] font-bold text-slate-600">{key}</span>
                         </div>
                         <p className="text-base font-black text-slate-900">{count}</p>
@@ -1446,11 +1583,9 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                                     }}
                                     className="text-[11px] font-bold p-1 bg-white border border-slate-200 rounded focus:outline-none focus:border-yellow-400 cursor-pointer min-w-[90px]"
                                   >
-                                    <option value="TDP">TDP</option>
-                                    <option value="YSRCP">YSRCP</option>
-                                    <option value="JSP">JSP</option>
-                                    <option value="BJP">BJP</option>
-                                    <option value="INC">INC</option>
+                                    {activePartiesList.map(p => (
+                                      <option key={p.code} value={p.code}>{p.code}</option>
+                                    ))}
                                     <option value="Neutral">Neutral</option>
                                     <option value="OTH">OTH</option>
                                     <option value="Unknown">Unknown</option>
@@ -1476,11 +1611,6 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                                       liveTrackLastUpdatedTime: new Date().toISOString()
                                     } : item));
 
-                                    // Persist vote tracking to backend PostgreSQL database
-                                    void markVoteDone(v.id).catch(() => {
-                                      void syncVoter({ id: v.id, voteStatus: 'VOTE DONE' as any });
-                                    });
-
                                     // Add to real-time sync ticker log
                                     const newLog = {
                                       id: "SYNC-" + Math.floor(1000 + Math.random() * 9000),
@@ -1491,9 +1621,21 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                                       synced: false
                                     };
                                     setLiveSyncQueue(prev => [newLog, ...prev].slice(0, 5));
-                                    setTimeout(() => {
-                                      setLiveSyncQueue(prev => prev.map(log => log.id === newLog.id ? { ...log, synced: true } : log));
-                                    }, 1000);
+
+                                    // Persist vote tracking to backend PostgreSQL database
+                                    void markVoteDone(v.id)
+                                      .then(() => {
+                                        setLiveSyncQueue(prev => prev.map(log => log.id === newLog.id ? { ...log, synced: true } : log));
+                                      })
+                                      .catch(() => {
+                                        void syncVoter({ id: v.id, voteStatus: 'VOTE DONE' as any })
+                                          .then(() => {
+                                            setLiveSyncQueue(prev => prev.map(log => log.id === newLog.id ? { ...log, synced: true } : log));
+                                          })
+                                          .catch((err) => {
+                                            console.error('Failed to mark vote done:', err);
+                                          });
+                                      });
                                   }}
                                   className="px-2.5 py-1.5 bg-yellow-400 hover:bg-yellow-500 text-slate-950 text-[10px] font-black rounded shadow-sm hover:shadow active:scale-95 transition-all uppercase tracking-wide cursor-pointer"
                                 >
@@ -1503,24 +1645,37 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                                 <button
                                   onClick={() => {
                                     const now = new Date();
+                                    const updateTime = now.toISOString();
+                                    const displayTime = v.voteDoneTime || now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
                                     setVoters(prev => prev.map(item => item.id === v.id ? { 
                                       ...item, 
-                                      liveTrackLastUpdatedTime: now.toISOString()
+                                      liveTrackLastUpdatedTime: updateTime
                                     } : item));
 
-                                    // Trigger immediate sync aggregation stream update
+                                    // Add to real-time sync ticker log
                                     const newLog = {
                                       id: "SYNC-" + Math.floor(1000 + Math.random() * 9000),
                                       voterName: v.name,
-                                      time: v.voteDoneTime || now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                                      status: '✓ VOTE DONE',
+                                      time: displayTime,
+                                      status: '✓ SAVED',
                                       assessment: v.inchargeAssessment || 'Unknown',
                                       synced: false
                                     };
                                     setLiveSyncQueue(prev => [newLog, ...prev].slice(0, 5));
-                                    setTimeout(() => {
-                                      setLiveSyncQueue(prev => prev.map(log => log.id === newLog.id ? { ...log, synced: true } : log));
-                                    }, 1000);
+
+                                    // Persist assessment update to backend PostgreSQL database
+                                    void syncVoter({
+                                      id: v.id,
+                                      inchargeAssessment: v.inchargeAssessment as any,
+                                      liveTrackLastUpdatedTime: updateTime,
+                                    }, session.userId)
+                                      .then(() => {
+                                        setLiveSyncQueue(prev => prev.map(log => log.id === newLog.id ? { ...log, synced: true } : log));
+                                      })
+                                      .catch((err) => {
+                                        console.error('Failed to sync voter assessment:', err);
+                                      });
                                   }}
                                   className="px-3 py-1.5 bg-slate-950 hover:bg-slate-800 text-white text-[10px] font-black rounded shadow-sm hover:shadow active:scale-95 transition-all uppercase tracking-wide cursor-pointer"
                                 >
@@ -1679,7 +1834,10 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
                           </td>
                           <td className="px-4 py-4">
                             <button
-                              onClick={() => setEditingVoter(v)}
+                              onClick={() => {
+                                setEditingVoter(v);
+                                void getVoterById(v.id).then(f => { if (f) setEditingVoter(f); }).catch(() => {});
+                              }}
                               className="px-2.5 py-1 bg-white border border-gray-200 text-[10px] font-bold rounded hover:bg-gray-50 text-gray-700 shadow-sm cursor-pointer"
                             >
                               Update Status
@@ -1884,47 +2042,27 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
               {/* 1. VOTER CHOICE */}
               <div className="space-y-1.5">
                 <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider">1. Voter Choice</label>
-                <div className="space-y-2">
-                  {/* Row 1: TDP, YSRCP, JSP, BJP */}
-                  <div className="grid grid-cols-4 gap-2">
-                    {(['TDP', 'YSRCP', 'JSP', 'BJP'] as VoterPreference[]).map((pref) => {
-                      const isSelected = editingVoter.politicalPreference === pref;
-                      return (
-                        <button
-                          key={pref}
-                          type="button"
-                          onClick={() => setEditingVoter({ ...editingVoter, politicalPreference: pref })}
-                          className={`py-2 text-xs rounded-lg border text-center transition-all cursor-pointer ${
-                            isSelected 
-                              ? 'bg-yellow-400 text-slate-950 border-yellow-400 font-black shadow-sm' 
-                              : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200 font-bold'
-                          }`}
-                        >
-                          {pref}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {/* Row 2: INC, Neutral, OTH */}
-                  <div className="grid grid-cols-3 gap-2">
-                    {(['INC', 'Neutral', 'OTH'] as VoterPreference[]).map((pref) => {
-                      const isSelected = editingVoter.politicalPreference === pref;
-                      return (
-                        <button
-                          key={pref}
-                          type="button"
-                          onClick={() => setEditingVoter({ ...editingVoter, politicalPreference: pref })}
-                          className={`py-2 text-xs rounded-lg border text-center transition-all cursor-pointer ${
-                            isSelected 
-                              ? 'bg-yellow-400 text-slate-950 border-yellow-400 font-black shadow-sm' 
-                              : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200 font-bold'
-                          }`}
-                        >
-                          {pref === 'OTH' ? 'OTH' : pref}
-                        </button>
-                      );
-                    })}
-                  </div>
+                <div className="flex flex-wrap gap-2">
+                  {[...activePartiesList.map(p => p.code), 'Neutral', 'OTH'].map((pref) => {
+                    const isSelected = editingVoter.politicalPreference === pref;
+                    const partyObj = activePartiesList.find(p => p.code === pref);
+                    const colorHex = pref === 'Neutral' ? '#64748b' : pref === 'OTH' ? '#9333ea' : (partyObj?.primaryColor || primaryPartyColor);
+                    return (
+                      <button
+                        key={pref}
+                        type="button"
+                        onClick={() => setEditingVoter({ ...editingVoter, politicalPreference: pref })}
+                        className={`flex-1 min-w-[70px] py-2 text-xs rounded-lg border text-center transition-all cursor-pointer ${
+                          isSelected 
+                            ? 'text-white font-black shadow-sm' 
+                            : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200 font-bold'
+                        }`}
+                        style={isSelected ? { backgroundColor: colorHex, borderColor: colorHex } : {}}
+                      >
+                        {pref}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 

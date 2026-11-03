@@ -15,7 +15,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { AdminUser } from '../types';
-import { fetchAdminProfile, updateAdminProfile, changeAdminPassword } from '../lib/api';
+import { fetchAdminProfile, updateAdminProfile, changeAdminPassword, requestMobileChangeOtp, verifyMobileChangeOtp } from '../lib/api';
 import { useNotification } from '../context/NotificationContext';
 import { getAppUrl, getApiUrl } from '../lib/env';
 
@@ -32,6 +32,50 @@ export default function AdminProfileSecurity({
 
   // Profile fields state
   const [loading, setLoading] = useState(true);
+  const [showMobileModal, setShowMobileModal] = useState(false);
+  const [newMobile, setNewMobile] = useState('');
+  const [otpRequestId, setOtpRequestId] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState('');
+  const [mobileSubmitting, setMobileSubmitting] = useState(false);
+
+  const handleRequestMobileOtp = async () => {
+    if (newMobile.length < 10) {
+      notify.error('Please enter a valid 10-digit mobile number', 'Validation Error');
+      return;
+    }
+    setMobileSubmitting(true);
+    try {
+      const res = await requestMobileChangeOtp(newMobile);
+      setOtpRequestId(res.requestId);
+      notify.success('Verification code dispatched to proposed number.', 'OTP Sent');
+    } catch (err: any) {
+      notify.error(err?.message || 'Failed to request OTP', 'Request Failed');
+    } finally {
+      setMobileSubmitting(false);
+    }
+  };
+
+  const handleVerifyMobileOtp = async () => {
+    if (!otpRequestId || otpCode.length < 6) {
+      notify.error('Please enter the 6-digit verification code', 'Validation Error');
+      return;
+    }
+    setMobileSubmitting(true);
+    try {
+      await verifyMobileChangeOtp(otpRequestId, newMobile, otpCode);
+      setProfileData(prev => ({ ...prev, mobileNumber: newMobile }));
+      setShowMobileModal(false);
+      setOtpRequestId(null);
+      setOtpCode('');
+      setNewMobile('');
+      notify.success('Mobile number updated successfully.', 'Verified');
+    } catch (err: any) {
+      notify.error(err?.message || 'Verification failed', 'Invalid Code');
+    } finally {
+      setMobileSubmitting(false);
+    }
+  };
+
   const [profileData, setProfileData] = useState<{
     name: string;
     email: string;
@@ -252,9 +296,18 @@ export default function AdminProfileSecurity({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  Registered Mobile Number
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-slate-300">
+                    Registered Mobile Number
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowMobileModal(true)}
+                    className="text-[11px] font-bold text-amber-400 hover:text-amber-300 transition cursor-pointer"
+                  >
+                    Change Number
+                  </button>
+                </div>
                 <div className="relative">
                   <Smartphone className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
@@ -445,6 +498,62 @@ export default function AdminProfileSecurity({
           </div>
         </div>
       </div>
+
+      {showMobileModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-sm font-black text-white">Change Admin Mobile Number</h3>
+              <button
+                onClick={() => { setShowMobileModal(false); setOtpRequestId(null); setOtpCode(''); }}
+                className="text-slate-400 hover:text-white text-xs"
+              >
+                Cancel
+              </button>
+            </div>
+            
+            {!otpRequestId ? (
+              <div className="space-y-3">
+                <p className="text-xs text-slate-400">Enter your new 10-digit mobile number. An OTP will be dispatched to verify ownership.</p>
+                <input
+                  type="tel"
+                  value={newMobile}
+                  onChange={(e) => setNewMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  placeholder="New 10-digit Mobile"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono focus:border-amber-400 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleRequestMobileOtp}
+                  disabled={mobileSubmitting || newMobile.length < 10}
+                  className="w-full py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs disabled:opacity-50 transition cursor-pointer"
+                >
+                  {mobileSubmitting ? 'Sending OTP...' : 'Send Verification OTP'}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-slate-400">Enter the 6-digit OTP code sent to +91 {newMobile}:</p>
+                <input
+                  type="text"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="6-digit OTP"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono text-center tracking-widest focus:border-amber-400 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleVerifyMobileOtp}
+                  disabled={mobileSubmitting || otpCode.length < 6}
+                  className="w-full py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs disabled:opacity-50 transition cursor-pointer"
+                >
+                  {mobileSubmitting ? 'Verifying...' : 'Verify & Update Number'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

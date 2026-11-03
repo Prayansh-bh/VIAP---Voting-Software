@@ -430,7 +430,7 @@ export async function loadCmsBundle(options?: {
       NOT: {
         code: { startsWith: 'TEST_' },
       },
-      ...(orgId ? { organisationId: orgId } : {}),
+      ...(orgId ? { OR: [{ organisationId: orgId }, { organisationId: null }] } : {}),
     },
     orderBy: { sortOrder: 'asc' },
   });
@@ -756,6 +756,8 @@ export async function provisionApplication(
     seenMobiles.add(cleanMobile);
 
     const ALLOWED_TIER_ROLES = [
+      RoleType.HIGH_COMMAND,
+      'PARTY_ADMIN',
       RoleType.STATE_ADMIN,
       RoleType.ZONE_INCHARGE,
       RoleType.PARLIAMENT_INCHARGE,
@@ -1069,6 +1071,13 @@ export async function provisionApplication(
         };
 
         const configKey = org.code.toLowerCase();
+        const effectivePartyCode = (body.activePartyCode || 'TDP').toUpperCase();
+        const tenantAnalyticsConfig = {
+          ...DEFAULT_ANALYTICS_CONFIG,
+          leadParty: effectivePartyCode,
+          trackedParties: Array.from(new Set([effectivePartyCode, ...incomingParties.map((p) => p.code.trim().toUpperCase()), 'NEUTRAL', 'OTH'])),
+        };
+
         const updatedConfig = await tx.cMSConfiguration.upsert({
           where: { configKey },
           update: {
@@ -1081,7 +1090,7 @@ export async function provisionApplication(
             primaryColor: body.primaryColor || '#eab308',
             secondaryColor: body.secondaryColor || '#1e293b',
             accentColor: body.accentColor || '#3b82f6',
-            activePartyCode: body.activePartyCode || 'TDP',
+            activePartyCode: effectivePartyCode,
             appScope: body.appScope || 'SINGLE_MLA',
             parliamentName: parliament.name,
             parliamentCode: parliament.code,
@@ -1090,7 +1099,7 @@ export async function provisionApplication(
             hierarchyLabels: mergedHierarchyLabels,
             featureToggles: body.featureToggles || DEFAULT_FEATURE_TOGGLES,
             dashboardConfig: DEFAULT_DASHBOARD_CONFIG,
-            analyticsConfig: DEFAULT_ANALYTICS_CONFIG,
+            analyticsConfig: tenantAnalyticsConfig,
             aiEnabled: true,
           },
           create: {
@@ -1104,7 +1113,7 @@ export async function provisionApplication(
             primaryColor: body.primaryColor || '#eab308',
             secondaryColor: body.secondaryColor || '#1e293b',
             accentColor: body.accentColor || '#3b82f6',
-            activePartyCode: body.activePartyCode || 'TDP',
+            activePartyCode: effectivePartyCode,
             appScope: body.appScope || 'SINGLE_MLA',
             parliamentName: parliament.name,
             parliamentCode: parliament.code,
@@ -1113,7 +1122,7 @@ export async function provisionApplication(
             hierarchyLabels: mergedHierarchyLabels,
             featureToggles: body.featureToggles || DEFAULT_FEATURE_TOGGLES,
             dashboardConfig: DEFAULT_DASHBOARD_CONFIG,
-            analyticsConfig: DEFAULT_ANALYTICS_CONFIG,
+            analyticsConfig: tenantAnalyticsConfig,
             aiEnabled: true,
           },
         });

@@ -36,6 +36,7 @@ export function buildApp(): FastifyInstance {
       level: env.NODE_ENV === 'production' ? 'info' : 'debug',
     },
     trustProxy: true,
+    ignoreTrailingSlash: true,
     bodyLimit: 50 * 1024 * 1024,
   });
 
@@ -139,6 +140,7 @@ export function buildApp(): FastifyInstance {
   app.register(organisationsRoutes, { prefix: '/api/organisations' });
   app.register(partiesRoutes, { prefix: '/api/parties' });
   app.register(hierarchyRoutes, { prefix: '/api' });
+  app.register(hierarchyRoutes, { prefix: '/api/hierarchy' });
   app.register(votersRoutes, { prefix: '/api/voters' });
   app.register(cadreRoutes, { prefix: '/api/cadre' });
   app.register(tasksRoutes, { prefix: '/api/tasks' });

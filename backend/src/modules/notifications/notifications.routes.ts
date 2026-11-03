@@ -64,6 +64,37 @@ export async function notificationsRoutes(fastify: FastifyInstance) {
         organisationId: req.user?.organisationId || null,
       },
     });
+
+    // Fan-out notifications to all active cadre within the tenant organization
+    if (req.user?.organisationId) {
+      void (async () => {
+        try {
+          const cadreUsers = await prisma.user.findMany({
+            where: {
+              organisationId: req.user!.organisationId,
+              accountStatus: 'ACTIVE',
+            },
+            select: { id: true },
+            take: 500,
+          });
+
+          if (cadreUsers.length > 0) {
+            await prisma.notification.createMany({
+              data: cadreUsers.map((u) => ({
+                userId: u.id,
+                title: `High Command: ${title.trim()}`,
+                message: content.trim().slice(0, 250),
+                type: 'SYSTEM',
+                priority: priority === 'URGENT' ? 'HIGH' : 'NORMAL',
+              })),
+            });
+          }
+        } catch (err: any) {
+          req.log.warn({ err }, 'Announcement fan-out notification notice');
+        }
+      })();
+    }
+
     return reply.status(201).send(successResponse(created, 'Announcement created'));
   });
 

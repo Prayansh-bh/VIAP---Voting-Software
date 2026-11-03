@@ -36,8 +36,11 @@ import {
   fetchColumnMappingSuggestions,
   validateApplicationData,
   importApplicationData,
+  fetchDataImportById,
   fetchDataImports,
   fetchDataImportErrors,
+  fetchImportErrors,
+  fetchImportHistory,
   ApplicationConfig,
   ConstituencyItem,
   ValidationReport,
@@ -207,14 +210,20 @@ export default function AssignDataModule({
   const loadHistory = async (page = 1) => {
     setLoadingHistory(true);
     try {
-      const res = await fetchDataImports(selectedAppId, {
-        status: historyStatusFilter,
-        constituencyId: historyConstituencyFilter,
-        page,
-        limit: 15,
-      });
-      setHistoryItems(res.items || []);
-      setHistoryPagination(res.pagination || { total: 0, page: 1, limit: 15, totalPages: 1 });
+      if (historyStatusFilter === 'ALL' && !historyConstituencyFilter && page === 1) {
+        const items = await fetchImportHistory(selectedAppId);
+        setHistoryItems(items || []);
+        setHistoryPagination({ total: items.length, page: 1, limit: 20, totalPages: 1 });
+      } else {
+        const res = await fetchDataImports(selectedAppId, {
+          status: historyStatusFilter,
+          constituencyId: historyConstituencyFilter,
+          page,
+          limit: 15,
+        });
+        setHistoryItems(res.items || []);
+        setHistoryPagination(res.pagination || { total: 0, page: 1, limit: 15, totalPages: 1 });
+      }
     } catch (err) {
       console.error('Failed to load import history:', err);
     } finally {
@@ -375,17 +384,11 @@ export default function AssignDataModule({
     if (!targetConstituency) return;
     setImporting(true);
     setUploadStep('importing');
-    setImportProgress(10);
+    setImportProgress(25);
     setImportError(null);
 
-    const progressTimer = setInterval(() => {
-      setImportProgress((prev) => {
-        if (prev < 90) return prev + Math.floor(Math.random() * 15) + 5;
-        return prev;
-      });
-    }, 400);
-
     try {
+      setImportProgress(50);
       const summary = await importApplicationData(selectedAppId, {
         level: 'VOTER',
         rows: rawRows,
@@ -397,7 +400,18 @@ export default function AssignDataModule({
         fileSize: file?.size || 0,
       });
 
-      clearInterval(progressTimer);
+      setImportProgress(75);
+      if (summary?.importId) {
+        try {
+          const authoritativeRecord = await fetchDataImportById(selectedAppId, summary.importId);
+          if (authoritativeRecord) {
+            summary.reconciliationReport = authoritativeRecord.metadata?.reconciliationReport || summary.reconciliationReport;
+          }
+        } catch {
+          // Graceful fallback to initial summary response
+        }
+      }
+
       setImportProgress(100);
       setImportSummary(summary);
       setUploadStep('summary');
@@ -405,7 +419,6 @@ export default function AssignDataModule({
       // Refresh constituency table
       loadConstituencies();
     } catch (err: any) {
-      clearInterval(progressTimer);
       setImportError(`Import failed: ${err.message}`);
       setUploadStep('preview');
     } finally {
@@ -804,7 +817,7 @@ export default function AssignDataModule({
                                   onClick={async () => {
                                     setSelectedHistoryForErrors(item);
                                     setLoadingErrors(true);
-                                    const errs = await fetchDataImportErrors(item.id);
+                                    const errs = await fetchImportErrors(item.id);
                                     setHistoryErrors(errs);
                                     setLoadingErrors(false);
                                   }}

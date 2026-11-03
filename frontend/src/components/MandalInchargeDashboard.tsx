@@ -12,6 +12,7 @@ import {
   MandalVillage,
   saveMandalVoterRecord
 } from '../utils/mandalHelpers';
+import { createCadreApi } from '../lib/api/cadre.api';
 import {
   Home,
   Search,
@@ -57,6 +58,7 @@ import {
   fetchVotersForUnit,
   fetchHierarchyVillages,
   fetchHierarchyBooths,
+  fetchMandalAnalytics,
   type HierarchyVillage,
   type HierarchyBooth,
   syncVoter,
@@ -67,6 +69,8 @@ import {
 import { createRealtimeSocket, RealtimeVoteEvent } from '../lib/realtime';
 import Pagination from './common/Pagination';
 import { useCms } from '../context/CmsContext';
+import ActiveSessionsModal from './common/ActiveSessionsModal';
+import CadrePulseWidget from './common/CadrePulseWidget';
 
 interface MandalInchargeDashboardProps {
   session: UserSession;
@@ -253,6 +257,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   };
   const [cadreActiveTab, setCadreActiveTab] = useState<'village' | 'booth' | 'voter'>('village');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSessionsOpen, setIsSessionsOpen] = useState(false);
   const [voters, setVoters] = useState<Voter[]>([]);
 
   // Caste Analytics Redesign States
@@ -417,6 +422,16 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     }
     setCadreAssignments(updated);
     setEditingSlotKey(null);
+
+    // Persist allocation in PostgreSQL
+    if (name.trim()) {
+      void createCadreApi({
+        name: name.trim(),
+        role: 'VOTER_100_INCHARGE',
+        assignedUnitLevel: 'VOTER_GROUP',
+        notes: `Assigned to Slot ${key} via Mandal Cockpit`,
+      }).catch(() => {});
+    }
   };
 
   const handleSaveBoothIncharge = (boothNum: number, name: string, mobile: string) => {
@@ -424,6 +439,18 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     updated[boothNum] = { name: name.trim(), mobile: mobile.trim() };
     setBoothInchargeOverrides(updated);
     setEditingInchargeBooth(null);
+
+    // Persist allocation in PostgreSQL
+    const cleanMobile = mobile.replace(/\D/g, '').slice(-10);
+    if (name.trim() && cleanMobile.length >= 10) {
+      void createCadreApi({
+        name: name.trim(),
+        mobileNumber: cleanMobile,
+        role: 'BOOTH_PRESIDENT',
+        assignedUnitLevel: 'BOOTH',
+        notes: `Assigned as Booth ${boothNum} Incharge via Mandal Cockpit`,
+      }).catch(() => {});
+    }
   };
 
   const totalAssignedV100 = useMemo(() => {
@@ -645,6 +672,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
           fetchCadreNetwork(session.unitId).catch(() => null),
           fetchHierarchyVillages(session.unitId).catch(() => []),
           fetchHierarchyBooths(session.unitId).catch(() => []),
+          fetchMandalAnalytics(session.unitId).catch(() => null),
         ]);
 
         if (!active) {
@@ -1422,7 +1450,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         return;
       }
 
-      void updateTrainingProgress(existing.id, 'WATCHED').then(() => {
+      void updateTrainingProgress(video.id, 'WATCHED').then(() => {
         setTrainingProgress((prev) => ({
           ...prev,
           [video.id]: { ...existing, status: 'WATCHED', watchedAt: new Date().toISOString() },
@@ -1433,7 +1461,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     }
 
     void ensureTrainingAssigned(session.userId, video.id)
-      .then((progress) => updateTrainingProgress(progress.id, 'WATCHED').then(() => progress))
+      .then((progress) => updateTrainingProgress(video.id, 'WATCHED').then(() => progress))
       .then((progress) => {
         setTrainingProgress((prev) => ({
           ...prev,
@@ -1750,6 +1778,17 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
 
         {/* Fixed Sign Out at Bottom */}
         <div className="pt-4 border-t border-slate-800 bg-slate-900 shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsSessionsOpen(true)}
+            className="w-full mb-2 flex items-center justify-between px-4 py-2.5 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-all cursor-pointer"
+          >
+            <span className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              Active Sessions
+            </span>
+            <ChevronRight className="w-3.5 h-3.5 opacity-60" />
+          </button>
           <button
             onClick={onLogout}
             className="w-full flex items-center justify-between px-4 py-3 bg-red-950/40 hover:bg-red-900/60 border border-red-900/30 text-red-400 hover:text-white rounded-xl text-xs font-bold transition-all duration-200 cursor-pointer"
@@ -2171,6 +2210,9 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                     </form>
                   )}
                 </div>
+
+                {/* Cadre Opinion Polls Widget */}
+                <CadrePulseWidget title="Mandal Cadre Opinion Polls" />
 
               </div>
             </div>
@@ -5260,6 +5302,10 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         </div>
       )}
 
+      <ActiveSessionsModal
+        isOpen={isSessionsOpen}
+        onClose={() => setIsSessionsOpen(false)}
+      />
     </div>
   );
 }

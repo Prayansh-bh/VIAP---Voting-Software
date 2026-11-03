@@ -1,150 +1,28 @@
 import { prisma } from '../../lib/prisma.js';
 import { CreateApprovalDto } from './approvals.schema.js';
+import { Prisma } from '@prisma/client';
 
 export interface ApprovalRecord {
   id: string;
-  partyId?: string;
+  partyId?: string | null;
   type: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   title: string;
-  description?: string;
-  entityId?: string;
-  entityType?: string;
+  description?: string | null;
+  entityId?: string | null;
+  entityType?: string | null;
   payload: Record<string, any>;
-  requestedByName: string;
-  requestedByRole: string;
-  requestedByMobile: string;
-  actionedByName?: string;
-  actionedAt?: Date | string;
-  rejectionReason?: string;
+  requestedByName?: string | null;
+  requestedByRole?: string | null;
+  requestedByMobile?: string | null;
+  actionedByName?: string | null;
+  actionedAt?: Date | string | null;
+  rejectionReason?: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 }
 
 export class ApprovalsService {
-  private static tableInitialized = true;
-
-  private static async ensureTable() {
-    // Formally managed by Prisma (model ApprovalRequest in schema.prisma)
-    return;
-  }
-
-  private static async seedInitialApprovals() {
-    const defaultParty = (await prisma.politicalParty.findFirst({ where: { isActive: true } }))?.code || 'TDP';
-
-    const sampleRequests: Array<{
-      type: string;
-      title: string;
-      desc: string;
-      name: string;
-      role: string;
-      mobile: string;
-      payload: any;
-    }> = [
-      // 1. User Registrations
-      {
-        type: 'USER_REGISTRATION',
-        title: 'New Cadre Registration — Polling Agent',
-        desc: 'Self-registered via Mobile Gateway for Booth #104 (Kondapi)',
-        name: 'Ramesh Naidu',
-        role: 'POLLING_AGENT',
-        mobile: '9848011221',
-        payload: { area: 'Booth #104', village: 'Kondapi', idProof: 'EPIC-A109' },
-      },
-      {
-        type: 'USER_REGISTRATION',
-        title: 'New Volunteer Application — Village Ward 3',
-        desc: 'Cadre volunteer enrollment request',
-        name: 'K. Sunitha',
-        role: 'VOLUNTEER',
-        mobile: '9848011222',
-        payload: { area: 'Ward 3', village: 'Ananthavaram' },
-      },
-      // 2. Incharge Requests
-      {
-        type: 'INCHARGE_APPROVAL',
-        title: 'Appointment: Booth Incharge for Booth #112',
-        desc: 'Proposed replacement for superannuated incharge in Booth #112',
-        name: 'V. Venkatesh',
-        role: 'BOOTH_PRESIDENT',
-        mobile: '9848011223',
-        payload: { boothNumber: '112', targetMandal: 'Kondapi', voterCount: 840 },
-      },
-      {
-        type: 'INCHARGE_APPROVAL',
-        title: 'Appointment: 100-Voter Cluster Incharge',
-        desc: 'Cluster Committee lead for Section 2 (Voters 101-200)',
-        name: 'M. Harish',
-        role: 'VOTER_100_INCHARGE',
-        mobile: '9848011224',
-        payload: { clusterRange: '101-200', booth: '#108' },
-      },
-      // 3. Data Corrections
-      {
-        type: 'DATA_CORRECTION',
-        title: 'Voter Status Update: EPIC WDX2910384 to MIGRATED',
-        desc: 'Voter permanently shifted to Hyderabad for employment; request status update to Migrated Outreach',
-        name: 'S. Prasad (Booth Incharge #14)',
-        role: 'BOOTH_PRESIDENT',
-        mobile: '9848010002',
-        payload: { epicNumber: 'WDX2910384', previousStatus: 'ACTIVE', newStatus: 'MIGRATED', city: 'Hyderabad' },
-      },
-      {
-        type: 'DATA_CORRECTION',
-        title: 'Voter Family Relation Correction: EPIC WDX1029381',
-        desc: 'Relation updated from Father to Husband as per latest electoral roll revision',
-        name: 'L. Nageswara Rao',
-        role: 'VOTER_100_INCHARGE',
-        mobile: '9848010003',
-        payload: { epicNumber: 'WDX1029381', field: 'relationType', from: 'FATHER', to: 'HUSBAND' },
-      },
-      // 4. Survey Approvals
-      {
-        type: 'SURVEY_APPROVAL',
-        title: 'Batch Survey Submission: Booth #105 (48 Verified)',
-        desc: 'Door-to-door ground sentiment and scheme beneficiary survey completed',
-        name: 'P. Anjaneyulu',
-        role: 'VOTER_100_INCHARGE',
-        mobile: '9848010004',
-        payload: { completedSurveys: 48, favorableCount: 39, neutralCount: 7, schemesChecked: 3 },
-      },
-      {
-        type: 'SURVEY_APPROVAL',
-        title: 'Batch Survey Submission: Booth #108 (35 Verified)',
-        desc: 'Local community feedback survey report ready for sign-off',
-        name: 'T. Rama Rao',
-        role: 'BOOTH_PRESIDENT',
-        mobile: '9848010002',
-        payload: { completedSurveys: 35, favorableCount: 28, neutralCount: 5 },
-      },
-      // 5. Transfer Approvals
-      {
-        type: 'TRANSFER_APPROVAL',
-        title: 'Incharge Transfer: Move from Booth #101 to Booth #106',
-        desc: 'Cadre relocation due to residential transfer in Kondapi Mandal',
-        name: 'Ch. Srinivas',
-        role: 'BOOTH_PRESIDENT',
-        mobile: '9848011225',
-        payload: { fromBooth: '101', toBooth: '106', mandal: 'Kondapi' },
-      },
-    ];
-
-    for (const item of sampleRequests) {
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO approval_requests (party_id, type, status, title, description, payload, requested_by_name, requested_by_role, requested_by_mobile, created_at, updated_at)
-         VALUES ($1, $2, 'PENDING', $3, $4, $5::jsonb, $6, $7, $8, NOW(), NOW())`,
-        defaultParty,
-        item.type,
-        item.title,
-        item.desc,
-        JSON.stringify(item.payload),
-        item.name,
-        item.role,
-        item.mobile
-      );
-    }
-  }
-
   static async getApprovals(query: {
     partyId?: string;
     type?: string;
@@ -152,141 +30,309 @@ export class ApprovalsService {
     limit?: number;
     offset?: number;
   }) {
-    await this.ensureTable();
-    const conditions: string[] = [];
-    const params: any[] = [];
-    let pIdx = 1;
+    const where: Prisma.ApprovalRequestWhereInput = {};
 
     if (query.partyId && query.partyId !== 'all') {
-      conditions.push(`(party_id = $${pIdx} OR party_id IS NULL)`);
-      params.push(query.partyId);
-      pIdx++;
+      where.OR = [
+        { partyId: query.partyId },
+        { partyId: null },
+      ];
     }
 
     if (query.type && query.type !== 'ALL') {
-      conditions.push(`type = $${pIdx}`);
-      params.push(query.type);
-      pIdx++;
+      if (query.type === 'INCHARGE_REQUEST') {
+        where.type = { in: ['INCHARGE_REQUEST', 'INCHARGE_APPROVAL', 'TRANSFER_APPROVAL', 'TRANSFER_REQUEST'] };
+      } else {
+        where.type = query.type;
+      }
     }
 
     if (query.status && query.status !== 'ALL') {
-      conditions.push(`status = $${pIdx}`);
-      params.push(query.status);
-      pIdx++;
+      where.status = query.status;
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = Math.min(query.limit || 50, 100);
     const offset = query.offset || 0;
 
-    const countQuery = `SELECT COUNT(*)::int as total FROM approval_requests ${whereClause}`;
-    const dataQuery = `
-      SELECT id, party_id as "partyId", type, status, title, description, entity_id as "entityId",
-             entity_type as "entityType", payload, requested_by_name as "requestedByName",
-             requested_by_role as "requestedByRole", requested_by_mobile as "requestedByMobile",
-             actioned_by_name as "actionedByName", actioned_at as "actionedAt",
-             rejection_reason as "rejectionReason", created_at as "createdAt", updated_at as "updatedAt"
-      FROM approval_requests
-      ${whereClause}
-      ORDER BY created_at DESC
-      LIMIT ${limit} OFFSET ${offset}
-    `;
-
-    const [totalRes, items] = (await Promise.all([
-      prisma.$queryRawUnsafe(countQuery, ...params),
-      prisma.$queryRawUnsafe(dataQuery, ...params),
-    ])) as [any[], any[]];
+    const [total, items] = await Promise.all([
+      prisma.approvalRequest.count({ where }),
+      prisma.approvalRequest.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: offset,
+        take: limit,
+      }),
+    ]);
 
     return {
-      total: totalRes?.[0]?.total || 0,
-      items: items || [],
+      total,
+      items: items.map((item) => ({
+        id: item.id,
+        partyId: item.partyId,
+        type: item.type,
+        status: item.status as 'PENDING' | 'APPROVED' | 'REJECTED',
+        title: item.title,
+        description: item.description,
+        entityId: item.entityId,
+        entityType: item.entityType,
+        payload: (item.payload as Record<string, any>) || {},
+        requestedByName: item.requestedByName || 'Incharge',
+        requestedByRole: item.requestedByRole || 'CADRE',
+        requestedByMobile: item.requestedByMobile || '',
+        actionedByName: item.actionedByName,
+        actionedAt: item.actionedAt,
+        rejectionReason: item.rejectionReason,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+      })),
       limit,
       offset,
     };
   }
 
   static async getStats(partyId?: string) {
-    await this.ensureTable();
-    const filter = partyId && partyId !== 'all' ? `WHERE (party_id = '${partyId}' OR party_id IS NULL)` : '';
+    const where: Prisma.ApprovalRequestWhereInput = {};
+    if (partyId && partyId !== 'all') {
+      where.OR = [{ partyId }, { partyId: null }];
+    }
 
-    const stats: any[] = await prisma.$queryRawUnsafe(`
-      SELECT 
-        COUNT(*) FILTER (WHERE status = 'PENDING')::int as "totalPending",
-        COUNT(*) FILTER (WHERE status = 'APPROVED')::int as "totalApproved",
-        COUNT(*) FILTER (WHERE status = 'REJECTED')::int as "totalRejected",
-        COUNT(*) FILTER (WHERE status = 'PENDING' AND type = 'USER_REGISTRATION')::int as "userRegistrations",
-        COUNT(*) FILTER (WHERE status = 'PENDING' AND type = 'INCHARGE_APPROVAL')::int as "inchargeRequests",
-        COUNT(*) FILTER (WHERE status = 'PENDING' AND type = 'DATA_CORRECTION')::int as "dataCorrections",
-        COUNT(*) FILTER (WHERE status = 'PENDING' AND type = 'SURVEY_APPROVAL')::int as "surveyApprovals",
-        COUNT(*) FILTER (WHERE status = 'PENDING' AND type = 'TRANSFER_APPROVAL')::int as "transferApprovals"
-      FROM approval_requests
-      ${filter}
-    `);
+    const all = await prisma.approvalRequest.findMany({
+      where,
+      select: { type: true, status: true },
+    });
 
-    return (
-      stats?.[0] || {
-        totalPending: 0,
-        totalApproved: 0,
-        totalRejected: 0,
-        userRegistrations: 0,
-        inchargeRequests: 0,
-        dataCorrections: 0,
-        surveyApprovals: 0,
-        transferApprovals: 0,
-      }
-    );
+    const totalPending = all.filter((a) => a.status === 'PENDING').length;
+    const totalApproved = all.filter((a) => a.status === 'APPROVED').length;
+    const totalRejected = all.filter((a) => a.status === 'REJECTED').length;
+
+    const userRegistrations = all.filter((a) => a.status === 'PENDING' && a.type === 'USER_REGISTRATION').length;
+    const inchargeRequests = all.filter(
+      (a) =>
+        a.status === 'PENDING' &&
+        (a.type === 'INCHARGE_REQUEST' || a.type === 'INCHARGE_APPROVAL' || a.type === 'TRANSFER_APPROVAL' || a.type === 'TRANSFER_REQUEST')
+    ).length;
+    const dataCorrections = all.filter((a) => a.status === 'PENDING' && a.type === 'DATA_CORRECTION').length;
+    const surveyApprovals = all.filter((a) => a.status === 'PENDING' && a.type === 'SURVEY_APPROVAL').length;
+    const transferApprovals = all.filter(
+      (a) => a.status === 'PENDING' && (a.type === 'TRANSFER_APPROVAL' || a.type === 'TRANSFER_REQUEST')
+    ).length;
+
+    return {
+      totalPending,
+      totalApproved,
+      totalRejected,
+      userRegistrations,
+      inchargeRequests,
+      dataCorrections,
+      surveyApprovals,
+      transferApprovals,
+    };
   }
 
   static async createApproval(data: CreateApprovalDto) {
-    await this.ensureTable();
-    const rows: any[] = await prisma.$queryRawUnsafe(
-      `INSERT INTO approval_requests (party_id, type, status, title, description, entity_id, entity_type, payload, requested_by_name, requested_by_role, requested_by_mobile, created_at, updated_at)
-       VALUES ($1, $2, 'PENDING', $3, $4, $5, $6, $7::jsonb, $8, $9, $10, NOW(), NOW())
-       RETURNING id, type, status, title, created_at as "createdAt"`,
-      data.partyId || 'TDP',
-      data.type,
-      data.title,
-      data.description || null,
-      data.entityId || null,
-      data.entityType || null,
-      JSON.stringify(data.payload || {}),
-      data.requestedByName || 'In-Charge',
-      data.requestedByRole || 'VOTER_100_INCHARGE',
-      data.requestedByMobile || ''
-    );
-    return rows?.[0];
+    const created = await prisma.approvalRequest.create({
+      data: {
+        partyId: data.partyId || 'SDS',
+        type: data.type,
+        title: data.title,
+        description: data.description || null,
+        entityId: data.entityId || null,
+        entityType: data.entityType || null,
+        payload: (data.payload as Prisma.InputJsonValue) || {},
+        requestedByName: data.requestedByName || 'In-Charge',
+        requestedByRole: data.requestedByRole || 'VOTER_100_INCHARGE',
+        requestedByMobile: data.requestedByMobile || '',
+        status: 'PENDING',
+      },
+    });
+
+    return created;
   }
 
   static async approve(id: string, actionedBy: string = 'Party Super Admin') {
-    await this.ensureTable();
-    const rows: any[] = await prisma.$queryRawUnsafe(
-      `UPDATE approval_requests 
-       SET status = 'APPROVED', actioned_by_name = $1, actioned_at = NOW(), updated_at = NOW()
-       WHERE id = $2::uuid
-       RETURNING id, status, actioned_by_name as "actionedByName", actioned_at as "actionedAt"`,
-      actionedBy,
-      id
-    );
-    if (!rows || rows.length === 0) {
-      throw new Error(`Approval request with ID ${id} not found.`);
-    }
-    return rows[0];
+    return prisma.$transaction(async (tx) => {
+      const request = await tx.approvalRequest.findUnique({ where: { id } });
+      if (!request) {
+        throw new Error(`Approval request with ID '${id}' not found.`);
+      }
+      if (request.status !== 'PENDING') {
+        throw new Error(`Approval request has already been ${request.status.toLowerCase()}.`);
+      }
+
+      const payload = (request.payload as Record<string, any>) || {};
+
+      // Outbound Execution Dispatcher based on Type
+      switch (request.type) {
+        case 'USER_REGISTRATION': {
+          const userId = request.entityId || payload.userId;
+          if (userId) {
+            await tx.user.updateMany({
+              where: { id: userId },
+              data: { accountStatus: 'ACTIVE', isVerified: true },
+            });
+          } else {
+            const mobile = payload.mobileNumber || request.requestedByMobile;
+            if (mobile) {
+              const existing = await tx.user.findFirst({
+                where: { mobileNumber: mobile },
+              });
+              if (existing) {
+                await tx.user.update({
+                  where: { id: existing.id },
+                  data: { accountStatus: 'ACTIVE', isVerified: true },
+                });
+              } else {
+                let organisationId = request.partyId || payload.organisationId;
+                if (!organisationId) {
+                  const defaultOrg = await tx.organisation.findFirst({ select: { id: true } });
+                  organisationId = defaultOrg?.id;
+                }
+                if (organisationId) {
+                  const role = (payload.role || request.requestedByRole || 'BOOTH_INCHARGE').toUpperCase();
+                  await tx.user.create({
+                    data: {
+                      userCode: `CADRE-${mobile.slice(-4)}-${Date.now().toString().slice(-4)}`,
+                      mobileNumber: mobile,
+                      name: payload.name || request.requestedByName || 'Cadre Member',
+                      role: role as any,
+                      organisationId,
+                      accountStatus: 'ACTIVE',
+                      isVerified: true,
+                    },
+                  });
+                }
+              }
+            }
+          }
+          break;
+        }
+
+        case 'INCHARGE_APPROVAL':
+        case 'INCHARGE_REQUEST':
+        case 'TRANSFER_APPROVAL':
+        case 'TRANSFER_REQUEST': {
+          const assignmentId = payload.assignmentId || request.entityId;
+          const newUnitLevel = (payload.newUnitLevel || payload.targetLevel || '').toUpperCase();
+          const newUnitId = payload.newUnitId || payload.targetJurisdictionId || payload.unitId;
+
+          if (assignmentId && newUnitLevel && newUnitId) {
+            const updateData: any = {
+              stateId: null,
+              zoneId: null,
+              parliamentId: null,
+              constituencyId: null,
+              mandalId: null,
+              villageId: null,
+              boothId: null,
+              voterGroupId: null,
+              assignedAt: new Date(),
+            };
+
+            switch (newUnitLevel) {
+              case 'STATE': updateData.stateId = newUnitId; break;
+              case 'ZONE': updateData.zoneId = newUnitId; break;
+              case 'PARLIAMENT': updateData.parliamentId = newUnitId; break;
+              case 'CONSTITUENCY': updateData.constituencyId = newUnitId; break;
+              case 'MANDAL': updateData.mandalId = newUnitId; break;
+              case 'VILLAGE': updateData.villageId = newUnitId; break;
+              case 'BOOTH': updateData.boothId = newUnitId; break;
+              case 'VOTER_GROUP': updateData.voterGroupId = newUnitId; break;
+            }
+
+            await tx.userHierarchyAssignment.updateMany({
+              where: { id: assignmentId },
+              data: updateData,
+            });
+          }
+          break;
+        }
+
+        case 'DATA_CORRECTION': {
+          const voterId = payload.voterId || request.entityId;
+          const updates = payload.updates || payload.data || {};
+          if (voterId && Object.keys(updates).length > 0) {
+            const existingVoter = await tx.voter.findUnique({
+              where: { id: voterId },
+              select: { id: true, voterStatus: true },
+            });
+            if (existingVoter) {
+              await tx.voter.update({
+                where: { id: voterId },
+                data: updates,
+              });
+
+              if (updates.voterStatus && updates.voterStatus !== existingVoter.voterStatus) {
+                await tx.voterStatusHistory.create({
+                  data: {
+                    voterId,
+                    previousStatus: existingVoter.voterStatus,
+                    newStatus: updates.voterStatus,
+                    reason: `Approved via Central Approval Engine: ${request.title}`,
+                  },
+                });
+              }
+            }
+          }
+          break;
+        }
+
+        case 'SURVEY_APPROVAL': {
+          const voterIds = payload.voterIds;
+          if (Array.isArray(voterIds) && voterIds.length > 0) {
+            await tx.voter.updateMany({
+              where: { id: { in: voterIds } },
+              data: { surveyStatus: 'VERIFIED' },
+            });
+          }
+          break;
+        }
+      }
+
+      // Update approval request status
+      const updated = await tx.approvalRequest.update({
+        where: { id },
+        data: {
+          status: 'APPROVED',
+          actionedByName: actionedBy,
+          actionedAt: new Date(),
+        },
+      });
+
+      return updated;
+    });
   }
 
   static async reject(id: string, reason: string, actionedBy: string = 'Party Super Admin') {
-    await this.ensureTable();
-    const rows: any[] = await prisma.$queryRawUnsafe(
-      `UPDATE approval_requests 
-       SET status = 'REJECTED', rejection_reason = $1, actioned_by_name = $2, actioned_at = NOW(), updated_at = NOW()
-       WHERE id = $3::uuid
-       RETURNING id, status, rejection_reason as "rejectionReason", actioned_by_name as "actionedByName", actioned_at as "actionedAt"`,
-      reason,
-      actionedBy,
-      id
-    );
-    if (!rows || rows.length === 0) {
-      throw new Error(`Approval request with ID ${id} not found.`);
-    }
-    return rows[0];
+    return prisma.$transaction(async (tx) => {
+      const request = await tx.approvalRequest.findUnique({ where: { id } });
+      if (!request) {
+        throw new Error(`Approval request with ID '${id}' not found.`);
+      }
+      if (request.status !== 'PENDING') {
+        throw new Error(`Approval request has already been ${request.status.toLowerCase()}.`);
+      }
+
+      if (request.type === 'USER_REGISTRATION') {
+        const userId = request.entityId || (request.payload as any)?.userId;
+        if (userId) {
+          await tx.user.updateMany({
+            where: { id: userId, accountStatus: 'PENDING' },
+            data: { accountStatus: 'SUSPENDED' },
+          });
+        }
+      }
+
+      const updated = await tx.approvalRequest.update({
+        where: { id },
+        data: {
+          status: 'REJECTED',
+          rejectionReason: reason,
+          actionedByName: actionedBy,
+          actionedAt: new Date(),
+        },
+      });
+
+      return updated;
+    });
   }
 }

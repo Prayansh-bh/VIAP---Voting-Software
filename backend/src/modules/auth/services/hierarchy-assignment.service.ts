@@ -34,8 +34,11 @@ export class HierarchyAssignmentService {
       ? await prisma.constituency.findFirst({ where: { parliamentId: parliament.id } })
       : await prisma.constituency.findFirst();
 
-    if (role === RoleType.SUPER_ADMIN || role === RoleType.STATE_ADMIN) {
-      const stateUnit = await prisma.organizationUnit.findFirst({ where: { level: OrgHierarchyLevel.STATE } });
+    if (role === RoleType.SUPER_ADMIN || role === RoleType.STATE_ADMIN || role === RoleType.HIGH_COMMAND || (role as any) === 'PARTY_ADMIN') {
+      const stateUnit = user.organisationId
+        ? (await prisma.organizationUnit.findFirst({ where: { code: state?.code || undefined, level: OrgHierarchyLevel.STATE } }) ||
+           await prisma.organizationUnit.findFirst({ where: { level: OrgHierarchyLevel.STATE } }))
+        : await prisma.organizationUnit.findFirst({ where: { level: OrgHierarchyLevel.STATE } });
       resolvedUnitId = stateUnit?.id || null;
       if (state) assignmentData.stateId = state.id;
     } else if (role === RoleType.ZONE_INCHARGE) {

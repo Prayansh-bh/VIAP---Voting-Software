@@ -33,8 +33,17 @@ import {
 } from 'lucide-react';
 import { UserSession } from '../types';
 import { useCms } from '../context/CmsContext';
-import { apiFetch } from '../lib/api';
+import {
+  apiFetch,
+  fetchAuditLogs,
+  fetchAuditStats,
+  fetchStates,
+  fetchZones,
+  fetchParliaments,
+  fetchConstituencies,
+} from '../lib/api';
 import Pagination from './common/Pagination';
+import ActiveSessionsModal from './common/ActiveSessionsModal';
 
 interface SuperAdminDashboardProps {
   session: UserSession;
@@ -84,6 +93,7 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
   }, [isKnownSubPath, navigate]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSessionsOpen, setIsSessionsOpen] = useState(false);
 
   const setActiveTab = (tab: SuperAdminTab) => {
     navigate(SUPER_ADMIN_TAB_TO_PATH[tab]);
@@ -98,9 +108,35 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
   // Data states
   const [orgs, setOrgs] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditStats, setAuditStats] = useState<any>(null);
   const [auditPage, setAuditPage] = useState(1);
   const [auditPageSize, setAuditPageSize] = useState(10);
   const [healthStatus, setHealthStatus] = useState<any>(null);
+  const [refreshingHealth, setRefreshingHealth] = useState(false);
+  const [healthMsg, setHealthMsg] = useState<string | null>(null);
+
+  const handleRefreshHealth = async () => {
+    setRefreshingHealth(true);
+    try {
+      const res = await apiFetch<any>('/api/health');
+      setHealthStatus(res);
+      setHealthMsg('Diagnostics telemetry refreshed successfully from backend.');
+      setTimeout(() => setHealthMsg(null), 3500);
+    } catch (err: any) {
+      setHealthMsg('Failed to ping backend diagnostics: ' + (err?.message || 'Server error'));
+      setTimeout(() => setHealthMsg(null), 4000);
+    } finally {
+      setRefreshingHealth(false);
+    }
+  };
+  const [geoStates, setGeoStates] = useState<any[]>([]);
+  const [selectedGeoState, setSelectedGeoState] = useState<string>('');
+  const [geoZones, setGeoZones] = useState<any[]>([]);
+  const [selectedGeoZone, setSelectedGeoZone] = useState<string>('');
+  const [geoParliaments, setGeoParliaments] = useState<any[]>([]);
+  const [selectedGeoParliament, setSelectedGeoParliament] = useState<string>('');
+  const [geoConstituencies, setGeoConstituencies] = useState<any[]>([]);
+  const [loadingGeo, setLoadingGeo] = useState<boolean>(false);
   const [aiStats, setAiStats] = useState<any>({
     status: 'ACTIVE',
     provider: 'Google Gemini Pro / Flash',
@@ -109,16 +145,71 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
     latencyAvg: '0ms',
   });
 
+  const loadGeoStates = async () => {
+    try {
+      setLoadingGeo(true);
+      const states = await fetchStates();
+      if (Array.isArray(states) && states.length > 0) {
+        setGeoStates(states);
+        const firstStateId = states[0].id;
+        setSelectedGeoState(firstStateId);
+        const zones = await fetchZones(firstStateId);
+        setGeoZones(Array.isArray(zones) ? zones : []);
+        if (Array.isArray(zones) && zones.length > 0) {
+          const firstZoneId = zones[0].id;
+          setSelectedGeoZone(firstZoneId);
+          const parliaments = await fetchParliaments(firstZoneId);
+          setGeoParliaments(Array.isArray(parliaments) ? parliaments : []);
+          if (Array.isArray(parliaments) && parliaments.length > 0) {
+            setSelectedGeoParliament(parliaments[0].id);
+            const acs = await fetchConstituencies(parliaments[0].id);
+            setGeoConstituencies(Array.isArray(acs) ? acs : []);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Hierarchy geo loader notice:', err);
+    } finally {
+      setLoadingGeo(false);
+    }
+  };
+
+  const handleSelectGeoState = async (stateId: string) => {
+    setSelectedGeoState(stateId);
+    setSelectedGeoZone('');
+    setSelectedGeoParliament('');
+    setGeoConstituencies([]);
+    const zones = await fetchZones(stateId);
+    setGeoZones(Array.isArray(zones) ? zones : []);
+  };
+
+  const handleSelectGeoZone = async (zoneId: string) => {
+    setSelectedGeoZone(zoneId);
+    setSelectedGeoParliament('');
+    setGeoConstituencies([]);
+    const parliaments = await fetchParliaments(zoneId);
+    setGeoParliaments(Array.isArray(parliaments) ? parliaments : []);
+  };
+
+  const handleSelectGeoParliament = async (parliamentId: string) => {
+    setSelectedGeoParliament(parliamentId);
+    const acs = await fetchConstituencies(parliamentId);
+    setGeoConstituencies(Array.isArray(acs) ? acs : []);
+  };
+
   const loadData = async () => {
     setLoading(true);
+    void loadGeoStates();
     try {
-      const [orgsRes, auditRes, healthRes] = await Promise.all([
+      const [orgsRes, auditRes, auditStatsRes, healthRes] = await Promise.all([
         apiFetch<any[]>('/api/organisations').catch(() => []),
-        apiFetch<any[]>('/api/audit?limit=100').catch(() => []),
+        fetchAuditLogs({ limit: 100 }).catch(() => []),
+        fetchAuditStats().catch(() => null),
         apiFetch<any>('/api/health').catch(() => ({ status: 'UP', database: 'healthy' })),
       ]);
       setOrgs(Array.isArray(orgsRes) ? orgsRes : []);
       setAuditLogs(Array.isArray(auditRes) ? auditRes : (auditRes as any)?.items || []);
+      setAuditStats(auditStatsRes?.data || auditStatsRes);
       setHealthStatus(healthRes);
     } catch (err) {
       console.error('SuperAdmin load error:', err);
@@ -234,7 +325,18 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
         </div>
 
         {/* Fixed Sign Out at Bottom matching Mandal / Booth */}
-        <div className="p-4 border-t border-slate-900 bg-slate-950 shrink-0">
+        <div className="p-4 border-t border-slate-900 bg-slate-950 shrink-0 space-y-2">
+          <button
+            type="button"
+            onClick={() => setIsSessionsOpen(true)}
+            className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-all cursor-pointer"
+          >
+            <span className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              Active Sessions
+            </span>
+            <ChevronRight className="w-3.5 h-3.5 opacity-60" />
+          </button>
           <button
             onClick={onLogout}
             className="w-full flex items-center justify-between px-4 py-3 bg-red-950/40 hover:bg-red-900/60 border border-red-900/30 text-red-400 hover:text-white rounded-xl text-xs font-bold transition-all duration-200 cursor-pointer"
@@ -438,6 +540,89 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
                 >
                   Launch Admin Console (Port 3001) <ExternalLink className="w-4 h-4" />
                 </button>
+              </div>
+
+              {/* ADMINISTRATIVE TERRITORY & GEOGRAPHIC EXPLORER */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-indigo-500" />
+                      Administrative Territory &amp; Geographic Drill-Down
+                    </h3>
+                    <p className="text-[11px] text-slate-500">Live authoritative states, zones, parliaments, and assembly constituencies</p>
+                  </div>
+                  <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-1 rounded-md border border-indigo-200">
+                    {geoStates.length} States &bull; {geoConstituencies.length} Active ACs
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase text-slate-500">1. State</label>
+                    <select
+                      value={selectedGeoState}
+                      onChange={(e) => handleSelectGeoState(e.target.value)}
+                      className="w-full text-xs font-bold p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none"
+                    >
+                      {geoStates.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase text-slate-500">2. Zone</label>
+                    <select
+                      value={selectedGeoZone}
+                      onChange={(e) => handleSelectGeoZone(e.target.value)}
+                      className="w-full text-xs font-bold p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none"
+                      disabled={geoZones.length === 0}
+                    >
+                      <option value="">{geoZones.length === 0 ? 'No zones' : 'Select Zone...'}</option>
+                      {geoZones.map((z) => (
+                        <option key={z.id} value={z.id}>{z.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase text-slate-500">3. Parliament (Lok Sabha)</label>
+                    <select
+                      value={selectedGeoParliament}
+                      onChange={(e) => handleSelectGeoParliament(e.target.value)}
+                      className="w-full text-xs font-bold p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none"
+                      disabled={geoParliaments.length === 0}
+                    >
+                      <option value="">{geoParliaments.length === 0 ? 'No parliaments' : 'Select Parliament...'}</option>
+                      {geoParliaments.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase text-slate-500">4. Constituencies (Vidhan Sabha)</label>
+                    <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 truncate">
+                      {geoConstituencies.length > 0 ? `${geoConstituencies.length} Constituencies Loaded` : 'Select parliament to inspect'}
+                    </div>
+                  </div>
+                </div>
+
+                {geoConstituencies.length > 0 && (
+                  <div className="pt-2 flex flex-wrap gap-1.5 border-t border-slate-100">
+                    {geoConstituencies.slice(0, 8).map((ac) => (
+                      <span key={ac.id} className="text-[10px] font-mono font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
+                        {ac.name} {ac.code ? `(${ac.code})` : ''}
+                      </span>
+                    ))}
+                    {geoConstituencies.length > 8 && (
+                      <span className="text-[10px] font-bold text-slate-400 py-0.5">
+                        +{geoConstituencies.length - 8} more
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Recent Security Audit Events */}
@@ -663,9 +848,16 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
                   <h2 className="text-sm font-extrabold text-slate-900">Immutable Platform Audit Trail</h2>
                   <p className="text-xs text-slate-500">Cryptographically verifiable log of all administrative and voter mutations</p>
                 </div>
-                <span className="text-xs font-mono text-slate-500 font-bold bg-slate-100 px-3 py-1 rounded-full">
-                  {auditLogs.length} Events Logged
-                </span>
+                <div className="flex items-center gap-2">
+                  {auditStats?.inLast24h !== undefined && (
+                    <span className="text-xs font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 font-bold px-3 py-1 rounded-full">
+                      {auditStats.inLast24h} in 24h
+                    </span>
+                  )}
+                  <span className="text-xs font-mono text-slate-500 font-bold bg-slate-100 px-3 py-1 rounded-full">
+                    {auditStats?.total ?? auditLogs.length} Events Logged
+                  </span>
+                </div>
               </div>
 
               <div className="overflow-x-auto">
@@ -723,39 +915,95 @@ export default function SuperAdminDashboard({ session, onLogout }: SuperAdminDas
           {/* TAB 7: SYSTEM HEALTH */}
           {activeTab === 'health' && (
             <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-6 animate-fade-in shadow-sm">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-3">
                 <div>
                   <h2 className="text-sm font-extrabold text-slate-900">System Diagnostics &amp; Infrastructure</h2>
                   <p className="text-xs text-slate-500">Fastify backend server, PostgreSQL connection pool, and Socket.IO status</p>
                 </div>
-                <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  ALL SYSTEMS NOMINAL
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleRefreshHealth}
+                    disabled={refreshingHealth}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${refreshingHealth ? 'animate-spin text-amber-500' : 'text-slate-500'}`} />
+                    <span>{refreshingHealth ? 'Pinging...' : 'Ping Telemetry'}</span>
+                  </button>
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                    healthStatus?.status === 'UP' && healthStatus?.database === 'healthy'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                  }`}>
+                    {healthStatus?.status === 'UP' && healthStatus?.database === 'healthy' ? 'ALL SYSTEMS NOMINAL' : 'DEGRADED'}
+                  </span>
+                </div>
               </div>
+
+              {healthMsg && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-semibold text-emerald-800 flex items-center gap-2 animate-fade-in">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{healthMsg}</span>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                  <span className="text-xs text-slate-500 font-medium">Fastify REST Server</span>
-                  <div className="text-sm font-bold text-emerald-600">Status: UP (Port 4000)</div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-500 font-medium">Fastify REST Server</span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  </div>
+                  <div className="text-sm font-bold text-emerald-600">Status: {healthStatus?.status || 'UP'} (Port 4000)</div>
                   <div className="text-[11px] text-slate-400 font-mono">Uptime: {Math.round(healthStatus?.uptime || 120)}s</div>
+                  <div className="text-[10px] text-slate-400 font-mono">Environment: {healthStatus?.environment || 'development'}</div>
                 </div>
 
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                  <span className="text-xs text-slate-500 font-medium">PostgreSQL Engine</span>
-                  <div className="text-sm font-bold text-emerald-600">Connection: Active &amp; Healthy</div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-500 font-medium">PostgreSQL Engine</span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  </div>
+                  <div className="text-sm font-bold text-emerald-600">
+                    Connection: {healthStatus?.database === 'healthy' ? 'Active & Healthy' : 'Degraded'}
+                  </div>
                   <div className="text-[11px] text-slate-400 font-mono">Prisma Client v6.14.0</div>
+                  <div className="text-[10px] text-slate-400 font-mono">Timestamp: {healthStatus?.timestamp ? new Date(healthStatus.timestamp).toLocaleTimeString() : 'Live'}</div>
                 </div>
 
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                  <span className="text-xs text-slate-500 font-medium">Real-Time Gateway</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-500 font-medium">Real-Time Gateway</span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  </div>
                   <div className="text-sm font-bold text-emerald-600">Socket.IO Server Ready</div>
                   <div className="text-[11px] text-slate-400 font-mono">Hierarchy-aware rooms</div>
+                  <div className="text-[10px] text-slate-400 font-mono">Protocol: WebSocket / Polling</div>
+                </div>
+              </div>
+
+              {/* Maintenance Tools */}
+              <div className="pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-xs text-slate-500">
+                  <span className="font-bold text-slate-700">Platform Maintenance:</span> Real-time telemetry is reconciled directly against the authoritative PostgreSQL cluster.
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsSessionsOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 transition-colors cursor-pointer"
+                  >
+                    <Activity className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Manage Active Sessions</span>
+                  </button>
                 </div>
               </div>
             </div>
           )}
         </div>
       </main>
+
+      <ActiveSessionsModal
+        isOpen={isSessionsOpen}
+        onClose={() => setIsSessionsOpen(false)}
+      />
     </div>
   );
 }

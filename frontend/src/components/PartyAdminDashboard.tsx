@@ -39,13 +39,17 @@ import {
 } from 'lucide-react';
 import { UserSession, Voter, VoterTask, GroundReport } from '../types';
 import { useCms } from '../context/CmsContext';
+import { useNotification } from '../context/NotificationContext';
 import { fetchStateAnalytics, HierarchyAnalyticsResponse } from '../lib/api/analytics.api';
-import { fetchTasks, createTask, updateTaskStatus } from '../lib/api/tasks.api';
+import { fetchTasks, createTask, updateTaskStatus, deleteTask } from '../lib/api/tasks.api';
 import { fetchGroundReports } from '../lib/api/reports.api';
-import { fetchVoters, updateVoter } from '../lib/api/voters.api';
-import { fetchTrainingVideos } from '../lib/api/training.api';
+import { fetchVoters, updateVoter, bulkImportVoters } from '../lib/api/voters.api';
+import { fetchTrainingVideos, deleteTrainingVideo } from '../lib/api/training.api';
 import { fetchApplicationIncharges, InchargeRecord } from '../lib/api/applications.api';
+import { fetchCadrePerformance } from '../lib/api/cadre.api';
 import { apiFetch } from '../lib/api/client';
+import CadrePulseWidget from './common/CadrePulseWidget';
+import ActiveSessionsModal from './common/ActiveSessionsModal';
 
 export type PartyAdminTabType =
   | 'dashboard'
@@ -122,6 +126,7 @@ interface FakeVoterItem {
 
 export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDashboardProps) {
   const { config, parties } = useCms();
+  const { notify, confirmDialog } = useNotification();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -141,6 +146,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
   };
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSessionsModalOpen, setIsSessionsModalOpen] = useState(false);
   const [isRefreshingAll, setIsRefreshingAll] = useState(false);
 
   // 1. Live Analytics / Telemetry from PostgreSQL
@@ -152,6 +158,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
   const [isLoadingVideos, setIsLoadingVideos] = useState(false);
   const [videoSuccessMsg, setVideoSuccessMsg] = useState('');
   const [videoErrorMsg, setVideoErrorMsg] = useState('');
+  const [deletingVideoId, setDeletingVideoId] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [newUrl, setNewUrl] = useState('');
   const [newCategory, setNewCategory] = useState('CAMPAIGN');
@@ -163,6 +170,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
   // 3. Live Directives / Tasks from PostgreSQL
   const [directives, setDirectives] = useState<VoterTask[]>([]);
   const [isLoadingDirectives, setIsLoadingDirectives] = useState(false);
+  const [deletingDirectiveId, setDeletingDirectiveId] = useState<string | null>(null);
   const [newDirectiveTitle, setNewDirectiveTitle] = useState('');
   const [newDirectiveInstructions, setNewDirectiveInstructions] = useState('');
   const [newDirectivePriority, setNewDirectivePriority] = useState<'High' | 'Urgent' | 'Medium'>('High');
@@ -170,6 +178,38 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
   const [newDirectiveDueDate, setNewDirectiveDueDate] = useState('');
   const [isSubmittingDirective, setIsSubmittingDirective] = useState(false);
   const [directiveSuccessMsg, setDirectiveSuccessMsg] = useState('');
+
+  // Dynamic hierarchy mapping for directives & training
+  const DEFAULT_HIERARCHY_TIER_LABELS: Record<string, string> = {
+    STATE: 'State HQ',
+    ZONE: 'Zone HQ',
+    PARLIAMENT: 'Parliament Command',
+    DISTRICT: 'District Unit',
+    CONSTITUENCY: 'Constituency Command',
+    MANDAL: 'Mandal Incharge Tier',
+    VILLAGE: 'Village Incharge Tier',
+    BOOTH: 'Polling Booth Incharges',
+    VOTER_GROUP: '100-Voter Cluster Committee',
+  };
+
+  const availableDirectiveTiers = useMemo(() => {
+    const active = config.activeHierarchyLevels && config.activeHierarchyLevels.length > 0
+      ? config.activeHierarchyLevels.filter(lvl => lvl !== 'PARTY_ADMIN')
+      : ['CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
+
+    const standardOrder = ['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
+    return [...active].sort((a, b) => {
+      const idxA = standardOrder.indexOf(a);
+      const idxB = standardOrder.indexOf(b);
+      return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
+    });
+  }, [config.activeHierarchyLevels]);
+
+  useEffect(() => {
+    if (availableDirectiveTiers.length > 0 && !availableDirectiveTiers.includes(newDirectiveTargetTier)) {
+      setNewDirectiveTargetTier(availableDirectiveTiers[0]);
+    }
+  }, [availableDirectiveTiers, newDirectiveTargetTier]);
 
   // 4. Live Fake Votes Audit from PostgreSQL
   const [fakeVoters, setFakeVoters] = useState<FakeVoterItem[]>([]);
@@ -189,6 +229,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
   // 6. Live Cadre Incharges from PostgreSQL
   const [inchargesList, setInchargesList] = useState<InchargeRecord[]>([]);
   const [isLoadingCadre, setIsLoadingCadre] = useState(false);
+  const [cadrePerformanceScore, setCadrePerformanceScore] = useState<number | null>(null);
 
   // 7. Live Electoral Roll Master from PostgreSQL
   const [votersList, setVotersList] = useState<Voter[]>([]);
@@ -310,11 +351,17 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
     setIsLoadingCadre(true);
     try {
       const appId = config.id || (session as any).applicationId || 'default';
-      const incharges = await fetchApplicationIncharges(appId);
+      const [incharges, perf] = await Promise.all([
+        fetchApplicationIncharges(appId).catch(() => []),
+        fetchCadrePerformance().catch(() => null),
+      ]);
       if (Array.isArray(incharges) && incharges.length > 0) {
         setInchargesList(incharges);
       } else if ((config as any).tierIncharges && Array.isArray((config as any).tierIncharges)) {
         setInchargesList((config as any).tierIncharges as any);
+      }
+      if (perf?.averageScore !== undefined && perf.averageScore !== null) {
+        setCadrePerformanceScore(Math.round(perf.averageScore));
       }
     } catch (err: any) {
       if ((config as any).tierIncharges && Array.isArray((config as any).tierIncharges)) {
@@ -343,6 +390,34 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
       console.warn('Voters master API notice:', err.message);
     } finally {
       setIsLoadingVoters(false);
+    }
+  };
+
+  const handleFastBulkImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const lines = text.split('\n').filter(Boolean);
+      if (lines.length <= 1) {
+        notify.error('File must contain a header and at least one voter row', 'Invalid File');
+        return;
+      }
+      const headers = lines[0].split(',').map((h) => h.trim());
+      const rows = lines.slice(1).map((l) => {
+        const vals = l.split(',').map((v) => v.trim());
+        const obj: any = {};
+        headers.forEach((h, i) => {
+          obj[h] = vals[i] || '';
+        });
+        return obj;
+      });
+      const constituencyId = (session as any).assignedConstituencyId || config.id || 'default';
+      await bulkImportVoters(constituencyId, rows, { importMode: 'APPEND' });
+      notify.success(`Imported ${rows.length} voter records successfully!`, 'Batch Ingest Complete');
+      await loadVoters();
+    } catch (err: any) {
+      notify.error(err.message || 'Bulk import failed', 'Ingest Error');
     }
   };
 
@@ -419,14 +494,44 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
       });
 
       setVideoSuccessMsg('Training video published successfully to cadre network!');
+      notify.success('Training video published successfully to cadre network!', 'Module Published');
       setNewTitle('');
       setNewUrl('');
       setNewDescription('');
       await loadVideos();
     } catch (err: any) {
       setVideoErrorMsg(err.message || 'Failed to publish video.');
+      notify.error(err.message || 'Failed to publish video.', 'Publish Failed');
     } finally {
       setIsSubmittingVideo(false);
+    }
+  };
+
+  // Delete Video from DB
+  const handleDeleteVideo = async (videoId: string, title: string) => {
+    const confirmed = await confirmDialog({
+      title: 'Delete Training Module',
+      message: `Are you sure you want to delete module "${title}" from the PostgreSQL library? This will remove the module from the cadre network.`,
+      confirmText: 'Delete Module',
+      cancelText: 'Cancel',
+      danger: true,
+      icon: 'trash',
+    });
+    if (!confirmed) return;
+
+    setDeletingVideoId(videoId);
+    setVideoSuccessMsg('');
+    setVideoErrorMsg('');
+    try {
+      await deleteTrainingVideo(videoId);
+      setVideoSuccessMsg(`Module "${title}" deleted successfully.`);
+      notify.success(`Module "${title}" deleted successfully from PostgreSQL library.`, 'Module Deleted');
+      await loadVideos();
+    } catch (err: any) {
+      setVideoErrorMsg(err.message || 'Failed to delete training module.');
+      notify.error(err.message || 'Failed to delete training module.', 'Deletion Error');
+    } finally {
+      setDeletingVideoId(null);
     }
   };
 
@@ -442,20 +547,50 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
       await createTask({
         title: newDirectiveTitle.trim(),
         instructions: newDirectiveInstructions.trim(),
-        priority: newDirectivePriority,
+        priority: newDirectivePriority.toUpperCase() as any,
         dueDate: newDirectiveDueDate ? new Date(newDirectiveDueDate).toISOString() : undefined,
+        targetLevel: newDirectiveTargetTier as any,
         targetHierarchyLevel: newDirectiveTargetTier,
       } as any);
 
       setDirectiveSuccessMsg('Operational directive dispatched to cadre network and saved in database!');
+      notify.success('Operational directive dispatched to cadre network and saved in database!', 'Directive Dispatched');
       setNewDirectiveTitle('');
       setNewDirectiveInstructions('');
       setNewDirectiveDueDate('');
       await loadDirectives();
     } catch (err: any) {
       console.error('Directive dispatch error:', err);
+      notify.error(err.message || 'Failed to dispatch directive.', 'Dispatch Error');
     } finally {
       setIsSubmittingDirective(false);
+    }
+  };
+
+  // Delete Directive from DB
+  const handleDeleteDirective = async (directiveId: string, title: string) => {
+    const confirmed = await confirmDialog({
+      title: 'Delete Operational Directive',
+      message: `Are you sure you want to delete directive "${title}" from the database? This action will permanently remove the directive for assigned field cadres.`,
+      confirmText: 'Delete Directive',
+      cancelText: 'Cancel',
+      danger: true,
+      icon: 'trash',
+    });
+    if (!confirmed) return;
+
+    setDeletingDirectiveId(directiveId);
+    setDirectiveSuccessMsg('');
+    try {
+      await deleteTask(directiveId);
+      setDirectiveSuccessMsg(`Directive "${title}" deleted successfully.`);
+      notify.success(`Directive "${title}" deleted successfully from database.`, 'Directive Deleted');
+      await loadDirectives();
+    } catch (err: any) {
+      console.error('Directive deletion error:', err);
+      notify.error(err.message || 'Failed to delete directive.', 'Deletion Error');
+    } finally {
+      setDeletingDirectiveId(null);
     }
   };
 
@@ -466,12 +601,13 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
     setAdjudicationSuccess('');
 
     try {
-      const targetVoterStatus = newStatus === 'VERIFIED_FAKE' ? 'Fake' : 'Active';
+      const targetVoterStatus = newStatus === 'VERIFIED_FAKE' ? 'FAKE' : 'ACTIVE';
       await updateVoter(selectedFakeVoter.id, {
         voterStatus: targetVoterStatus as any,
         notes: adjudicationNotes.trim() || `Adjudicated as ${newStatus} by Party Legal Cell`
       } as any);
 
+      notify.success(`Voter status updated in database to ${targetVoterStatus}!`, 'Adjudication Complete');
       setAdjudicationSuccess(`Voter status updated in PostgreSQL database to ${targetVoterStatus}!`);
       setTimeout(() => {
         setAdjudicationSuccess('');
@@ -482,6 +618,7 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
       await Promise.all([loadFakeVoters(), loadAnalytics()]);
     } catch (err: any) {
       console.error('Adjudication update error:', err);
+      notify.error(err.message || 'Failed to update adjudication status.', 'Adjudication Error');
     } finally {
       setIsAdjudicating(false);
     }
@@ -567,18 +704,40 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
 
   // Active Parties Telemetry derived dynamically from CMS Studio & Analytics
   const activePartiesList = useMemo(() => {
-    if (parties && parties.length > 0) return parties.filter(p => p.isActive);
-    return [
-      { name: 'Telugu Desam Party', code: 'TDP', primaryColor: '#eab308' },
-      { name: 'YSR Congress Party', code: 'YSRCP', primaryColor: '#2563eb' },
-      { name: 'JanaSena Party', code: 'JSP', primaryColor: '#dc2626' },
-      { name: 'Bharatiya Janata Party', code: 'BJP', primaryColor: '#f97316' },
-      { name: 'Indian National Congress', code: 'INC', primaryColor: '#0284c7' },
-    ];
-  }, [parties]);
+    const list: Array<{ name: string; code: string; primaryColor?: string }> = [];
+    const seenCodes = new Set<string>();
+
+    const primaryCode = config?.activePartyCode || 'SDS';
+    const primaryName = config?.organisationName || config?.headerTitle || 'SDS Party';
+    const primaryColor = config?.primaryColor || '#a31de2';
+
+    list.push({
+      name: primaryName,
+      code: primaryCode,
+      primaryColor,
+    });
+    seenCodes.add(primaryCode);
+
+    if (parties && parties.length > 0) {
+      for (const p of parties) {
+        if (p.isActive && !seenCodes.has(p.code)) {
+          seenCodes.add(p.code);
+          list.push({
+            name: p.name || p.code,
+            code: p.code,
+            primaryColor: p.primaryColor || '#94a3b8',
+          });
+        }
+      }
+    }
+
+    return list;
+  }, [parties, config]);
 
   // Real Counts from PostgreSQL
-  const totalElectorateCount = analytics?.summary?.totalVoters ?? votersTotal ?? 0;
+  const totalElectorateCount = (analytics?.summary?.totalVoters && analytics.summary.totalVoters > 0)
+    ? analytics.summary.totalVoters
+    : ((votersTotal && votersTotal > 0) ? votersTotal : 0);
   const realPartyPreferences = analytics?.partyPreference || {};
   const neutralVotesCount = realPartyPreferences['NEUTRAL'] || realPartyPreferences['Neutral'] || 0;
   const casteDistribution = analytics?.demographics?.caste || {};
@@ -687,8 +846,20 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
           </nav>
         </div>
 
-        {/* Bottom Fixed Sign Out */}
-        <div className="pt-4 border-t border-slate-800 bg-slate-900 shrink-0">
+        {/* Bottom Fixed Sign Out & Sessions */}
+        <div className="pt-4 border-t border-slate-800 bg-slate-900 shrink-0 space-y-2">
+          <button
+            type="button"
+            onClick={() => setIsSessionsModalOpen(true)}
+            className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-800/60 hover:bg-slate-800 border border-slate-700/50 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all duration-200 cursor-pointer"
+          >
+            <span className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 shrink-0 text-amber-400" />
+              Active Sessions
+            </span>
+            <ChevronRight className="w-3.5 h-3.5 opacity-60" />
+          </button>
+
           <button
             onClick={onLogout}
             className="w-full flex items-center justify-between px-4 py-3 bg-red-950/40 hover:bg-red-900/60 border border-red-900/30 text-red-400 hover:text-white rounded-xl text-xs font-bold transition-all duration-200 cursor-pointer"
@@ -701,6 +872,12 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
           </button>
         </div>
       </aside>
+
+      {/* Active Device Sessions Modal */}
+      <ActiveSessionsModal
+        isOpen={isSessionsModalOpen}
+        onClose={() => setIsSessionsModalOpen(false)}
+      />
 
       {/* --------------------------------------------------------
           MAIN SCROLLABLE WORKSPACE
@@ -947,20 +1124,29 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                     <p className="text-center py-8 text-xs text-slate-400 font-medium">No operational directives dispatched yet. Create one from the Directives tab.</p>
                   ) : (
                     <div className="space-y-3">
-                      {directives.slice(0, 3).map(d => (
+                      {directives.slice(0, 3).map(d => {
+                        const isOverdue = String(d.status).toUpperCase() !== 'COMPLETED' && Boolean(d.dueDate && new Date(d.dueDate) < new Date());
+                        return (
                         <div key={d.id} className="p-3 rounded-xl border border-gray-100 bg-slate-50/60 space-y-2">
                           <div className="flex items-center justify-between">
-                            <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
-                              d.priority === 'Urgent' || d.priority === 'High' ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-700'
-                            }`}>
-                              {d.priority} Priority
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                d.priority === 'Urgent' || d.priority === 'High' ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-700'
+                              }`}>
+                                {d.priority} Priority
+                              </span>
+                              {isOverdue && (
+                                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-500 text-white animate-pulse">
+                                  OVERDUE
+                                </span>
+                              )}
+                            </div>
                             <span className="text-[10px] text-slate-400 font-mono">Due: {d.dueDate ? String(d.dueDate).slice(0, 10) : 'Open'}</span>
                           </div>
                           <h4 className="text-xs font-bold text-slate-800">{d.title}</h4>
                           <p className="text-[10px] text-slate-500 truncate">{d.instructions || 'Standard guidelines'}</p>
                         </div>
-                      ))}
+                      );})}
                     </div>
                   )}
                 </div>
@@ -1004,6 +1190,9 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                     </div>
                   )}
                 </div>
+
+                {/* Cadre Pulse Polls Widget */}
+                <CadrePulseWidget isAdmin={true} />
               </div>
             </div>
           )}
@@ -1311,12 +1500,11 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                         className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-amber-400 font-bold"
                       >
                         <option value="ALL">All Hierarchy Tiers (Universal)</option>
-                        <option value="STATE">State Incharge Only</option>
-                        <option value="CONSTITUENCY">Constituency Incharge Only</option>
-                        <option value="MANDAL">Mandal President Only</option>
-                        <option value="VILLAGE">Village Incharge Only</option>
-                        <option value="BOOTH">Booth President Only</option>
-                        <option value="VOTER_GROUP">100-Voter Incharge Only</option>
+                        {availableDirectiveTiers.map((tier) => (
+                          <option key={tier} value={tier}>
+                            {config.hierarchyLabels?.[tier] || DEFAULT_HIERARCHY_TIER_LABELS[tier] || tier} Only
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </div>
@@ -1384,7 +1572,17 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                           >
                             <Play className="w-3.5 h-3.5" /> Watch Stream
                           </button>
-                          <span className="text-[10px] text-slate-400 font-semibold">Postgres Sync</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-slate-400 font-semibold">Postgres Sync</span>
+                            <button
+                              onClick={() => handleDeleteVideo(v.id, v.title)}
+                              disabled={deletingVideoId === v.id}
+                              title="Delete training module"
+                              className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -1474,11 +1672,11 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                         onChange={(e) => setNewDirectiveTargetTier(e.target.value)}
                         className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
                       >
-                        <option value="MANDAL">Mandal Incharge Tier</option>
-                        <option value="VILLAGE">Village Incharge Tier</option>
-                        <option value="BOOTH">Polling Booth Incharges</option>
-                        <option value="VOTER_GROUP">100-Voter Cluster Committee</option>
-                        <option value="CONSTITUENCY">Constituency Command</option>
+                        {availableDirectiveTiers.map((tier) => (
+                          <option key={tier} value={tier}>
+                            {config.hierarchyLabels?.[tier] || DEFAULT_HIERARCHY_TIER_LABELS[tier] || tier}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div className="space-y-1">
@@ -1527,42 +1725,70 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                   <p className="text-center py-10 text-slate-400 text-xs font-medium">No tasks found in PostgreSQL database. Create your first operational task above!</p>
                 ) : (
                   <div className="space-y-3">
-                    {directives.map(d => (
-                      <div key={d.id} className="p-4 rounded-xl border border-gray-200 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        <div className="space-y-1.5 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
-                              d.priority === 'Urgent' || d.priority === 'High' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'
-                            }`}>
-                              {d.priority} Priority
-                            </span>
-                            <span className="text-xs font-black text-slate-900">{d.title}</span>
-                          </div>
-                          <p className="text-[11px] text-slate-500">{d.instructions || 'Standard operational guidelines apply.'}</p>
-                          <div className="flex items-center gap-3 text-[10px] text-slate-400 font-semibold pt-1">
-                            <span>Status: <strong className="text-slate-700">{d.status}</strong></span>
-                            <span>•</span>
-                            <span>Target: <strong className="text-slate-700">{d.targetHierarchyLevel || 'All Levels'}</strong></span>
-                            <span>•</span>
-                            <span>Due: <strong className="text-slate-700">{d.dueDate ? String(d.dueDate).slice(0, 10) : 'Open'}</strong></span>
-                          </div>
-                        </div>
+                    {directives.map(d => {
+                      const targetDisplay = (d.targetHierarchyLevel || (d as any).targetLevel);
+                      const targetLabel = targetDisplay
+                        ? (config.hierarchyLabels?.[targetDisplay] || DEFAULT_HIERARCHY_TIER_LABELS[targetDisplay] || targetDisplay)
+                        : 'All Levels';
+                      const isHighPriority = String(d.priority).toUpperCase() === 'URGENT' || String(d.priority).toUpperCase() === 'HIGH';
+                      const isOverdue = String(d.status).toUpperCase() !== 'COMPLETED' && Boolean(d.dueDate && new Date(d.dueDate) < new Date());
 
-                        <div className="flex items-center gap-2 shrink-0">
-                          {d.status !== 'Completed' && (
+                      return (
+                        <div key={d.id} className="p-4 rounded-xl border border-gray-200 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                          <div className="space-y-1.5 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                                isHighPriority ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'
+                              }`}>
+                                {d.priority} Priority
+                              </span>
+                              {isOverdue && (
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-rose-500 text-white animate-pulse">
+                                  OVERDUE
+                                </span>
+                              )}
+                              <span className="text-xs font-black text-slate-900">{d.title}</span>
+                            </div>
+                            <p className="text-[11px] text-slate-500">{d.instructions || 'Standard operational guidelines apply.'}</p>
+                            <div className="flex items-center gap-3 text-[10px] text-slate-400 font-semibold pt-1">
+                              <span>Status: <strong className="text-slate-700">{d.status}</strong></span>
+                              <span>•</span>
+                              <span>Target: <strong className="text-slate-700">{targetLabel}</strong></span>
+                              <span>•</span>
+                              <span>Due: <strong className="text-slate-700">{d.dueDate ? String(d.dueDate).slice(0, 10) : 'Open'}</strong></span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {String(d.status).toUpperCase() !== 'COMPLETED' && (
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    await updateTaskStatus(d.id, 'COMPLETED', 'Marked completed by Party Admin HQ');
+                                    notify.success(`Directive "${d.title}" marked as completed in database.`, 'Status Updated');
+                                    await loadDirectives();
+                                  } catch (err: any) {
+                                    console.error('Failed to update directive status:', err);
+                                    notify.error(err.message || 'Failed to mark directive as completed.', 'Status Update Failed');
+                                  }
+                                }}
+                                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold cursor-pointer transition-colors"
+                              >
+                                Mark Completed
+                              </button>
+                            )}
                             <button
-                              onClick={async () => {
-                                await updateTaskStatus(d.id, 'Completed', 'Marked completed by Party Admin HQ');
-                                await loadDirectives();
-                              }}
-                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold cursor-pointer"
+                              onClick={() => handleDeleteDirective(d.id, d.title)}
+                              disabled={deletingDirectiveId === d.id}
+                              title="Delete operational directive"
+                              className="p-1.5 rounded-lg border border-slate-200 text-slate-400 hover:text-red-600 hover:bg-red-50 hover:border-red-200 transition-colors cursor-pointer"
                             >
-                              Mark Completed
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
-                          )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1582,9 +1808,16 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                   </h3>
                   <p className="text-xs text-slate-400">All appointed leadership and incharges provisioned in PostgreSQL database</p>
                 </div>
-                <span className="text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg">
-                  {inchargesList.length} Appointed Cadre Incharges Active
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg">
+                    {inchargesList.length} Appointed Cadre Incharges Active
+                  </span>
+                  {cadrePerformanceScore !== null && (
+                    <span className="text-xs font-bold text-blue-600 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-lg">
+                      Avg Score: {cadrePerformanceScore}%
+                    </span>
+                  )}
+                </div>
               </div>
 
               {inchargesList.length === 0 ? (
@@ -1717,9 +1950,14 @@ export default function PartyAdminDashboard({ session, onLogout }: PartyAdminDas
                       className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                     />
                   </div>
-                  <button onClick={() => { setVoterPage(1); loadVoters(); }} className="px-3 py-1.5 bg-slate-900 text-white text-xs font-bold rounded-lg">
+                  <button onClick={() => { setVoterPage(1); loadVoters(); }} className="px-3 py-1.5 bg-slate-900 text-white text-xs font-bold rounded-lg cursor-pointer">
                     Search
                   </button>
+                  <label className="px-3 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 text-xs font-bold rounded-lg cursor-pointer flex items-center gap-1 shrink-0">
+                    <Download className="w-3.5 h-3.5 rotate-180" />
+                    <span>Quick CSV Ingest</span>
+                    <input type="file" accept=".csv" onChange={handleFastBulkImport} className="hidden" />
+                  </label>
                 </div>
               </div>
 

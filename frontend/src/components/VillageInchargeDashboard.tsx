@@ -650,7 +650,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
         return;
       }
 
-      void updateTrainingProgress(existing.id, 'WATCHED')
+      void updateTrainingProgress(video.id, 'WATCHED')
         .then(() => {
           setTrainingProgress((prev) => ({
             ...prev,
@@ -663,7 +663,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
     }
 
     void ensureTrainingAssigned(session.userId, video.id)
-      .then((progress) => updateTrainingProgress(progress.id, 'WATCHED').then(() => progress))
+      .then((progress) => updateTrainingProgress(video.id, 'WATCHED').then(() => progress))
       .then((progress) => {
         setTrainingProgress((prev) => ({
           ...prev,

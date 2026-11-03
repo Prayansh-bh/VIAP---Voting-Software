@@ -246,22 +246,39 @@ export class HierarchyService {
     return item;
   }
 
+  private static async resolveMandalIdFromUnit(mandalId?: string): Promise<string | undefined> {
+    if (!mandalId) return undefined;
+    const mandalExists = await prisma.mandal.findUnique({ where: { id: mandalId }, select: { id: true } });
+    if (mandalExists) return mandalExists.id;
+
+    const orgUnit = await prisma.organizationUnit.findUnique({ where: { id: mandalId } });
+    if (!orgUnit) return mandalId;
+
+    if (orgUnit.code) {
+      const byCode = await prisma.mandal.findFirst({
+        where: { code: orgUnit.code },
+        select: { id: true },
+      });
+      if (byCode) return byCode.id;
+    }
+
+    if (orgUnit.name) {
+      const byName = await prisma.mandal.findFirst({
+        where: { name: { equals: orgUnit.name, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (byName) return byName.id;
+    }
+
+    return mandalId;
+  }
+
   static async getVillages(mandalId?: string, organisationId?: string | null, isSuperAdmin = false) {
     if (!isSuperAdmin && !organisationId) {
       return [];
     }
 
-    let resolvedMandalId = mandalId;
-    if (mandalId) {
-      const mandalExists = await prisma.mandal.findUnique({ where: { id: mandalId } });
-      if (!mandalExists) {
-        const orgUnit = await prisma.organizationUnit.findUnique({ where: { id: mandalId } });
-        if (orgUnit?.code) {
-          const m = await prisma.mandal.findFirst({ where: { code: orgUnit.code } });
-          if (m) resolvedMandalId = m.id;
-        }
-      }
-    }
+    const resolvedMandalId = await HierarchyService.resolveMandalIdFromUnit(mandalId);
 
     const where: Prisma.VillageWhereInput = {};
     if (resolvedMandalId) where.mandalId = resolvedMandalId;
@@ -331,17 +348,7 @@ export class HierarchyService {
       return [];
     }
 
-    let resolvedMandalId = mandalId;
-    if (mandalId) {
-      const mandalExists = await prisma.mandal.findUnique({ where: { id: mandalId } });
-      if (!mandalExists) {
-        const orgUnit = await prisma.organizationUnit.findUnique({ where: { id: mandalId } });
-        if (orgUnit?.code) {
-          const m = await prisma.mandal.findFirst({ where: { code: orgUnit.code } });
-          if (m) resolvedMandalId = m.id;
-        }
-      }
-    }
+    const resolvedMandalId = await HierarchyService.resolveMandalIdFromUnit(mandalId);
 
     const where: Prisma.BoothWhereInput = {};
     if (villageId) where.villageId = villageId;
@@ -444,7 +451,7 @@ export class HierarchyService {
 
     return prisma.voterGroup.findMany({
       where,
-      include: { booth: true, assignedIncharge: true },
+      include: { booth: { include: { village: { include: { mandal: true } } } }, assignedIncharge: true },
       orderBy: { name: 'asc' },
     });
   }

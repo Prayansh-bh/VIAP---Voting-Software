@@ -48,3 +48,10 @@ export async function generateStrategicReport(
     body: JSON.stringify({ unitId: unitId || undefined, language }),
   });
 }
+
+export async function crawlNews(query?: string): Promise<{ inserted: number }> {
+  return apiFetch<{ inserted: number }>('/api/ai/crawl-news', {
+    method: 'POST',
+    body: JSON.stringify({ query: query || 'Andhra Pradesh Election' }),
+  });
+}

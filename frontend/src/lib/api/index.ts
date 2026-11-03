@@ -11,3 +11,24 @@ export * from './auth.api';
 export * from './cms.api';
 export * from './audit.api';
 export * from './hierarchy.api';
+export * from './approvals.api';
+export * from './polls.api';
+export {
+  fetchApplicationConfig,
+  fetchApplicationConstituencies,
+  fetchColumnMappingSuggestions,
+  validateApplicationData,
+  importApplicationData,
+  fetchDataImports,
+  fetchDataImportById,
+  fetchDataImportErrors,
+  fetchImportHistory,
+  fetchImportErrors,
+  createImportProgressStream,
+  fetchApplicationIncharges,
+  type ApplicationConfig,
+  type ConstituencyItem,
+  type ValidationReport,
+  type ImportSummary,
+  type DataImportRecord,
+} from './applications.api';

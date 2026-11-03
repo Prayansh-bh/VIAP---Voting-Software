@@ -242,6 +242,45 @@ export class ApplicationsController {
     return reply.send(csv);
   }
 
+  static async streamImportProgress(req: FastifyRequest, reply: FastifyReply) {
+    const { applicationId, importId } = req.params as { applicationId?: string; importId: string };
+    reply.raw.setHeader('Content-Type', 'text/event-stream');
+    reply.raw.setHeader('Cache-Control', 'no-cache');
+    reply.raw.setHeader('Connection', 'keep-alive');
+    if ((reply.raw as any).flushHeaders) (reply.raw as any).flushHeaders();
+
+    const sendProgress = async () => {
+      try {
+        const data = await ApplicationsService.getDataImportById(importId, applicationId, req.hierarchyScope, req.user?.userId, req.user);
+        const total = (data as any)?.totalRecords || 0;
+        const processed = (data as any)?.processedRecords || 0;
+        const percent = total > 0 ? Math.round((processed / total) * 100) : ((data as any)?.status === 'COMPLETED' ? 100 : 0);
+        reply.raw.write(`data: ${JSON.stringify({ status: (data as any)?.status, progress: percent, processed, total })}\n\n`);
+        return (data as any)?.status === 'COMPLETED' || (data as any)?.status === 'FAILED';
+      } catch {
+        return true;
+      }
+    };
+
+    const isDone = await sendProgress();
+    if (isDone) {
+      reply.raw.end();
+      return;
+    }
+
+    const interval = setInterval(async () => {
+      const finished = await sendProgress();
+      if (finished) {
+        clearInterval(interval);
+        reply.raw.end();
+      }
+    }, 1000);
+
+    req.raw.on('close', () => {
+      clearInterval(interval);
+    });
+  }
+
   static async getImportHistory(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId } = req.params as { applicationId: string };
     const data = await ApplicationsService.getImportHistory(applicationId, req.hierarchyScope);
@@ -288,13 +327,23 @@ export class ApplicationsController {
 
   static async transferIncharge(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId, id } = req.params as { applicationId: string; id: string };
-    const body = (req.body || {}) as { targetUnitLevel: string; targetUnitId: string; reason?: string };
+    const body = (req.body || {}) as any;
+    const targetUnitLevel = body.targetUnitLevel || body.targetLevel || '';
+    const targetUnitId = body.targetUnitId || body.targetJurisdiction || '';
+    const reason = body.reason || body.handoverNote;
+
+    if (!targetUnitLevel || !targetUnitId) {
+      return reply.status(400).send({
+        error: 'VALIDATION_ERROR',
+        message: 'Both targetUnitLevel and targetUnitId are required for incharge transfer.',
+      });
+    }
     const data = await ApplicationsService.transferIncharge(
       applicationId,
       id,
-      body.targetUnitLevel,
-      body.targetUnitId,
-      body.reason,
+      targetUnitLevel,
+      targetUnitId,
+      reason,
       req.user
     );
     return reply.send(successResponse(data, 'Incharge jurisdiction transferred successfully'));
@@ -302,8 +351,20 @@ export class ApplicationsController {
 
   static async replaceIncharge(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId, id } = req.params as { applicationId: string; id: string };
-    const body = (req.body || {}) as { name: string; mobileNumber: string; email?: string; reason?: string };
-    const data = await ApplicationsService.replaceIncharge(applicationId, id, body, req.user);
+    const body = (req.body || {}) as any;
+    const normalizedBody = {
+      name: (body.name || body.replacementName || '').trim(),
+      mobileNumber: (body.mobileNumber || body.replacementMobile || '').replace(/\D/g, '').slice(-10),
+      email: body.email,
+      reason: body.reason || body.handoverNote || 'Administrative replacement',
+    };
+    if (!normalizedBody.name || normalizedBody.mobileNumber.length < 10) {
+      return reply.status(400).send({
+        error: 'VALIDATION_ERROR',
+        message: 'Valid replacement name and 10-digit mobile number are required.',
+      });
+    }
+    const data = await ApplicationsService.replaceIncharge(applicationId, id, normalizedBody, req.user);
     return reply.status(201).send(successResponse(data, 'Incharge replaced successfully'));
   }
 
@@ -349,7 +410,8 @@ export class ApplicationsController {
 
   static async getSummary(req: FastifyRequest, reply: FastifyReply) {
     const { applicationId } = req.params as { applicationId: string };
-    const data = await ApplicationsService.getSummary(applicationId, req.hierarchyScope, req.user);
+    const query = req.query as { constituencyId?: string } | undefined;
+    const data = await ApplicationsService.getSummary(applicationId, req.hierarchyScope, req.user, query?.constituencyId);
     return reply.send(successResponse(data));
   }
 

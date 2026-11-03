@@ -503,6 +503,7 @@ export class ImportQueueService {
 
     let activeJobId: string | null = null;
     let tempFilePath: string | null = null;
+    let currentMeta: Record<string, any> = {};
 
     try {
       // 1. Atomically claim oldest QUEUED job belonging to this node (or unassigned)
@@ -551,6 +552,7 @@ export class ImportQueueService {
 
       activeJobId = candidate.id;
       const meta = (candidate.metadata as Record<string, any>) || {};
+      currentMeta = meta;
       tempFilePath = meta.tempFilePath as string | null;
 
       await prisma.importJob.updateMany({
@@ -648,13 +650,15 @@ export class ImportQueueService {
         existingGroups.map((g) => [`${g.boothId}:${g.name.trim().toLowerCase()}`, g.id]),
       );
 
-      const mapping = meta.columnMapping as Record<string, string> | undefined;
+      const mapping = meta.columnMapping as Record<string, any> | undefined;
       const fieldToHeaderMap = new Map<string, string>();
-      if (mapping) {
+      if (mapping && typeof mapping === 'object') {
         for (const [k, v] of Object.entries(mapping)) {
-          if (!v) continue;
-          fieldToHeaderMap.set(k.toLowerCase(), v);
-          fieldToHeaderMap.set(v.toLowerCase(), k);
+          if (typeof k !== 'string' || typeof v !== 'string' || !k.trim() || !v.trim()) continue;
+          const cleanKey = k.trim().toLowerCase();
+          const cleanVal = v.trim();
+          fieldToHeaderMap.set(cleanKey, cleanVal);
+          fieldToHeaderMap.set(cleanVal.toLowerCase(), k.trim());
         }
       }
 
@@ -868,6 +872,7 @@ export class ImportQueueService {
             status: 'FAILED',
             completedAt: new Date(),
             metadata: {
+              ...(currentMeta || {}),
               failureReason: err?.message || 'Processing aborted due to unexpected error',
             },
           },
@@ -1142,6 +1147,9 @@ export class ImportQueueService {
           }
         }
 
+        const votersToInsert: any[] = [];
+        const votersToUpdate: any[] = [];
+
         for (const item of filteredItems) {
           const mandalId = (item as any).mandalId;
           const villageId = (item as any).villageId;
@@ -1151,66 +1159,75 @@ export class ImportQueueService {
           const existingMatch = existingByEpic.get(item.epic);
 
           if (existingMatch) {
-            // In-place update preserving voter primary key and existing foreign-key relations
-            await tx.voter.update({
-              where: { id: existingMatch.id },
-              data: {
-                name: item.name,
-                fatherHusbandName: item.relativeName,
-                relationType: item.relation,
-                age: item.age,
-                gender: item.gender,
-                mobileNumber: item.mobileNumber,
-                houseNumber: item.houseNumber,
-                caste: item.caste,
-                profession: item.profession,
-                politicalPreference: item.politicalPreference,
-                voterStatus: item.voterStatus as any,
-                notes: item.notes,
-                stateId: resolvedStateId,
-                zoneId: resolvedZoneId,
-                parliamentId: resolvedParliamentId,
-                constituencyId: constituency.id,
-                mandalId,
-                villageId,
-                boothId,
-                voterGroupId: groupId,
-                updatedById: actorId,
-              },
-            });
-            batchUpdated++;
+            votersToUpdate.push({ existingId: existingMatch.id, item, mandalId, villageId, boothId, groupId });
           } else {
-            // New voter insert
-            const created = await tx.voter.create({
-              data: {
-                serialNumber: item.serialNumber,
-                epicNumber: item.epic,
-                name: item.name,
-                fatherHusbandName: item.relativeName,
-                relationType: item.relation,
-                age: item.age,
-                gender: item.gender,
-                mobileNumber: item.mobileNumber,
-                houseNumber: item.houseNumber,
-                caste: item.caste,
-                profession: item.profession,
-                politicalPreference: item.politicalPreference,
-                voterStatus: item.voterStatus as any,
-                notes: item.notes,
-                stateId: resolvedStateId,
-                zoneId: resolvedZoneId,
-                parliamentId: resolvedParliamentId,
-                constituencyId: constituency.id,
-                mandalId,
-                villageId,
-                boothId,
-                voterGroupId: groupId,
-                updatedById: actorId,
-              },
+            votersToInsert.push({
+              id: crypto.randomUUID(),
+              serialNumber: item.serialNumber,
+              epicNumber: item.epic,
+              name: item.name,
+              fatherHusbandName: item.relativeName,
+              relationType: item.relation,
+              age: item.age,
+              gender: item.gender,
+              mobileNumber: item.mobileNumber,
+              houseNumber: item.houseNumber,
+              caste: item.caste,
+              profession: item.profession,
+              politicalPreference: item.politicalPreference,
+              voterStatus: item.voterStatus as any,
+              notes: item.notes,
+              stateId: resolvedStateId,
+              zoneId: resolvedZoneId,
+              parliamentId: resolvedParliamentId,
+              constituencyId: constituency.id,
+              mandalId,
+              villageId,
+              boothId,
+              voterGroupId: groupId,
+              updatedById: actorId,
             });
-            existingByEpic.set(item.epic, { id: created.id, epicNumber: item.epic, constituencyId: constituency.id });
-            batchImported++;
           }
+        }
+
+        // High-speed batch insert: executes as a single SQL INSERT statement
+        if (votersToInsert.length > 0) {
+          const res = await tx.voter.createMany({
+            data: votersToInsert,
+            skipDuplicates: true,
+          });
+          batchImported += res.count;
+        }
+
+        // In-place update preserving voter primary key and existing foreign-key relations
+        for (const u of votersToUpdate) {
+          await tx.voter.update({
+            where: { id: u.existingId },
+            data: {
+              name: u.item.name,
+              fatherHusbandName: u.item.relativeName,
+              relationType: u.item.relation,
+              age: u.item.age,
+              gender: u.item.gender,
+              mobileNumber: u.item.mobileNumber,
+              houseNumber: u.item.houseNumber,
+              caste: u.item.caste,
+              profession: u.item.profession,
+              politicalPreference: u.item.politicalPreference,
+              voterStatus: u.item.voterStatus as any,
+              notes: u.item.notes,
+              stateId: resolvedStateId,
+              zoneId: resolvedZoneId,
+              parliamentId: resolvedParliamentId,
+              constituencyId: constituency.id,
+              mandalId: u.mandalId,
+              villageId: u.villageId,
+              boothId: u.boothId,
+              voterGroupId: u.groupId,
+              updatedById: actorId,
+            },
+          });
+          batchUpdated++;
         }
       },
       { timeout: 15000 }

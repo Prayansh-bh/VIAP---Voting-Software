@@ -57,3 +57,9 @@ export async function updateTrainingProgress(videoId: string, status: string, qu
     body: JSON.stringify({ status, quizScore }),
   });
 }
+
+export async function deleteTrainingVideo(videoId: string): Promise<{ id: string; deleted: boolean }> {
+  return apiFetch<{ id: string; deleted: boolean }>(`/api/training/videos/${encodeURIComponent(videoId)}`, {
+    method: 'DELETE',
+  });
+}

@@ -2594,6 +2594,32 @@ export async function cmsRoutes(fastify: FastifyInstance) {
         } as unknown as Prisma.InputJsonValue,
       });
 
+      // Synchronize incharge movement into Central Approval Management Engine ledger
+      try {
+        await prisma.approvalRequest.create({
+          data: {
+            partyId: (req.user as any)?.organisationId || undefined,
+            type: 'TRANSFER_APPROVAL',
+            title: `Cadre Redeployment: ${user.name} transferred to ${body.toUnitLevel}`,
+            status: 'APPROVED',
+            entityId: user.id,
+            entityType: 'InchargeTransfer',
+            payload: {
+              userId: user.id,
+              toUnitLevel: body.toUnitLevel,
+              toUnitId: body.toUnitId,
+              reason: body.reason,
+            },
+            requestedByName: (req.user as any)?.name || 'In-Charge',
+            requestedByRole: (req.user as any)?.role || 'CONSTITUENCY_INCHARGE',
+            actionedByName: (req.user as any)?.name || 'Platform Administrator',
+            actionedAt: new Date(),
+          },
+        });
+      } catch (err) {
+        req.log.warn({ err }, 'Failed to record incharge transfer in approval ledger');
+      }
+
       return reply.send(
         successResponse({
           user: { id: user.id, name: user.name, mobileNumber: user.mobileNumber },
@@ -2721,6 +2747,33 @@ export async function cmsRoutes(fastify: FastifyInstance) {
           reason: body.reason || 'Cadre replaced by leadership',
         } as unknown as Prisma.InputJsonValue,
       });
+
+      // Synchronize incharge replacement into Central Approval Management Engine ledger
+      try {
+        await prisma.approvalRequest.create({
+          data: {
+            partyId: (req.user as any)?.organisationId || undefined,
+            type: 'INCHARGE_APPROVAL',
+            title: `Incharge Replacement: ${newUser.name} assigned to ${body.unitLevel}`,
+            status: 'APPROVED',
+            entityId: newUser.id,
+            entityType: 'InchargeReplacement',
+            payload: {
+              replacedUserId: body.currentUserId,
+              replacementUserId: newUser.id,
+              unitLevel: body.unitLevel,
+              unitId: body.unitId,
+              reason: body.reason,
+            },
+            requestedByName: (req.user as any)?.name || 'In-Charge',
+            requestedByRole: (req.user as any)?.role || 'CONSTITUENCY_INCHARGE',
+            actionedByName: (req.user as any)?.name || 'Platform Administrator',
+            actionedAt: new Date(),
+          },
+        });
+      } catch (err) {
+        req.log.warn({ err }, 'Failed to record incharge replacement in approval ledger');
+      }
 
       return reply.send(
         successResponse({

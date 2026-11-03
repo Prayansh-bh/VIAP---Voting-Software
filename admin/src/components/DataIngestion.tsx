@@ -27,11 +27,14 @@ import {
   ShieldAlert,
   FileText,
 } from 'lucide-react';
-import { AppInstance, ApplicationSummary } from '../types';
+import { AppInstance, ApplicationSummary, InchargeRecord } from '../types';
+import { useNotification } from '../context/NotificationContext';
 import {
   fetchApplicationSummary,
   fetchVotersList,
   importVoterRolls,
+  downloadImportErrorReport,
+  suggestColumnMapping,
   uploadVoterCsvStream,
   fetchImportJobStatus,
   fetchInchargeRosterPreview,
@@ -41,6 +44,8 @@ import {
   downloadInchargeRosterTemplate,
   uploadInchargeRosterSpreadsheet,
   submitManualInchargeRoster,
+  fetchIncharges,
+  assignExecutiveIncharge,
   CadreRosterSlotsResponse,
   CadreSlotItem,
   ManualRosterEntry,
@@ -341,6 +346,7 @@ function analyzeSheetGrid(rawGrid: any[][]): SheetAnalysisResult {
 }
 
 export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIngestionProps) {
+  const { notify } = useNotification();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'parsing' | 'uploading' | 'processing' | 'success' | 'partial' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
@@ -353,6 +359,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
     total: number;
   } | null>(null);
   const [uploadErrors, setUploadErrors] = useState<Array<{ rowNumber?: number; field?: string; errorMessage: string; value?: string }>>([]);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [showErrorDetails, setShowErrorDetails] = useState(false);
 
   // Real DB states
@@ -396,25 +403,86 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
   const [mappingWarning, setMappingWarning] = useState<string | null>(null);
   const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
   const [isCommitting, setIsCommitting] = useState(false);
+  const [selectedConstituencyId, setSelectedConstituencyId] = useState<string | null>(null);
 
-  const loadLiveData = async () => {
+  // Executive Leadership Manual Inputs state
+  const [executiveIncharges, setExecutiveIncharges] = useState<InchargeRecord[]>([]);
+  const [executiveInputs, setExecutiveInputs] = useState<Record<string, { name: string; mobileNumber: string; unitName?: string }>>({});
+  const [isSubmittingExec, setIsSubmittingExec] = useState<string | null>(null);
+  const [execSubmitMessage, setExecSubmitMessage] = useState<string | null>(null);
+  const [execSubmitError, setExecSubmitError] = useState<string | null>(null);
+
+  const loadExecutiveIncharges = async () => {
+    if (!currentApp?.id) return;
+    try {
+      const list = await fetchIncharges(currentApp.id);
+      setExecutiveIncharges(list || []);
+    } catch {
+      // Non-blocking
+    }
+  };
+
+  const handleSaveExecutiveIncharge = async (tierKey: string) => {
+    const EXECUTIVE_TIER_CONFIG: Record<string, { role: string; roleName: string; defaultUnit: string }> = {
+      STATE: { role: 'STATE_ADMIN', roleName: 'State Incharge / General Secretary', defaultUnit: 'State Headquarters' },
+      ZONE: { role: 'ZONE_INCHARGE', roleName: 'Zone Coordinator / Regional Head', defaultUnit: 'Regional Zone HQ' },
+      PARLIAMENT: { role: 'PARLIAMENT_INCHARGE', roleName: 'Parliament Incharge / Lok Sabha Lead', defaultUnit: 'Parliament Unit' },
+      DISTRICT: { role: 'CONSTITUENCY_INCHARGE', roleName: 'District Incharge / President', defaultUnit: 'District Unit' },
+      CONSTITUENCY: { role: 'CONSTITUENCY_INCHARGE', roleName: 'Constituency / Assembly Candidate Lead', defaultUnit: 'Assembly Constituency' },
+    };
+
+    const cfg = EXECUTIVE_TIER_CONFIG[tierKey.toUpperCase()];
+    if (!cfg || !currentApp?.id) return;
+    const input = executiveInputs[tierKey] || { name: '', mobileNumber: '' };
+    const cleanNum = (input.mobileNumber || '').replace(/\D/g, '').slice(-10);
+    if (cleanNum.length < 10) {
+      setExecSubmitError(`Please enter a valid 10-digit mobile number for ${cfg.roleName}.`);
+      return;
+    }
+    setIsSubmittingExec(tierKey);
+    setExecSubmitError(null);
+    setExecSubmitMessage(null);
+    try {
+      await assignExecutiveIncharge(currentApp.id, {
+        name: input.name.trim() || cfg.roleName,
+        mobileNumber: cleanNum,
+        role: cfg.role,
+        unitLevel: tierKey,
+        unitId: selectedConstituencyId || summary?.constituencyId || 'default',
+      });
+      setExecSubmitMessage(`Successfully assigned ${cfg.roleName} (+91 ${cleanNum})!`);
+      await loadExecutiveIncharges();
+    } catch (err: any) {
+      setExecSubmitError(err?.message || 'Failed to assign executive incharge.');
+    } finally {
+      setIsSubmittingExec(null);
+    }
+  };
+
+  const loadLiveData = async (overrideConstituencyId?: string) => {
     if (!currentApp) return;
     setLoading(true);
     try {
+      const activeCId = overrideConstituencyId || selectedConstituencyId || undefined;
       const [sum, vList] = await Promise.all([
-        fetchApplicationSummary(currentApp.id),
-        fetchVotersList({ appId: currentApp.id, limit: 15 }),
+        fetchApplicationSummary(currentApp.id, activeCId),
+        fetchVotersList({ appId: currentApp.id, constituencyId: activeCId, limit: 15 }),
       ]);
       setSummary(sum);
       setVoters(vList.items);
       setTotalVotersCount(sum?.totalVoters ?? vList.total);
 
-      if (sum?.constituencyId) {
+      const effectiveCId = activeCId || sum?.constituencyId || null;
+      if (effectiveCId && effectiveCId !== selectedConstituencyId) {
+        setSelectedConstituencyId(effectiveCId);
+      }
+
+      if (effectiveCId) {
         setIsLoadingSlots(true);
         try {
           const [rPrev, slots] = await Promise.all([
-            fetchInchargeRosterPreview(sum.constituencyId).catch(() => null),
-            fetchInchargeRosterSlots(sum.constituencyId).catch(() => null),
+            fetchInchargeRosterPreview(effectiveCId).catch(() => null),
+            fetchInchargeRosterSlots(effectiveCId).catch(() => null),
           ]);
           setRosterSummary(rPrev?.summary || null);
           if (slots) {
@@ -436,21 +504,32 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
     }
   };
 
+  const handleConstituencyChange = (cId: string) => {
+    setSelectedConstituencyId(cId);
+    setManualInputs({});
+    setRosterSpreadsheetFile(null);
+    setRosterUploadSuccess(null);
+    setRosterUploadError(null);
+    loadLiveData(cId);
+  };
+
   const handleDownloadTemplate = async (format: 'xlsx' | 'csv' = 'xlsx') => {
-    if (!summary?.constituencyId) {
-      alert('Please ingest voter rolls first before downloading the roster template.');
+    const cId = selectedConstituencyId || summary?.constituencyId;
+    if (!cId) {
+      notify.warning('Please ingest voter rolls first before downloading the roster template.', 'Template Download');
       return;
     }
     try {
-      await downloadInchargeRosterTemplate(summary.constituencyId, format);
+      await downloadInchargeRosterTemplate(cId, format);
     } catch (err: any) {
-      alert(err?.message || 'Failed to download roster template');
+      notify.error(err?.message || 'Failed to download roster template', 'Download Failed');
     }
   };
 
   const handleUploadRosterFile = async () => {
-    if (!summary?.constituencyId || !rosterSpreadsheetFile) {
-      alert('Please select a filled roster spreadsheet (.xlsx or .csv) to upload.');
+    const cId = selectedConstituencyId || summary?.constituencyId;
+    if (!cId || !rosterSpreadsheetFile) {
+      notify.warning('Please select a filled roster spreadsheet (.xlsx or .csv) to upload.', 'Upload Required');
       return;
     }
     setIsUploadingRoster(true);
@@ -458,7 +537,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
     setRosterUploadError(null);
     try {
       const res = await uploadInchargeRosterSpreadsheet(
-        summary.constituencyId,
+        cId,
         rosterSpreadsheetFile,
         currentApp?.partyCode || currentApp?.name,
         rosterPasscode
@@ -470,7 +549,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
         `${s?.boothsProvisioned || 0} Booths, ${s?.groupsProvisioned || 0} 100-Voter Groups)`
       );
       setRosterSpreadsheetFile(null);
-      await loadLiveData();
+      await loadLiveData(cId);
     } catch (err: any) {
       setRosterUploadError(err?.message || 'Failed to upload and register roster spreadsheet');
     } finally {
@@ -489,8 +568,9 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
   };
 
   const handleSubmitManualSection = async () => {
-    if (!summary?.constituencyId) {
-      alert('No constituency found.');
+    const cId = selectedConstituencyId || summary?.constituencyId;
+    if (!cId) {
+      notify.error('No constituency found.', 'Missing Constituency');
       return;
     }
     const currentSectionSlots = rosterSlotsData?.sections[activeCadreTab] || [];
@@ -523,7 +603,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
     }
 
     if (entriesToSubmit.length === 0) {
-      alert('Please enter at least one real 10-digit mobile number before submitting.');
+      notify.warning('Please enter at least one real 10-digit mobile number before submitting.', 'Validation Warning');
       return;
     }
 
@@ -533,7 +613,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
 
     try {
       await submitManualInchargeRoster(
-        summary.constituencyId,
+        cId,
         entriesToSubmit,
         currentApp?.partyCode || currentApp?.name,
         rosterPasscode
@@ -548,7 +628,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
         }
         return next;
       });
-      await loadLiveData();
+      await loadLiveData(cId);
     } catch (err: any) {
       setManualSubmitError(err?.message || 'Failed to submit manual roster numbers');
     } finally {
@@ -557,19 +637,21 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
   };
 
   const handleDownloadRoster = async () => {
-    if (!summary?.constituencyId) {
-      alert('No constituency found to download roster for.');
+    const cId = selectedConstituencyId || summary?.constituencyId;
+    if (!cId) {
+      notify.error('No constituency found to download roster for.', 'Missing Constituency');
       return;
     }
     try {
-      await downloadInchargeRosterCsv(summary.constituencyId);
+      await downloadInchargeRosterCsv(cId);
     } catch (err: any) {
-      alert(err?.message || 'Failed to download roster CSV');
+      notify.error(err?.message || 'Failed to download roster CSV', 'Download Failed');
     }
   };
 
   useEffect(() => {
     loadLiveData();
+    loadExecutiveIncharges();
   }, [currentApp?.id]);
 
   // Compute Instant Pre-Commit Validation & Preview
@@ -672,6 +754,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
       setUploadStatus('error');
       setStatusMessage('Invalid file format. Only spreadsheet files (.xlsx, .xls, .csv) are supported.');
       setUploadErrors([]);
+
       return;
     }
 
@@ -688,6 +771,9 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
     }
 
     setSelectedFile(file);
+    if (!isCsv && file.size > 10 * 1024 * 1024) {
+      notify.info('Large electorate spreadsheet detected (>10MB). If processing takes time, exporting your file to .CSV format is recommended for fastest line-by-line streaming without memory limits.', 'Large File Notice');
+    }
     setUploadStatus('parsing');
     setStatusMessage(isCsv ? 'Reading CSV sample headers...' : 'Reading spreadsheet and analyzing column headers...');
     setUploadErrors([]);
@@ -748,6 +834,21 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
       setHasDetectedHeaders(analysis.hasDetectedHeaders);
       setMappingWarning(analysis.warningNote || null);
       setColumnMapping(analysis.initialMapping);
+      // Asynchronously reconcile with backend AI column mapping suggestions
+      void suggestColumnMapping(currentApp.id, analysis.headers).then(suggested => {
+        const dictionary = suggested?.suggestions || suggested;
+        if (dictionary && typeof dictionary === 'object') {
+          const cleanMapping: Record<string, string> = {};
+          for (const [k, v] of Object.entries(dictionary)) {
+            if (typeof v === 'string' && v.trim()) {
+              cleanMapping[k] = v.trim();
+            }
+          }
+          if (Object.keys(cleanMapping).length > 0) {
+            setColumnMapping(prev => ({ ...prev, ...cleanMapping }));
+          }
+        }
+      }).catch(() => {});
 
       setUploadStatus('idle');
       setStatusMessage('');
@@ -778,11 +879,11 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
   const handleCommitImport = async () => {
     if (!currentApp || !selectedFile || sheetRowObjects.length === 0) return;
     if (!preCommitValidation.isEpicMapped || !preCommitValidation.isNameMapped) {
-      alert('Mandatory identity fields (Voter ID / EPIC and Voter Full Name) must be mapped before importing.');
+      notify.error('Mandatory identity fields (Voter ID / EPIC and Voter Full Name) must be mapped before importing.', 'Mapping Incomplete');
       return;
     }
     if (preCommitValidation.valid === 0) {
-      alert('Cannot commit: 0 valid records found in preview. Please check your column mappings.');
+      notify.error('Cannot commit: 0 valid records found in preview. Please check your column mappings.', 'Commit Rejected');
       return;
     }
 
@@ -800,7 +901,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
         currentApp.id,
         selectedFile,
         {
-          targetConstituencyId: summary?.constituencyId,
+          targetConstituencyId: selectedConstituencyId || summary?.constituencyId,
           importMode: 'APPEND',
           columnMapping,
         },
@@ -815,6 +916,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
       );
 
       const jobId = uploadRes?.jobId || uploadRes?.id;
+      if (jobId) setActiveJobId(jobId);
       if (!jobId) {
         throw new Error('Server did not return a valid job identifier.');
       }
@@ -873,7 +975,11 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
           } else if (status === 'FAILED') {
             clearInterval(pollTimer);
             setUploadStatus('error');
-            const reason = job?.failureReason || 'Import failed';
+            const reason =
+              job?.failureReason ||
+              job?.metadata?.failureReason ||
+              (Array.isArray(job?.errors) && job.errors[0]?.message) ||
+              'Import failed';
             if (reason === 'SOURCE_FILE_LOST_REUPLOAD_REQUIRED') {
               setStatusMessage(
                 'Import failed: The temporary source file was lost due to a container restart or sleep. On $0 ephemeral hosting (/tmp), please re-upload your file.'
@@ -950,8 +1056,25 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
             </div>
           )}
 
+          {summary?.constituencies && summary.constituencies.length > 0 && (
+            <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700">
+              <span className="text-[11px] font-bold text-slate-300">Constituency:</span>
+              <select
+                value={selectedConstituencyId || summary.constituencyId || ''}
+                onChange={(e) => handleConstituencyChange(e.target.value)}
+                className="bg-slate-900 border border-slate-700 text-cyan-400 text-xs font-bold rounded-lg px-2.5 py-1 focus:outline-none focus:border-cyan-400 cursor-pointer"
+              >
+                {summary.constituencies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.constituencyNumber ? `(${c.constituencyNumber}) ` : ''}{c.name} ({c.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <button
-            onClick={loadLiveData}
+            onClick={() => loadLiveData()}
             disabled={loading}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             title="Refresh database metrics"
@@ -965,6 +1088,48 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
           </div>
         </div>
       </div>
+
+      {/* Multi-Constituency Segments Bar (for Parliament MP or Statewide applications) */}
+      {summary?.constituencies && summary.constituencies.length > 1 && (
+        <div className="p-4 rounded-3xl bg-slate-900 border border-slate-800 space-y-3 shadow-lg">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Layers className="w-4 h-4 text-cyan-400" />
+              <h2 className="text-xs font-black text-white uppercase tracking-wider">
+                Multi-Constituency Segments ({summary.constituencies.length} Assembly Seats)
+              </h2>
+            </div>
+            <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+              <span>Active Ingestion Focus:</span>
+              <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30 font-mono text-[11px]">
+                {summary.constituencies.find(c => c.id === (selectedConstituencyId || summary.constituencyId))?.name || 'Selected Seat'}
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 pt-1">
+            {summary.constituencies.map((c) => {
+              const isSelected = (selectedConstituencyId || summary.constituencyId) === c.id;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => handleConstituencyChange(c.id)}
+                  className={`px-3 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                    isSelected
+                      ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20 font-black scale-102'
+                      : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700/80 border border-slate-700/60'
+                  }`}
+                >
+                  <span>{c.constituencyNumber ? `#${c.constituencyNumber} ` : ''}{c.name}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${isSelected ? 'bg-slate-950/20 text-slate-950 font-bold' : 'bg-slate-900 text-slate-400'}`}>
+                    {c.code}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Upload Box */}
       <div className="p-8 rounded-3xl bg-slate-900 border-2 border-dashed border-slate-700/80 hover:border-cyan-500/50 transition flex flex-col items-center justify-center text-center relative overflow-hidden">
@@ -1104,12 +1269,23 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
               <AlertCircle className="w-4 h-4" />
               <span>Row-Level Ingestion Errors ({uploadErrors.length} records)</span>
             </div>
-            <button
-              onClick={() => setShowErrorDetails(false)}
-              className="text-xs text-slate-400 hover:text-white transition cursor-pointer"
-            >
-              Close
-            </button>
+            <div className="flex items-center gap-2">
+              <a
+                href={activeJobId ? `/api/applications/data/error-report/${activeJobId}` : '#'}
+                download="voter_ingest_errors.csv"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-red-300 bg-red-950/60 hover:bg-red-900/60 border border-red-700/60 transition cursor-pointer"
+                title="Download complete error dump CSV from backend"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Download Error CSV</span>
+              </a>
+              <button
+                onClick={() => setShowErrorDetails(false)}
+                className="text-xs text-slate-400 hover:text-white transition cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
           </div>
           <p className="text-[11px] text-slate-400">
             The following records were rejected because they failed mandatory identity validation or unique constraint rules.
@@ -1459,6 +1635,158 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
         </div>
       </div>
 
+      {/* Executive & Campaign Leadership Cadre (Optional Manual Allocation for Left-out Macro Tiers) */}
+      {(() => {
+        const EXECUTIVE_TIER_CONFIG: Record<string, { role: string; roleName: string; defaultUnit: string; levelCode: string }> = {
+          STATE: { role: 'STATE_ADMIN', roleName: 'State Incharge / General Secretary', defaultUnit: 'State Headquarters', levelCode: 'STA' },
+          ZONE: { role: 'ZONE_INCHARGE', roleName: 'Zone Coordinator / Regional Head', defaultUnit: 'Regional Zone HQ', levelCode: 'ZON' },
+          PARLIAMENT: { role: 'PARLIAMENT_INCHARGE', roleName: 'Parliament Incharge / Lok Sabha Lead', defaultUnit: 'Parliament Unit', levelCode: 'PAR' },
+          DISTRICT: { role: 'CONSTITUENCY_INCHARGE', roleName: 'District Incharge / President', defaultUnit: 'District Unit', levelCode: 'DIS' },
+          CONSTITUENCY: { role: 'CONSTITUENCY_INCHARGE', roleName: 'Constituency / Assembly Candidate Lead', defaultUnit: 'Assembly Constituency', levelCode: 'CON' },
+        };
+
+        const activeExecTiers = (currentApp?.activeHierarchyLevels || []).filter((t) =>
+          Boolean(EXECUTIVE_TIER_CONFIG[t.toUpperCase()])
+        );
+
+        if (activeExecTiers.length === 0) return null;
+
+        return (
+          <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-white">Executive & Campaign Leadership (Macro Tiers)</h2>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-400/10 text-amber-300 border border-amber-400/20">
+                      Optional Manual Allocation
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Assign credentials for higher executive tiers selected during party creation that are not listed in the Electoral Roll Excel.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={loadExecutiveIncharges}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer self-start sm:self-auto border border-slate-700"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Sync DB</span>
+              </button>
+            </div>
+
+            {/* Notification messages */}
+            {execSubmitMessage && (
+              <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{execSubmitMessage}</span>
+              </div>
+            )}
+            {execSubmitError && (
+              <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{execSubmitError}</span>
+              </div>
+            )}
+
+            {/* Cards for each active executive tier */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {activeExecTiers.map((tierKey) => {
+                const cfg = EXECUTIVE_TIER_CONFIG[tierKey.toUpperCase()];
+                if (!cfg) return null;
+                const existingAssigned = executiveIncharges.find(
+                  (inc) => inc.role === cfg.role || inc.level === tierKey || inc.level === cfg.levelCode
+                );
+                const input = executiveInputs[tierKey] || {
+                  name: existingAssigned?.name || '',
+                  mobileNumber: existingAssigned?.phone || '',
+                };
+
+                return (
+                  <div key={tierKey} className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black uppercase font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                          {tierKey}
+                        </span>
+                        <span className="text-xs font-bold text-white">{cfg.roleName}</span>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        existingAssigned?.phone
+                          ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                          : 'bg-slate-800 text-slate-400 border border-slate-700'
+                      }`}>
+                        {existingAssigned?.phone ? `Active: +91 ${existingAssigned.phone}` : 'Pending Allocation'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-400">Incharge Full Name</label>
+                        <input
+                          type="text"
+                          value={input.name}
+                          onChange={(e) =>
+                            setExecutiveInputs((prev) => ({
+                              ...prev,
+                              [tierKey]: { ...input, name: e.target.value },
+                            }))
+                          }
+                          placeholder={cfg.roleName}
+                          className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-400">10-Digit Mobile (+91)</label>
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-mono text-slate-500">+91</span>
+                          <input
+                            type="tel"
+                            maxLength={10}
+                            value={input.mobileNumber}
+                            onChange={(e) => {
+                              const cleaned = e.target.value.replace(/\D/g, '').slice(0, 10);
+                              setExecutiveInputs((prev) => ({
+                                ...prev,
+                                [tierKey]: { ...input, mobileNumber: cleaned },
+                              }));
+                            }}
+                            placeholder="9848012345"
+                            className="w-full pl-10 pr-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white focus:outline-none focus:border-cyan-400"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end pt-1">
+                      <button
+                        type="button"
+                        disabled={isSubmittingExec === tierKey || (input.mobileNumber || '').replace(/\D/g, '').length < 10}
+                        onClick={() => handleSaveExecutiveIncharge(tierKey)}
+                        className="px-3.5 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold text-xs transition cursor-pointer flex items-center gap-1.5"
+                      >
+                        {isSubmittingExec === tierKey ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        )}
+                        <span>{existingAssigned ? 'Update Credential' : 'Assign Credential'}</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Cadre Incharge Logins & Credential Roster Center */}
       {(() => {
         const mandalSlots = rosterSlotsData?.sections?.mandals || [];
@@ -1534,7 +1862,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
 
               <div className="flex flex-wrap items-center gap-2.5">
                 <button
-                  onClick={loadLiveData}
+                  onClick={() => loadLiveData()}
                   disabled={isLoadingSlots}
                   className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs border border-slate-700 transition cursor-pointer flex items-center gap-1.5"
                   title="Refresh slots"
@@ -1545,7 +1873,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
 
                 <button
                   onClick={handleDownloadRoster}
-                  disabled={!summary?.constituencyId}
+                  disabled={!(selectedConstituencyId || summary?.constituencyId)}
                   className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition cursor-pointer flex items-center gap-2 disabled:opacity-50"
                 >
                   <Download className="w-3.5 h-3.5 text-cyan-400" />

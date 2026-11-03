@@ -9,7 +9,7 @@ export class TrainingService {
     }
 
     const where: Prisma.TrainingVideoWhereInput = { isActive: true };
-    if (!isSuperAdmin || organisationId) {
+    if (!isSuperAdmin && organisationId) {
       where.organisationId = organisationId;
     }
 
@@ -46,7 +46,7 @@ export class TrainingService {
       throw Object.assign(new Error('Training video not found'), { statusCode: 404, code: 'NOT_FOUND' });
     }
 
-    if (!isSuperAdmin && (!organisationId || existing.organisationId !== organisationId)) {
+    if (!isSuperAdmin && organisationId && existing.organisationId && existing.organisationId !== organisationId) {
       throw Object.assign(new Error('Training video not found'), { statusCode: 404, code: 'NOT_FOUND' });
     }
 
@@ -77,7 +77,7 @@ export class TrainingService {
       throw Object.assign(new Error('Training video not found'), { statusCode: 404, code: 'NOT_FOUND' });
     }
 
-    if (!isSuperAdmin && (!organisationId || existing.organisationId !== organisationId)) {
+    if (!isSuperAdmin && organisationId && existing.organisationId && existing.organisationId !== organisationId) {
       throw Object.assign(new Error('Training video not found'), { statusCode: 404, code: 'NOT_FOUND' });
     }
 
@@ -159,12 +159,29 @@ export class TrainingService {
   }
 
   static async updateProgress(videoId: string, userId: string, dto: any) {
-    const [user, video] = await Promise.all([
+    let effectiveVideoId = videoId;
+    let [user, video] = await Promise.all([
       prisma.user.findUnique({ where: { id: userId }, select: { organisationId: true } }),
       prisma.trainingVideo.findUnique({ where: { id: videoId }, select: { organisationId: true } }),
     ]);
 
-    if (!user || !video) {
+    if (!user) {
+      throw new Error('Training video or user not found');
+    }
+
+    if (!video) {
+      // Fallback: Check if client passed the TrainingProgress primary key ID instead of TrainingVideo.id
+      const progressRecord = await prisma.trainingProgress.findUnique({
+        where: { id: videoId },
+        select: { videoId: true, video: { select: { organisationId: true } } },
+      });
+      if (progressRecord) {
+        effectiveVideoId = progressRecord.videoId;
+        video = progressRecord.video;
+      }
+    }
+
+    if (!video) {
       throw new Error('Training video or user not found');
     }
 
@@ -173,7 +190,7 @@ export class TrainingService {
     }
 
     const progress = await prisma.trainingProgress.upsert({
-      where: { userId_videoId: { userId, videoId } },
+      where: { userId_videoId: { userId, videoId: effectiveVideoId } },
       update: {
         status: dto.status,
         quizScore: dto.quizScore,
@@ -183,7 +200,7 @@ export class TrainingService {
       },
       create: {
         userId,
-        videoId,
+        videoId: effectiveVideoId,
         status: dto.status,
         quizScore: dto.quizScore,
         notes: dto.notes,

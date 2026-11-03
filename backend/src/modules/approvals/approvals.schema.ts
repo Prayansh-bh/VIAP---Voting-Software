@@ -3,9 +3,11 @@ import { z } from 'zod';
 export const ApprovalTypeEnum = z.enum([
   'USER_REGISTRATION',
   'INCHARGE_APPROVAL',
+  'INCHARGE_REQUEST',
   'DATA_SUBMISSION',
   'SURVEY_APPROVAL',
   'TRANSFER_APPROVAL',
+  'TRANSFER_REQUEST',
   'DATA_CORRECTION',
 ]);
 

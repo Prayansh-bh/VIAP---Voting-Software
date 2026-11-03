@@ -107,6 +107,12 @@ export async function applicationsRoutes(fastify: FastifyInstance) {
   );
 
   fastify.get(
+    '/:applicationId/data/imports/:importId/stream',
+    { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
+    ApplicationsController.streamImportProgress,
+  );
+
+  fastify.get(
     '/:applicationId/data/imports/:importId/errors',
     { preHandler: [authenticate, requireRoles(...ADMIN_DATA_ROLES), populateHierarchyScope] },
     ApplicationsController.getDataImportErrors,

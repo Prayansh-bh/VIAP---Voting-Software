@@ -9,7 +9,11 @@ export class TasksService {
     const { status, priority, unitId, assigneeId } = query;
     const where: Prisma.TaskWhereInput = {};
 
-    if (status) where.status = status;
+    if (status) {
+      where.status = status;
+    } else {
+      where.status = { not: TaskStatus.CANCELLED };
+    }
     if (priority) where.priority = priority;
     if (assigneeId) where.assigneeId = assigneeId;
 
@@ -106,7 +110,12 @@ export class TasksService {
       task.village?.mandal?.constituency?.parliament?.zone?.state?.organisationId === scope.organisationId ||
       task.booth?.village?.mandal?.constituency?.parliament?.zone?.state?.organisationId === scope.organisationId;
 
-    if (!belongsToOrg) return false;
+    if (!belongsToOrg) {
+      if ((scope.role === 'HIGH_COMMAND' || scope.role === 'STATE_ADMIN') && (!task.createdById || !task.createdBy?.organisationId)) {
+        return true;
+      }
+      return false;
+    }
 
     // High Command and State Admin have full access within their tenant
     if (scope.role === 'HIGH_COMMAND' || scope.role === 'STATE_ADMIN') return true;

@@ -10,8 +10,19 @@ import { logAudit } from '../../middleware/audit.js';
 import { emitHierarchyEvent } from '../../lib/socket.js';
 
 const groundReportSchema = z.object({
-  reportType: z.nativeEnum(GroundReportType).default(GroundReportType.GENERAL_UPDATE),
-  priority: z.nativeEnum(TaskPriority).default(TaskPriority.MEDIUM),
+  reportType: z.preprocess((val) => {
+    if (typeof val === 'string') {
+      const upper = val.toUpperCase().replace(/\s*\/\s*/g, '_').replace(/\s+/g, '_');
+      if (upper.includes('COMPLAINT') || upper.includes('ISSUE')) return 'COMPLAINT';
+      if (upper.includes('UPDATE')) return 'GENERAL_UPDATE';
+      return upper;
+    }
+    return val;
+  }, z.nativeEnum(GroundReportType).default(GroundReportType.GENERAL_UPDATE)),
+  priority: z.preprocess((val) => {
+    if (typeof val === 'string') return val.toUpperCase();
+    return val;
+  }, z.nativeEnum(TaskPriority).default(TaskPriority.MEDIUM)),
   description: z.string().min(3),
   issueCategory: z.string().optional(),
   affectedVotersCount: z.number().optional(),
@@ -74,8 +85,14 @@ export async function reportsRoutes(fastify: FastifyInstance) {
       where.unitId = req.query.unitId;
     } else if (req.hierarchyScope && !req.hierarchyScope.isGlobalScope) {
       if (req.hierarchyScope.role !== 'HIGH_COMMAND' && req.hierarchyScope.role !== 'STATE_ADMIN') {
-        if (req.hierarchyScope.accessibleUnitIds.size > 0) {
-          where.unitId = { in: Array.from(req.hierarchyScope.accessibleUnitIds) };
+        const accessible = Array.from(req.hierarchyScope.accessibleUnitIds);
+        if (req.hierarchyScope.role === 'VOTER_100_INCHARGE') {
+          where.OR = [
+            { createdById: req.user!.userId },
+            ...(accessible.length > 0 ? [{ unitId: { in: accessible } }] : []),
+          ];
+        } else if (accessible.length > 0) {
+          where.unitId = { in: accessible };
         } else {
           where.unitId = '00000000-0000-0000-0000-000000000000';
         }
@@ -213,8 +230,14 @@ export async function reportsRoutes(fastify: FastifyInstance) {
       where.unitId = req.query.unitId;
     } else if (req.hierarchyScope && !req.hierarchyScope.isGlobalScope) {
       if (req.hierarchyScope.role !== 'HIGH_COMMAND' && req.hierarchyScope.role !== 'STATE_ADMIN') {
-        if (req.hierarchyScope.accessibleUnitIds.size > 0) {
-          where.unitId = { in: Array.from(req.hierarchyScope.accessibleUnitIds) };
+        const accessible = Array.from(req.hierarchyScope.accessibleUnitIds);
+        if (req.hierarchyScope.role === 'VOTER_100_INCHARGE') {
+          where.OR = [
+            { createdById: req.user!.userId },
+            ...(accessible.length > 0 ? [{ unitId: { in: accessible } }] : []),
+          ];
+        } else if (accessible.length > 0) {
+          where.unitId = { in: accessible };
         } else {
           where.unitId = '00000000-0000-0000-0000-000000000000';
         }

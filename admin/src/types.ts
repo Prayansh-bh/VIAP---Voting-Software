@@ -73,7 +73,15 @@ export interface InchargeRecord {
 
 export interface ApprovalRecord {
   id: string;
-  type: 'USER_REGISTRATION' | 'INCHARGE_REQUEST' | 'DATA_CORRECTION' | 'SURVEY_APPROVAL' | 'TRANSFER_REQUEST';
+  type:
+    | 'USER_REGISTRATION'
+    | 'INCHARGE_REQUEST'
+    | 'INCHARGE_APPROVAL'
+    | 'DATA_CORRECTION'
+    | 'SURVEY_APPROVAL'
+    | 'TRANSFER_REQUEST'
+    | 'TRANSFER_APPROVAL'
+    | (string & {});
   title: string;
   applicantName: string;
   applicantPhone: string;
@@ -107,4 +115,10 @@ export interface ApplicationSummary {
   totalMandals?: number;
   totalConstituencies?: number;
   constituencyId?: string;
+  constituencies?: Array<{
+    id: string;
+    name: string;
+    code: string;
+    constituencyNumber?: number | null;
+  }>;
 }
