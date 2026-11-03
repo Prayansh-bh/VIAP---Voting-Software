@@ -38,6 +38,7 @@ import {
   X
 } from 'lucide-react';
 import { UserSession } from '../types';
+import { askAiStrategy } from '../lib/api/ai.api';
 import { useCms } from '../context/CmsContext';
 import { fetchStateAnalytics } from '../lib/api';
 import AIStrategicIntelligenceCenter from './AIStrategicIntelligenceCenter';
@@ -161,10 +162,6 @@ export default function StateDashboard({ session, onLogout }: StateDashboardProp
         incharge: c.mlaName || c.candidateName || 'Assigned Incharge',
         phone: 'Not available',
         voters: hasVoters ? (c.totalVoters || c._count?.voters || 0) : 0,
-        incVotes: 0,
-        brsVotes: 0,
-        bjpVotes: 0,
-        mimVotes: 0,
         neutralVotes: 0,
         fakeVotes: 0,
         status: hasVoters ? ('WINNING' as 'WINNING' | 'TRAILING' | 'AWAITING_INGESTION') : ('AWAITING_INGESTION' as 'WINNING' | 'TRAILING' | 'AWAITING_INGESTION'),
@@ -272,7 +269,20 @@ export default function StateDashboard({ session, onLogout }: StateDashboardProp
   const winningCount = useMemo(() => relevantConstituencies.filter((c) => c.status === 'WINNING').length, [relevantConstituencies]);
   const trailingCount = useMemo(() => relevantConstituencies.filter((c) => c.status === 'TRAILING').length, [relevantConstituencies]);
 
-  const handleGenerateCampaign = () => {
+  const [isGeneratingCampaign, setIsGeneratingCampaign] = useState(false);
+
+  const handleGenerateCampaign = async () => {
+    setIsGeneratingCampaign(true);
+    try {
+      const prompt = `Generate a compelling ${campaignTone.toLowerCase()} political broadcast message for ${campaignPrompt || 'constituency voters'}. Language: ${campaignLang}.`;
+      const res = await askAiStrategy(session?.unitId, prompt, campaignLang === 'Telugu' ? 'te' : 'en');
+      if (res?.answer) {
+        setCampaignGeneratedMsg(res.answer.trim());
+        return;
+      }
+    } catch {} finally {
+      setIsGeneratingCampaign(false);
+    }
     setCampaignGeneratedMsg('నమస్కారం! పార్టీ ప్రభుత్వం అమలు చేస్తున్న ప్రజా సంక్షేమ పథకాలు ప్రతి గడపకూ చేరుతున్నాయి. ప్రజా పాలనలో భాగస్వాములు కండి!');
   };
 
@@ -1342,10 +1352,11 @@ export default function StateDashboard({ session, onLogout }: StateDashboardProp
 
                   <button
                     onClick={handleGenerateCampaign}
+                    disabled={isGeneratingCampaign}
                     className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold rounded-xl shadow-md transition cursor-pointer text-xs flex items-center justify-center gap-2"
                   >
                     <Sparkles size={16} />
-                    <span>Generate AI Broadcast Message</span>
+                    <span>{isGeneratingCampaign ? 'Generating AI Message...' : 'Generate AI Broadcast Message'}</span>
                   </button>
                 </div>
 

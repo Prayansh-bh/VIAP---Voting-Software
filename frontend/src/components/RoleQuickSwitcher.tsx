@@ -51,6 +51,7 @@ const SWITCHER_ITEMS: SwitcherItem[] = [
   { role: 'ROLES', category: 'system', label: 'CMS & Platform Admin (Port 3001)', shortLabel: 'Admin Panel', subtitle: 'Dedicated CMS Console', path: getAdminUrl(), icon: Settings, color: '#f59e0b', isExternal: true },
 
   // Apex Command
+  { role: 'PARTY_ADMIN', levelKey: 'PARTY_ADMIN', category: 'apex', label: 'Party Administrator (HQ)', shortLabel: 'Party Admin', subtitle: 'Manage Videos & Directives', path: '/party-admin', icon: Shield, color: '#f59e0b' },
   { role: 'STATE_ADMIN', levelKey: 'STATE', category: 'apex', label: 'State Incharge (Apex)', shortLabel: 'State', subtitle: 'Statewide War Room', path: '/state', icon: Building, color: '#f59e0b' },
   { role: 'ZONE_INCHARGE', levelKey: 'ZONE', category: 'apex', label: 'Zone Coordinator', shortLabel: 'Zone', subtitle: 'Multi-Parliament Command', path: '/zone', icon: Building, color: '#8b5cf6' },
   { role: 'PARLIAMENT_INCHARGE', levelKey: 'PARLIAMENT', category: 'apex', label: 'Parliament Incharge (MP)', shortLabel: 'Parliament', subtitle: 'Parliamentary Constituency', path: '/parliament', icon: Crown, color: '#3b82f6' },
@@ -82,6 +83,8 @@ const ROLE_RANK_WEIGHT: Record<string, number> = {
 };
 
 const roleLevelMap: Record<string, string> = {
+  PARTY_ADMIN: 'PARTY_ADMIN',
+  HIGH_COMMAND: 'PARTY_ADMIN',
   STATE_ADMIN: 'STATE',
   ZONE_INCHARGE: 'ZONE',
   PARLIAMENT_INCHARGE: 'PARLIAMENT',

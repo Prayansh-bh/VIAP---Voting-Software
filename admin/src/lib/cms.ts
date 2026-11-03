@@ -345,6 +345,7 @@ export const DEFAULT_CONFIG: CmsConfig = {
   constituencies: [],
   slogan: '',
   hierarchyLabels: {
+    PARTY_ADMIN: 'Party Administrator',
     STATE: 'State Incharge',
     ZONE: 'Zone Coordinator',
     PARLIAMENT: 'Parliament Incharge',
@@ -590,6 +591,7 @@ export async function saveCmsConfig(config: Partial<CmsConfig>, token?: string):
         dashboardConfig: config.dashboardConfig,
         analyticsConfig: config.analyticsConfig,
         aiEnabled: config.aiEnabled,
+        politicalParties: (config as any).politicalParties || (config as any).parties,
       }),
     });
     return true;

@@ -12,6 +12,7 @@ import {
   MandalVillage,
   saveMandalVoterRecord
 } from '../utils/mandalHelpers';
+import { createCadreApi } from '../lib/api/cadre.api';
 import {
   Home,
   Search,
@@ -57,6 +58,7 @@ import {
   fetchVotersForUnit,
   fetchHierarchyVillages,
   fetchHierarchyBooths,
+  fetchMandalAnalytics,
   type HierarchyVillage,
   type HierarchyBooth,
   syncVoter,
@@ -67,6 +69,8 @@ import {
 import { createRealtimeSocket, RealtimeVoteEvent } from '../lib/realtime';
 import Pagination from './common/Pagination';
 import { useCms } from '../context/CmsContext';
+import ActiveSessionsModal from './common/ActiveSessionsModal';
+import CadrePulseWidget from './common/CadrePulseWidget';
 
 interface MandalInchargeDashboardProps {
   session: UserSession;
@@ -174,7 +178,7 @@ interface VillageDataInfo {
 }
 
 export default function MandalInchargeDashboard({ session, onLogout }: MandalInchargeDashboardProps) {
-  const { config } = useCms();
+  const { config, parties } = useCms();
   const [cadreItems, setCadreItems] = useState<any[]>([]);
 
   const villageIncharges = useMemo(() => {
@@ -253,6 +257,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   };
   const [cadreActiveTab, setCadreActiveTab] = useState<'village' | 'booth' | 'voter'>('village');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSessionsOpen, setIsSessionsOpen] = useState(false);
   const [voters, setVoters] = useState<Voter[]>([]);
 
   // Caste Analytics Redesign States
@@ -417,6 +422,16 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     }
     setCadreAssignments(updated);
     setEditingSlotKey(null);
+
+    // Persist allocation in PostgreSQL
+    if (name.trim()) {
+      void createCadreApi({
+        name: name.trim(),
+        role: 'VOTER_100_INCHARGE',
+        assignedUnitLevel: 'VOTER_GROUP',
+        notes: `Assigned to Slot ${key} via Mandal Cockpit`,
+      }).catch(() => {});
+    }
   };
 
   const handleSaveBoothIncharge = (boothNum: number, name: string, mobile: string) => {
@@ -424,6 +439,18 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     updated[boothNum] = { name: name.trim(), mobile: mobile.trim() };
     setBoothInchargeOverrides(updated);
     setEditingInchargeBooth(null);
+
+    // Persist allocation in PostgreSQL
+    const cleanMobile = mobile.replace(/\D/g, '').slice(-10);
+    if (name.trim() && cleanMobile.length >= 10) {
+      void createCadreApi({
+        name: name.trim(),
+        mobileNumber: cleanMobile,
+        role: 'BOOTH_PRESIDENT',
+        assignedUnitLevel: 'BOOTH',
+        notes: `Assigned as Booth ${boothNum} Incharge via Mandal Cockpit`,
+      }).catch(() => {});
+    }
   };
 
   const totalAssignedV100 = useMemo(() => {
@@ -645,6 +672,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
           fetchCadreNetwork(session.unitId).catch(() => null),
           fetchHierarchyVillages(session.unitId).catch(() => []),
           fetchHierarchyBooths(session.unitId).catch(() => []),
+          fetchMandalAnalytics(session.unitId).catch(() => null),
         ]);
 
         if (!active) {
@@ -961,9 +989,9 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   }, [activeVoters, activeCasteDetail]);
 
 
-  // Party support breakdown
+  // Party support breakdown (Dynamically supporting all configured CMS parties)
   const partyStats = useMemo(() => {
-    const stats: Record<VoterPreference, number> = {
+    const stats: Record<string, number> = {
       TDP: 0,
       YSRCP: 0,
       JSP: 0,
@@ -972,16 +1000,23 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       Neutral: 0,
       OTH: 0
     };
+    if (parties && parties.length > 0) {
+      parties.forEach(p => {
+        if (p.code) {
+          stats[p.code] = 0;
+        }
+      });
+    }
     voters.forEach(v => {
       const pref = v.politicalPreference || 'Neutral';
       if (stats[pref] !== undefined) {
         stats[pref] += 1;
       } else {
-        stats.Neutral += 1;
+        stats['Neutral'] = (stats['Neutral'] || 0) + 1;
       }
     });
-    return stats;
-  }, [voters]);
+    return stats as Record<VoterPreference, number>;
+  }, [parties, voters]);
 
   // Fake votes count (Fake, Duplicate, Doubtful)
   const fakeVotesCount = useMemo(() => {
@@ -1018,20 +1053,42 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     };
   }, [partyStats, voters]);
 
-  // Donut chart calculations
+  // Donut chart calculations (Dynamically mapped from active CMS parties)
   const donutChartData = useMemo(() => {
-    const activeParties: VoterPreference[] = ['TDP', 'YSRCP', 'JSP', 'BJP', 'INC', 'Neutral'];
-    return activeParties.map(key => {
-      const value = partyStats[key];
-      const percentage = totalVotersCount > 0 ? (value / totalVotersCount) * 100 : 0;
+    const dynamicList = (parties && parties.length > 0)
+      ? parties.filter(p => p.isActive)
+      : [
+          { code: 'TDP', name: 'Telugu Desam Party', primaryColor: '#F59E0B' },
+          { code: 'YSRCP', name: 'YSR Congress Party', primaryColor: '#004B87' },
+          { code: 'INC', name: 'Congress', primaryColor: '#0284c7' },
+          { code: 'JSP', name: 'Jana Sena Party', primaryColor: '#dc2626' },
+          { code: 'BJP', name: 'Bharatiya Janata Party', primaryColor: '#f97316' },
+        ];
+
+    const items: Array<{ key: string; name: string; value: number; percentage: number; color: string }> = dynamicList.map(p => {
+      const val = (partyStats as any)[p.code] || 0;
+      const percentage = totalVotersCount > 0 ? (val / totalVotersCount) * 100 : 0;
       return {
-        key,
-        value,
+        key: p.code,
+        name: p.shortName || p.name || p.code,
+        value: val,
         percentage,
-        color: PARTY_COLORS[key]
+        color: p.primaryColor || PARTY_COLORS[p.code as VoterPreference] || '#F59E0B'
       };
     });
-  }, [partyStats]);
+
+    const neutralVal = (partyStats as any)['Neutral'] || 0;
+    const neutralPct = totalVotersCount > 0 ? (neutralVal / totalVotersCount) * 100 : 0;
+    items.push({
+      key: 'Neutral',
+      name: 'Neutral / Undecided',
+      value: neutralVal,
+      percentage: neutralPct,
+      color: '#64748B'
+    });
+
+    return items;
+  }, [parties, partyStats, totalVotersCount]);
 
   const [hoveredSlice, setHoveredSlice] = useState<string | null>(null);
 
@@ -1393,7 +1450,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         return;
       }
 
-      void updateTrainingProgress(existing.id, 'WATCHED').then(() => {
+      void updateTrainingProgress(video.id, 'WATCHED').then(() => {
         setTrainingProgress((prev) => ({
           ...prev,
           [video.id]: { ...existing, status: 'WATCHED', watchedAt: new Date().toISOString() },
@@ -1404,7 +1461,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     }
 
     void ensureTrainingAssigned(session.userId, video.id)
-      .then((progress) => updateTrainingProgress(progress.id, 'WATCHED').then(() => progress))
+      .then((progress) => updateTrainingProgress(video.id, 'WATCHED').then(() => progress))
       .then((progress) => {
         setTrainingProgress((prev) => ({
           ...prev,
@@ -1722,6 +1779,17 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         {/* Fixed Sign Out at Bottom */}
         <div className="pt-4 border-t border-slate-800 bg-slate-900 shrink-0">
           <button
+            type="button"
+            onClick={() => setIsSessionsOpen(true)}
+            className="w-full mb-2 flex items-center justify-between px-4 py-2.5 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-all cursor-pointer"
+          >
+            <span className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              Active Sessions
+            </span>
+            <ChevronRight className="w-3.5 h-3.5 opacity-60" />
+          </button>
+          <button
             onClick={onLogout}
             className="w-full flex items-center justify-between px-4 py-3 bg-red-950/40 hover:bg-red-900/60 border border-red-900/30 text-red-400 hover:text-white rounded-xl text-xs font-bold transition-all duration-200 cursor-pointer"
             id="btn-sidebar-logout"
@@ -1907,13 +1975,20 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                   <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Mandal Political Preference Breakdown</h3>
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                     {(() => {
-                      const activeParties: VoterPreference[] = ['TDP', 'YSRCP', 'JSP', 'BJP', 'INC', 'Neutral'];
+                      const dynamicParties = (parties && parties.length > 0)
+                        ? parties.filter(p => p.isActive).map(p => p.code as VoterPreference)
+                        : (['TDP', 'YSRCP', 'JSP', 'BJP', 'INC'] as VoterPreference[]);
+                      const activeParties: VoterPreference[] = Array.from(new Set([...dynamicParties, 'Neutral' as VoterPreference]));
                       return activeParties.map((p) => {
-                        const count = partyStats[p];
+                        const count = (partyStats as any)[p] || 0;
                         const pct = totalVotersCount > 0 ? ((count / totalVotersCount) * 100).toFixed(1) : '0.0';
+                        const matchedParty = parties?.find(item => item.code === p);
+                        const pName = matchedParty?.shortName || matchedParty?.name || PARTY_NAMES[p] || p;
+                        const pColor = matchedParty?.primaryColor;
+                        const bgClass = PARTY_BG_COLORS[p] || 'bg-slate-50 text-slate-800 border-slate-200';
                         return (
-                          <div key={p} className={"rounded-xl p-3 border " + PARTY_BG_COLORS[p]}>
-                            <h4 className="text-[10px] font-black tracking-wider uppercase mb-1">{PARTY_NAMES[p]}</h4>
+                          <div key={p} className={"rounded-xl p-3 border " + bgClass} style={pColor ? { borderLeft: `4px solid ${pColor}` } : undefined}>
+                            <h4 className="text-[10px] font-black tracking-wider uppercase mb-1" style={pColor ? { color: pColor } : undefined}>{pName}</h4>
                             <div className="flex flex-col">
                               <span className="text-lg font-black leading-none">{count.toLocaleString()}</span>
                               <span className="text-[10px] font-bold opacity-80 mt-1">{pct}%</span>
@@ -2136,6 +2211,9 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                   )}
                 </div>
 
+                {/* Cadre Opinion Polls Widget */}
+                <CadrePulseWidget title="Mandal Cadre Opinion Polls" />
+
               </div>
             </div>
           )}
@@ -2195,8 +2273,8 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                           key={tab.id}
                           onClick={() => setVillageListFilter(tab.id)}
                           className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer border ${villageListFilter === tab.id
-                              ? 'bg-yellow-400 text-slate-950 border-yellow-500 font-black shadow-md shadow-yellow-400/20'
-                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                            ? 'bg-yellow-400 text-slate-950 border-yellow-500 font-black shadow-md shadow-yellow-400/20'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                             }`}
                         >
                           {tab.label}
@@ -2296,8 +2374,8 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                                     </span>
                                   ) : (
                                     <span className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${status === 'WINNING'
-                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                        : 'bg-rose-50 text-rose-700 border-rose-200'
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                      : 'bg-rose-50 text-rose-700 border-rose-200'
                                       }`}>
                                       {status}
                                     </span>
@@ -2312,8 +2390,8 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                                     </span>
                                   ) : (
                                     <span className={`inline-block font-mono text-xs font-black px-2 py-0.5 rounded ${isWinning
-                                        ? 'text-emerald-600 bg-emerald-50 border border-emerald-150'
-                                        : 'text-rose-600 bg-rose-50 border border-rose-150'
+                                      ? 'text-emerald-600 bg-emerald-50 border border-emerald-150'
+                                      : 'text-rose-600 bg-rose-50 border border-rose-150'
                                       }`}>
                                       {isWinning ? '+' : '-'}{leadStr}
                                     </span>
@@ -2387,8 +2465,8 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                                   </span>
                                 ) : (
                                   <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase border ${isWinning
-                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                      : 'bg-orange-50 text-orange-700 border-orange-100'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                    : 'bg-orange-50 text-orange-700 border-orange-100'
                                     }`}>
                                     {status}
                                   </span>
@@ -2613,7 +2691,16 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                                 <div className="space-y-0.5">
                                   <h5 className="font-black text-slate-900 text-sm uppercase">{getVillageInchargeName(selectedVillageName)}</h5>
                                   <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Mandal Appointed Village Incharge</p>
-                                  <p className="text-xs font-mono text-slate-500 font-bold mt-1">📞 9123410001 (Dummy Contact)</p>
+                                  {getInchargePhone(selectedVillageName) ? (
+                                    <a
+                                      href={`tel:${getInchargePhone(selectedVillageName)}`}
+                                      className="inline-flex items-center gap-1.5 text-xs font-mono text-emerald-600 hover:text-emerald-700 font-bold mt-1"
+                                    >
+                                      <span>📞 {getInchargePhone(selectedVillageName)}</span>
+                                    </a>
+                                  ) : (
+                                    <p className="text-xs font-mono text-slate-400 font-bold mt-1">📞 Contact not available</p>
+                                  )}
                                 </div>
                               </div>
                               <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 text-xs space-y-1">
@@ -3016,8 +3103,8 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                       <button
                         onClick={() => setBoothListActiveTab('all')}
                         className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${boothListActiveTab === 'all'
-                            ? 'bg-white text-slate-950 shadow-sm'
-                            : 'text-slate-500 hover:text-slate-800'
+                          ? 'bg-white text-slate-950 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800'
                           }`}
                       >
                         ALL ({analyzedBooths.length})
@@ -3025,8 +3112,8 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                       <button
                         onClick={() => setBoothListActiveTab('winning')}
                         className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${boothListActiveTab === 'winning'
-                            ? 'bg-yellow-400 text-slate-950 shadow-sm'
-                            : 'text-slate-500 hover:text-slate-800'
+                          ? 'bg-yellow-400 text-slate-950 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800'
                           }`}
                       >
                         <span className="w-2 h-2 rounded-full bg-emerald-500" />
@@ -3035,8 +3122,8 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                       <button
                         onClick={() => setBoothListActiveTab('trailing')}
                         className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${boothListActiveTab === 'trailing'
-                            ? 'bg-blue-600 text-white shadow-sm'
-                            : 'text-slate-500 hover:text-slate-800'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800'
                           }`}
                       >
                         <span className="w-2 h-2 rounded-full bg-rose-500" />
@@ -4756,12 +4843,12 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                                 {video.category}
                               </span>
                               <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${progress?.status === 'COMPLETED'
-                                  ? 'bg-emerald-100 text-emerald-700'
-                                  : progress?.status === 'WATCHED'
-                                    ? 'bg-blue-100 text-blue-700'
-                                    : progress?.status === 'ASSIGNED'
-                                      ? 'bg-amber-100 text-amber-700'
-                                      : 'bg-slate-100 text-slate-500'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : progress?.status === 'WATCHED'
+                                  ? 'bg-blue-100 text-blue-700'
+                                  : progress?.status === 'ASSIGNED'
+                                    ? 'bg-amber-100 text-amber-700'
+                                    : 'bg-slate-100 text-slate-500'
                                 }`}>
                                 {progressLabel}
                               </span>
@@ -5215,6 +5302,10 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         </div>
       )}
 
+      <ActiveSessionsModal
+        isOpen={isSessionsOpen}
+        onClose={() => setIsSessionsOpen(false)}
+      />
     </div>
   );
 }

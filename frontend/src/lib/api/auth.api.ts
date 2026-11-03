@@ -1,7 +1,9 @@
 import { apiFetch } from './client';
 import { getOrCreateDeviceId, setDeviceToken, clearDeviceToken, setAuthToken } from '../authStorage';
 
-export async function requestOtpApi(
+export { getOrCreateDeviceId, getOrCreateDeviceId as getDeviceId };
+
+async function requestOtpApi(
   mobileNumber: string,
   role?: string,
   channel: 'SMS' | 'WHATSAPP' = 'SMS',
@@ -31,7 +33,7 @@ export async function requestOtp(
   return requestOtpApi(mobileNumber, role, channel, options);
 }
 
-export async function verifyOtpApi(
+async function verifyOtpApi(
   requestId: string,
   otpCode: string,
   deviceId?: string,
@@ -52,6 +54,28 @@ export async function verifyOtpApi(
   );
 }
 
+function resolveAuthoritativeUnitId(user: any): string {
+  const assignment = user?.hierarchyAssignment;
+  return (
+    assignment?.voterGroupId ||
+    assignment?.boothId ||
+    assignment?.villageId ||
+    assignment?.pollingStationId ||
+    assignment?.mandalId ||
+    assignment?.constituencyId ||
+    assignment?.parliamentId ||
+    assignment?.zoneId ||
+    assignment?.stateId ||
+    assignment?.mandal?.id ||
+    assignment?.village?.id ||
+    assignment?.booth?.id ||
+    assignment?.voterGroup?.id ||
+    user?.unitId ||
+    assignment?.unitId ||
+    ''
+  );
+}
+
 export async function verifyOtp(
   requestId: string,
   otpCode: string,
@@ -66,6 +90,7 @@ export async function verifyOtp(
 
   const user = data.user || {};
   const assignment = user.hierarchyAssignment;
+  const authoritativeUnitId = resolveAuthoritativeUnitId(user);
 
   return {
     token: data.token,
@@ -75,7 +100,7 @@ export async function verifyOtp(
       userName: user.name || user.userCode || 'In-Charge',
       mobileNumber: user.mobileNumber || '',
       role: user.role || 'CONSTITUENCY_INCHARGE',
-      unitId: user.unitId || assignment?.unitId || '',
+      unitId: authoritativeUnitId,
       assignedConstituency: assignment?.constituency?.name || '',
       assignedMandal: assignment?.mandal?.name || user.unitName,
       assignedVillage: assignment?.village?.name,
@@ -91,7 +116,7 @@ export async function verifyOtp(
  * Fast 1-Click Demo / In-App Dev Authentication.
  * Supports pre-seeded demo roles OR custom mobile numbers for new user dev onboarding.
  */
-export async function loginAsDemoRoleApi(
+async function loginAsDemoRoleApi(
   role: string,
   deviceId?: string,
   deviceName?: string,
@@ -132,6 +157,7 @@ export async function loginAsDemoRole(
 
   const user = data.user || {};
   const assignment = user.hierarchyAssignment;
+  const authoritativeUnitId = resolveAuthoritativeUnitId(user);
 
   return {
     token: data.token,
@@ -141,7 +167,7 @@ export async function loginAsDemoRole(
       userName: user.name || user.userCode || 'In-Charge',
       mobileNumber: user.mobileNumber || '',
       role: user.role || role,
-      unitId: user.unitId || assignment?.unitId || '',
+      unitId: authoritativeUnitId,
       assignedConstituency: assignment?.constituency?.name || '',
       assignedMandal: assignment?.mandal?.name || user.unitName,
       assignedVillage: assignment?.village?.name,
@@ -169,7 +195,7 @@ export async function loginAsDevUser(
  * Authenticates user seamlessly using a remembered device token (Zomato/Uber pattern).
  * Directly opens dashboard on authorized devices without prompting for OTP.
  */
-export async function authenticateDeviceSessionApi(
+async function authenticateDeviceSessionApi(
   deviceId: string,
   deviceToken: string
 ): Promise<{ token: string; refreshToken?: string; deviceId: string; deviceToken: string; user: any }> {
@@ -194,6 +220,7 @@ export async function authenticateDeviceSession(
 
   const user = data.user || {};
   const assignment = user.hierarchyAssignment;
+  const authoritativeUnitId = resolveAuthoritativeUnitId(user);
 
   return {
     token: data.token,
@@ -203,7 +230,7 @@ export async function authenticateDeviceSession(
       userName: user.name || user.userCode || 'In-Charge',
       mobileNumber: user.mobileNumber || '',
       role: user.role || 'CONSTITUENCY_INCHARGE',
-      unitId: user.unitId || assignment?.unitId || '',
+      unitId: authoritativeUnitId,
       assignedConstituency: assignment?.constituency?.name || '',
       assignedMandal: assignment?.mandal?.name || user.unitName,
       assignedVillage: assignment?.village?.name,

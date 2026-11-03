@@ -58,8 +58,9 @@ export const assignInchargeSchema = z.object({
     'VILLAGE',
     'BOOTH',
     'VOTER_GROUP',
+    'DISTRICT',
   ]),
-  unitId: z.string().min(1, 'Target unitId is required'),
+  unitId: z.string().optional().default('default'),
   parentUnitId: z.string().optional(),
   reason: z.string().optional(),
 });
@@ -74,6 +75,7 @@ export const updateInchargeSchema = z.object({
     'VILLAGE',
     'BOOTH',
     'VOTER_GROUP',
+    'DISTRICT',
   ]).optional(),
   unitId: z.string().optional(),
   isActive: z.boolean().optional(),

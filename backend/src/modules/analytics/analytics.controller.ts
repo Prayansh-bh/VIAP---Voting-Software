@@ -203,4 +203,69 @@ export class AnalyticsController {
     const data = await AnalyticsService.computeAnalyticsForUnit(targetUnitId);
     return reply.send(successResponse(data));
   }
+
+  static async getLiveVoteEvents(req: FastifyRequest, reply: FastifyReply) {
+    const query = req.query as { unitId?: string; limit?: string };
+    const limit = Math.min(100, Math.max(1, parseInt(query.limit || '25', 10)));
+    const where: any = {};
+
+    if (query.unitId) {
+      where.unitId = query.unitId;
+    }
+
+    const events = await prisma.liveVoteEvent.findMany({
+      where,
+      orderBy: { changedAt: 'desc' },
+      take: limit,
+      include: {
+        voter: {
+          select: {
+            id: true,
+            name: true,
+            epicNumber: true,
+            politicalPreference: true,
+          },
+        },
+        incharge: {
+          select: {
+            id: true,
+            name: true,
+            userCode: true,
+          },
+        },
+        unit: {
+          select: {
+            id: true,
+            name: true,
+            level: true,
+          },
+        },
+      },
+    });
+
+    const formatted = events.map((ev) => ({
+      id: ev.id,
+      previousStatus: ev.previousStatus,
+      nextStatus: ev.nextStatus,
+      changedAt: ev.changedAt.toISOString(),
+      voter: {
+        id: ev.voter.id,
+        name: ev.voter.name,
+        epicNumber: ev.voter.epicNumber,
+        politicalPreference: ev.voter.politicalPreference,
+      },
+      unit: {
+        id: ev.unit?.id || ev.unitId,
+        name: ev.unit?.name || '',
+        level: ev.unit?.level || 'VOTER_GROUP',
+      },
+      incharge: {
+        id: ev.incharge.id,
+        name: ev.incharge.name,
+        userCode: ev.incharge.userCode,
+      },
+    }));
+
+    return reply.send(successResponse(formatted));
+  }
 }

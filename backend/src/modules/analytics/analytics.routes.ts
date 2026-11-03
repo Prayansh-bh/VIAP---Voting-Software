@@ -15,4 +15,5 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
   fastify.get('/village/:id', AnalyticsController.getVillageAnalytics);
   fastify.get('/booth/:id', AnalyticsController.getBoothAnalytics);
   fastify.get('/voter-incharge/:id', AnalyticsController.getVoterInchargeAnalytics);
+  fastify.get('/live-events', AnalyticsController.getLiveVoteEvents);
 }

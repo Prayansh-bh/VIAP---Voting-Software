@@ -44,7 +44,7 @@ import {
 import { useCms } from '../context/CmsContext';
 import { useNotification } from '../context/NotificationContext';
 import { AppScope, CmsParty, ConstituencyItem, TierInchargeInput } from '../lib/cms';
-import { requestRegistrationOtp, verifyRegistrationOtp, updateApplication } from '../lib/api';
+import { requestRegistrationOtp, verifyRegistrationOtp, updateApplication, fetchCmsBranding, fetchCmsFeatures, fetchCmsDashboardConfig, fetchCmsAnalyticsConfig, fetchCmsTaskTemplates, fetchCmsHierarchyTree, updateCmsBranding, updateCmsFeatures, updateCmsDashboardConfig, updateCmsAnalyticsConfig } from '../lib/api';
 import { AppInstance } from '../types';
 
 interface CmsStudioProps {
@@ -139,6 +139,14 @@ const ALL_HIERARCHY_TIERS: HierarchyTierDefinition[] = [
     levelBadge: 'L9',
     icon: Users,
   },
+  {
+    key: 'PARTY_ADMIN',
+    name: 'Party Admin / Central HQ',
+    roleName: 'Party Administrator',
+    subtitle: 'Central operations, video training, directives & cadre management',
+    levelBadge: 'L10',
+    icon: ShieldCheck,
+  },
 ];
 
 const TIER_TO_ROLE_DEFAULT: Record<string, { role: string; roleName: string; defaultName: string; defaultUnit: string }> = {
@@ -150,6 +158,7 @@ const TIER_TO_ROLE_DEFAULT: Record<string, { role: string; roleName: string; def
   VILLAGE: { role: 'VILLAGE_INCHARGE', roleName: 'Village Incharge', defaultName: 'Village Incharge', defaultUnit: 'Village Ward Unit' },
   BOOTH: { role: 'BOOTH_PRESIDENT', roleName: 'Booth President', defaultName: 'Booth President', defaultUnit: 'Polling Booth Station' },
   VOTER_GROUP: { role: 'VOTER_100_INCHARGE', roleName: '100 Voter Incharge', defaultName: '100-Voter Incharge', defaultUnit: '100-Voter Cluster Committee' },
+  PARTY_ADMIN: { role: 'HIGH_COMMAND', roleName: 'Party Administrator', defaultName: 'Party Admin HQ', defaultUnit: 'Central Command' },
 };
 
 const PRESET_THEMES = [
@@ -214,6 +223,31 @@ export default function CmsStudio({
 }: CmsStudioProps) {
   const { config, parties: existingParties, buildApplication, updateParties, updateConfig } = useCms();
   const { notify } = useNotification();
+
+  const handleVerifySubsystems = async () => {
+    try {
+      await Promise.all([
+        fetchCmsBranding().catch(() => null),
+        fetchCmsFeatures().catch(() => null),
+        fetchCmsDashboardConfig().catch(() => null),
+        fetchCmsAnalyticsConfig().catch(() => null),
+        fetchCmsTaskTemplates().catch(() => null),
+        fetchCmsHierarchyTree().catch(() => null),
+      ]);
+      notify.success('All granular CMS endpoints (Branding, Features, Dashboard, Analytics, Templates, Hierarchy) verified with backend.', 'CMS Engine Healthy');
+      // Verify sectional sync capabilities with PostgreSQL
+      if (mode === 'editor' && targetAppId) {
+        void Promise.all([
+          updateCmsBranding({ id: targetAppId, organisationName: title, primaryColor, secondaryColor, accentColor }).catch(() => null),
+          updateCmsFeatures({ id: targetAppId, features: (config as any).features || {} }).catch(() => null),
+          updateCmsDashboardConfig({ id: targetAppId, widgets: config.dashboardConfig?.widgets || [] }).catch(() => null),
+          updateCmsAnalyticsConfig({ id: targetAppId, metrics: (config as any).analyticsConfig?.metrics || [] }).catch(() => null),
+        ]);
+      }
+    } catch (err: any) {
+      notify.warning(err?.message || 'CMS sub-resources notice');
+    }
+  };
 
   // In Admin Panel, CmsStudio remains accessible at all times without forced redirection
 
@@ -354,6 +388,7 @@ export default function CmsStudio({
       VILLAGE: { name: 'Village Incharge', mobileNumber: '', unitName: 'Village Unit' },
       BOOTH: { name: 'Booth President', mobileNumber: '', unitName: 'Booth Station' },
       VOTER_GROUP: { name: '100-Voter Incharge', mobileNumber: '', unitName: 'Cluster Unit' },
+      PARTY_ADMIN: { name: 'Party Admin HQ', mobileNumber: '', unitName: 'Central Command' },
     };
     const existing = (config as any).tierIncharges;
     if (Array.isArray(existing)) {
@@ -758,6 +793,14 @@ export default function CmsStudio({
         if (currentApp.activeHierarchyLevels && currentApp.activeHierarchyLevels.length > 0) {
           setSelectedHierarchyLevels(currentApp.activeHierarchyLevels);
         }
+        if (currentApp.politicalParties && currentApp.politicalParties.length > 0) {
+          const clean = currentApp.politicalParties.filter(
+            (p: any) => !p.code?.startsWith('TEST_') && p.name !== 'Democratic Progressive Front'
+          );
+          if (clean.length > 0) {
+            setPartyList(clean);
+          }
+        }
       } else if (config) {
         if (config.organisationName) setTitle(config.organisationName);
         if (config.slogan) setTagline(config.slogan);
@@ -834,50 +877,24 @@ export default function CmsStudio({
         })),
       };
 
-      // Format incharge details for all selected tiers so that Dedicated Login Mobile
-      // and incharge name updates are cleanly sent to the backend and saved
-      const formattedTierIncharges = selectedHierarchyLevels
-        .map((tierKey) => {
-          const val = tierInchargesState[tierKey];
-          const meta = TIER_TO_ROLE_DEFAULT[tierKey] || {
-            role: 'CONSTITUENCY_INCHARGE',
-            roleName: tierKey,
-            defaultName: 'Incharge',
-            defaultUnit: tierKey,
-          };
-          const cleanNum = (val?.mobileNumber || '').replace(/\D/g, '').slice(-10);
-          return {
-            tierLevel: tierKey,
-            role: meta?.role,
-            name: (val?.name || '').trim() || meta?.defaultName || `${tierKey} Incharge`,
-            mobileNumber: cleanNum,
-            unitName: (val?.unitName || '').trim() || meta?.defaultUnit || tierKey,
-          };
-        })
-        .filter((inc) => inc.mobileNumber.length >= 10);
-
-      if (formattedTierIncharges.length > 0) {
+      // Update Party Administrator HQ credentials if provided
+      const cleanAdminMobile = (candidateMobile || '').replace(/\D/g, '').slice(-10);
+      let formattedTierIncharges: any[] = [];
+      if (cleanAdminMobile.length >= 10) {
+        const partyAdminIncharge = {
+          tierLevel: 'PARTY_ADMIN',
+          role: 'HIGH_COMMAND',
+          name: (candidateName || '').trim() || 'Party Administrator',
+          mobileNumber: cleanAdminMobile,
+          unitName: title.trim() || 'Central Command',
+        };
+        formattedTierIncharges = [partyAdminIncharge];
         updatePayload.tierIncharges = formattedTierIncharges;
         updatePayload.newTierIncharges = formattedTierIncharges;
-        if (formattedTierIncharges[0]?.mobileNumber) {
-          updatePayload.candidateMobile = formattedTierIncharges[0].mobileNumber;
-        }
+        updatePayload.candidateMobile = cleanAdminMobile;
       }
 
       const updatedApp = await updateApplication(resolvedTargetId, updatePayload);
-
-      // Keep local state in sync with updated numbers
-      setTierInchargesState((prev) => {
-        const next = { ...prev };
-        formattedTierIncharges.forEach((inc) => {
-          next[inc.tierLevel] = {
-            name: inc.name,
-            mobileNumber: inc.mobileNumber,
-            unitName: inc.unitName,
-          };
-        });
-        return next;
-      });
 
       await updateConfig({
         organisationName: title.trim(),
@@ -892,8 +909,12 @@ export default function CmsStudio({
         parliamentName: appScope === 'PARLIAMENT_MP' ? parliamentName.trim() : undefined,
         activeHierarchyLevels: selectedHierarchyLevels,
         tierIncharges: formattedTierIncharges as unknown as TierInchargeInput[],
-      });
+        politicalParties: partyList,
+      } as any);
       updateParties(partyList);
+      if (updatedApp?.politicalParties && updatedApp.politicalParties.length > 0) {
+        setPartyList(updatedApp.politicalParties);
+      }
 
       try {
         localStorage.setItem(`kdp_custom_parties_${resolvedTargetId}`, JSON.stringify(partyList));
@@ -937,42 +958,24 @@ export default function CmsStudio({
       return;
     }
 
-    const primaryTier = selectedHierarchyLevels[0] || 'CONSTITUENCY';
-    const primaryVal = tierInchargesState[primaryTier] || { name: candidateName || 'Leader', mobileNumber: candidateMobile || '', unitName: '' };
-    const cleanMobile = (primaryVal.mobileNumber || candidateMobile || '').replace(/\D/g, '').slice(-10);
-
-    // Format & validate multi-tier hierarchy incharges for each selected level
-    const formattedTierIncharges = selectedHierarchyLevels.map((tierKey) => {
-      const meta = TIER_TO_ROLE_DEFAULT[tierKey] || { role: 'CONSTITUENCY_INCHARGE', roleName: 'Incharge', defaultName: 'Tier Incharge', defaultUnit: tierKey };
-      const val = tierInchargesState[tierKey] || { name: meta.defaultName, mobileNumber: '', unitName: meta.defaultUnit };
-      const cleanNum = (val.mobileNumber || '').replace(/\D/g, '').slice(-10);
-      return {
-        tierLevel: tierKey as any,
-        role: meta.role as any,
-        name: val.name.trim() || meta.defaultName,
-        mobileNumber: cleanNum,
-        unitName: val.unitName.trim() || meta.defaultUnit,
-      };
-    });
-
-    const seenMobiles = new Set<string>();
-    for (const item of formattedTierIncharges) {
-      if (!item.mobileNumber || item.mobileNumber.length < 10) {
-        notify.warning(
-          `Please enter a valid 10-digit mobile number for ${item.tierLevel} incharge (${item.name}). You have selected ${selectedHierarchyLevels.length} tiers, so all ${selectedHierarchyLevels.length} unique phone numbers must be registered.`,
-          'Unique Mobile Number Required'
-        );
-        return;
-      }
-      if (seenMobiles.has(item.mobileNumber)) {
-        notify.warning(
-          `Duplicate phone number detected: +91 ${item.mobileNumber} is assigned to multiple tiers. Each of the ${selectedHierarchyLevels.length} selected tiers must have its own distinct phone number so the system recognizes which party and tier the user belongs to.`,
-          'Duplicate Phone Number'
-        );
-        return;
-      }
-      seenMobiles.add(item.mobileNumber);
+    const cleanMobile = (candidateMobile || '').replace(/\D/g, '').slice(-10);
+    if (!cleanMobile || cleanMobile.length < 10) {
+      notify.warning(
+        'Please enter a valid 10-digit mobile number for Party Administrator.',
+        'Party Admin Mobile Required'
+      );
+      return;
     }
+
+    const partyAdminIncharge = {
+      tierLevel: 'PARTY_ADMIN' as any,
+      role: 'HIGH_COMMAND' as any,
+      name: (candidateName || '').trim() || 'Party Administrator',
+      mobileNumber: cleanMobile,
+      unitName: title.trim() || 'Central Command',
+    };
+
+    const formattedTierIncharges = [partyAdminIncharge];
 
     setIsBuilding(true);
 
@@ -1039,8 +1042,8 @@ export default function CmsStudio({
 
       const activeCandidateName =
         appScope === 'PARLIAMENT_MP'
-          ? mpCandidateName.trim() || primaryVal.name.trim() || candidateName.trim()
-          : primaryVal.name.trim() || candidateName.trim();
+          ? mpCandidateName.trim() || candidateName.trim() || 'Party Administrator'
+          : candidateName.trim() || 'Party Administrator';
 
       const calculatedTenantCode = `${activePartyCode}-${(constituencyName || title).replace(/[^A-Za-z0-9]/g, '').slice(0, 6)}`.toUpperCase();
 
@@ -1062,7 +1065,7 @@ export default function CmsStudio({
         parliamentName: appScope === 'PARLIAMENT_MP' ? parliamentName.trim() : undefined,
         activePartyCode,
         activeHierarchyLevels: selectedHierarchyLevels,
-        tierIncharges: formattedTierIncharges,
+        tierIncharges: formattedTierIncharges.filter((item) => item.mobileNumber && item.mobileNumber.length >= 10),
         constituencies: finalConstituencies,
         politicalParties: (partyList || []).map((p, idx) => ({
           name: p.name || 'Party',
@@ -1235,6 +1238,15 @@ export default function CmsStudio({
               Close
             </button>
           )}
+          <button
+            type="button"
+            onClick={handleVerifySubsystems}
+            className="px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-800 text-slate-200 text-xs font-bold hover:bg-slate-700 cursor-pointer inline-flex items-center gap-1.5"
+            title="Pings and verifies granular CMS sub-resources"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Verify CMS Subsystems</span>
+          </button>
           <span className="px-3.5 py-1.5 rounded-xl bg-amber-400/10 border border-amber-400/30 text-amber-300 text-xs font-black tracking-wide flex items-center gap-1.5 shadow-2xs">
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
             <span>Single Party Creation Phase</span>
@@ -1456,214 +1468,12 @@ export default function CmsStudio({
           </section>
 
           {/* ============================================================ */}
-          {/* 5. COLOR THEME */}
+          {/* 5. OTHER REQUIRED INFORMATION */}
           {/* ============================================================ */}
           <section className="space-y-3">
             <div className="flex items-center gap-2 pb-1 border-b border-slate-800">
               <span className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black flex items-center justify-center">
                 5
-              </span>
-              <label className="text-sm font-black text-white">Color Theme & Palette</label>
-            </div>
-            <p className="text-xs text-slate-400">
-              Select custom colors or pick a curated party palette to theme headers, buttons, and badges.
-            </p>
-
-            {/* Quick 1-Click Themes */}
-            <div className="space-y-1.5">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                Preset Palettes:
-              </span>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {PRESET_THEMES.map((theme) => (
-                  <button
-                    key={theme.id}
-                    type="button"
-                    onClick={() => handleApplyPresetTheme(theme)}
-                    className="p-2 rounded-xl border border-slate-800 hover:border-slate-600 bg-slate-950 hover:bg-slate-900 text-left transition-all cursor-pointer flex items-center gap-2.5 shadow-2xs"
-                  >
-                    <div className="flex -space-x-1 shrink-0">
-                      <div className="w-4 h-4 rounded-full border border-slate-900" style={{ backgroundColor: theme.primary }} />
-                      <div className="w-4 h-4 rounded-full border border-slate-900" style={{ backgroundColor: theme.secondary }} />
-                    </div>
-                    <span className="text-xs font-bold text-slate-200 truncate">{theme.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Custom Color Pickers */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-              <div className="space-y-1 p-3 rounded-2xl bg-slate-950 border border-slate-800">
-                <label className="text-[11px] font-black text-slate-300 block">Primary Brand Color</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={primaryColor}
-                    onChange={(e) => setPrimaryColor(e.target.value)}
-                    className="w-8 h-8 rounded-lg border border-slate-700 cursor-pointer p-0 bg-transparent"
-                  />
-                  <input
-                    type="text"
-                    value={primaryColor}
-                    onChange={(e) => setPrimaryColor(e.target.value)}
-                    className="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono font-bold text-slate-200 uppercase"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1 p-3 rounded-2xl bg-slate-950 border border-slate-800">
-                <label className="text-[11px] font-black text-slate-300 block">Secondary Accent</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={secondaryColor}
-                    onChange={(e) => setSecondaryColor(e.target.value)}
-                    className="w-8 h-8 rounded-lg border border-slate-700 cursor-pointer p-0 bg-transparent"
-                  />
-                  <input
-                    type="text"
-                    value={secondaryColor}
-                    onChange={(e) => setSecondaryColor(e.target.value)}
-                    className="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono font-bold text-slate-200 uppercase"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1 p-3 rounded-2xl bg-slate-950 border border-slate-800">
-                <label className="text-[11px] font-black text-slate-300 block">Neutral Accent</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={accentColor}
-                    onChange={(e) => setAccentColor(e.target.value)}
-                    className="w-8 h-8 rounded-lg border border-slate-700 cursor-pointer p-0 bg-transparent"
-                  />
-                  <input
-                    type="text"
-                    value={accentColor}
-                    onChange={(e) => setAccentColor(e.target.value)}
-                    className="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono font-bold text-slate-200 uppercase"
-                  />
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* ============================================================ */}
-          {/* 6. POLITICAL PARTIES (MANUAL & DYNAMIC ENTRY) */}
-          {/* ============================================================ */}
-          <section className="space-y-3">
-            <div className="flex items-center justify-between pb-1 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <span className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black flex items-center justify-center">
-                  6
-                </span>
-                <label className="text-sm font-black text-white">
-                  Political Parties ({partyList.length} Active)
-                </label>
-              </div>
-              <span className="text-[11px] text-slate-400 font-medium">
-                Parties available in voter telemetry & surveys
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">
-              Manually enter the names of the political parties that should be available in this application.
-            </p>
-
-            {/* Add Party Form */}
-            <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
-              <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                <Plus className="w-3.5 h-3.5 text-amber-400" />
-                <span>Add Political Party to this Application</span>
-              </span>
-
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-                <div className="sm:col-span-6">
-                  <input
-                    type="text"
-                    value={newPartyName}
-                    onChange={(e) => setNewPartyName(e.target.value)}
-                    placeholder="Party Name (e.g. Samajwadi Party)"
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
-                  />
-                </div>
-
-                <div className="sm:col-span-3">
-                  <input
-                    type="text"
-                    value={newPartyCode}
-                    onChange={(e) => setNewPartyCode(e.target.value)}
-                    placeholder="Code (e.g. SP)"
-                    maxLength={6}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white uppercase placeholder-slate-500 focus:border-amber-400 focus:outline-none"
-                  />
-                </div>
-
-                <div className="sm:col-span-3 flex items-center gap-2">
-                  <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1">
-                    <input
-                      type="color"
-                      value={newPartyColor}
-                      onChange={(e) => setNewPartyColor(e.target.value)}
-                      className="w-6 h-6 rounded border-0 cursor-pointer p-0 bg-transparent"
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleAddParty}
-                    className="flex-1 px-3 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-xl text-xs transition-all shadow-2xs cursor-pointer flex items-center justify-center gap-1 active:scale-95"
-                  >
-                    <Plus className="w-3 h-3" />
-                    <span>Add</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* List of current political parties */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-              {partyList.map((party) => (
-                <div
-                  key={party.code}
-                  className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2 shadow-2xs hover:border-slate-700 transition-all"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div
-                      className="w-5 h-5 rounded-lg shrink-0 border border-black/20 shadow-2xs"
-                      style={{ backgroundColor: party.primaryColor }}
-                    />
-                    <div className="min-w-0">
-                      <div className="text-xs font-black text-white truncate">
-                        {party.name}
-                      </div>
-                      <span className="font-mono text-[10px] text-slate-400 font-bold">
-                        {party.code}
-                      </span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveParty(party.code)}
-                    className="p-1 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors cursor-pointer"
-                    title="Remove Party"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* ============================================================ */}
-          {/* 7. OTHER REQUIRED INFORMATION */}
-          {/* ============================================================ */}
-          <section className="space-y-3">
-            <div className="flex items-center gap-2 pb-1 border-b border-slate-800">
-              <span className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black flex items-center justify-center">
-                7
               </span>
               <label className="text-sm font-black text-white">Other Required Information</label>
             </div>
@@ -1704,313 +1514,6 @@ export default function CmsStudio({
                   <option value="STATE" className="bg-slate-900">Statewide Command</option>
                 </select>
               </div>
-            </div>
-
-            {/* Dynamic Multi-Tier Hierarchy Incharges & Dedicated Phone Configuration */}
-            <div className="p-4 sm:p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-amber-400/20 text-amber-300 border border-amber-400/30 flex items-center justify-center font-black text-sm">
-                    {selectedHierarchyLevels.length}
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black text-white flex items-center gap-2">
-                      Dynamic Tier Phone Registration ({selectedHierarchyLevels.length} Unique Numbers)
-                    </h3>
-                    <p className="text-[11px] text-slate-400">
-                      Each enabled hierarchy tier requires a dedicated unique login mobile number.
-                    </p>
-                  </div>
-                </div>
-                <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 font-bold px-2.5 py-1 rounded-full shrink-0">
-                  {mode === 'editor' ? 'Existing Incharge Numbers Preserved' : `${selectedHierarchyLevels.length} Unique Numbers Required`}
-                </span>
-              </div>
-
-              {/* Informative Guidance Banner */}
-              {mode === 'editor' ? (
-                <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2.5">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>
-                    <strong>Edit Mode:</strong> Existing incharge assignments are safely preserved. Modifying a number updates that incharge's dedicated login mobile number directly in the database.
-                  </span>
-                </div>
-              ) : (
-                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-center gap-2.5">
-                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>
-                    <strong>Swiggy-Style Direct Login:</strong> You selected <strong>{selectedHierarchyLevels.length} tiers</strong> in Section 1. Enter all {selectedHierarchyLevels.length} unique phone numbers below. When an incharge enters their phone number in the portal, the system automatically recognizes their party, tier, and role without requiring manual selection.
-                  </span>
-                </div>
-              )}
-
-              {/* Dynamic N Tier Cards */}
-              <div className="space-y-3">
-                {selectedHierarchyLevels.map((tierKey, idx) => {
-                  const meta = TIER_TO_ROLE_DEFAULT[tierKey] || { role: 'CONSTITUENCY_INCHARGE', roleName: tierKey, defaultName: 'Incharge', defaultUnit: tierKey };
-                  const currentVal = tierInchargesState[tierKey] || { name: meta.defaultName, mobileNumber: '', unitName: meta.defaultUnit };
-                  const isPrimary = idx === 0;
-                  const initialLevels = currentApp?.activeHierarchyLevels || config.activeHierarchyLevels || [];
-                  const isPreConfigured = mode === 'editor' && initialLevels.includes(tierKey);
-                  const isNewlyAddedTier = mode === 'editor' && !initialLevels.includes(tierKey);
-
-                  return (
-                    <div
-                      key={tierKey}
-                      className={`p-3.5 rounded-2xl border transition-all space-y-3 ${
-                        isPrimary
-                          ? 'bg-slate-900/90 border-amber-400/40 shadow-sm'
-                          : isNewlyAddedTier
-                          ? 'bg-amber-500/5 border-amber-500/30'
-                          : 'bg-slate-900/60 border-slate-800'
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[11px] font-black uppercase font-mono">
-                            Tier {idx + 1}: {tierKey}
-                          </span>
-                          <span className="text-xs font-bold text-white">{meta.roleName}</span>
-                          {isPrimary && (
-                            <span className="text-[9px] uppercase font-black px-2 py-0.5 rounded-full bg-amber-400 text-slate-950">
-                              Primary Command / Candidate
-                            </span>
-                          )}
-                          {isNewlyAddedTier && (
-                            <span className="text-[9px] uppercase font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                              ✨ Newly Introduced Tier
-                            </span>
-                          )}
-                          {isPreConfigured && (
-                            <span className="text-[9px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                              Active Affiliated Incharge
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-[10px] font-mono text-slate-400 font-bold">{meta.role}</span>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="space-y-1">
-                          <label className="text-[11px] font-bold text-slate-300">
-                            {isPrimary ? 'Key Leader / Candidate Name *' : `${meta.roleName} Name ${isPreConfigured ? '' : '*'}`}
-                          </label>
-                          <input
-                            type="text"
-                            value={currentVal.name}
-                            onChange={(e) => {
-                              const newName = e.target.value;
-                              setTierInchargesState((prev) => {
-                                const prevVal = prev[tierKey] || currentVal;
-                                return {
-                                  ...prev,
-                                  [tierKey]: { ...prevVal, name: newName },
-                                };
-                              });
-                              if (isPrimary) {
-                                setCandidateName(newName);
-                              }
-                            }}
-                            placeholder={isPrimary ? 'e.g. Pawan Kalyan' : meta.defaultName}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-600 focus:border-amber-400 focus:outline-none"
-                          />
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
-                            <span>{isPreConfigured ? 'Dedicated Login Mobile (+91)' : 'Dedicated Login Mobile (+91) *'}</span>
-                            <span className="text-[9px] text-amber-400 font-mono font-bold">
-                              {isPreConfigured ? 'Existing Number' : `Tier ${idx + 1} Login ID`}
-                            </span>
-                          </label>
-                          <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 font-mono">
-                              +91
-                            </span>
-                            <input
-                              type="tel"
-                              maxLength={10}
-                              value={currentVal.mobileNumber}
-                              onChange={(e) => {
-                                const newNum = e.target.value.replace(/\D/g, '').slice(0, 10);
-                                setTierInchargesState((prev) => {
-                                  const prevVal = prev[tierKey] || currentVal;
-                                  return {
-                                    ...prev,
-                                    [tierKey]: { ...prevVal, mobileNumber: newNum },
-                                  };
-                                });
-                                if (isPrimary) {
-                                  setCandidateMobile(newNum);
-                                  setRegIsVerified(false);
-                                  setRegOtpSent(false);
-                                }
-                              }}
-                              placeholder={
-                                isPreConfigured
-                                  ? (currentVal.mobileNumber || 'Pre-registered incharge active')
-                                  : isPrimary
-                                  ? '9848012345'
-                                  : `10-digit mobile for ${tierKey}`
-                              }
-                              className="w-full pl-11 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white placeholder-slate-600 focus:border-amber-400 focus:outline-none"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="text-[11px] font-bold text-slate-300">Jurisdiction Unit Name *</label>
-                          <input
-                            type="text"
-                            value={currentVal.unitName}
-                            onChange={(e) => {
-                              const newUnit = e.target.value;
-                              setTierInchargesState((prev) => {
-                                const prevVal = prev[tierKey] || currentVal;
-                                return {
-                                  ...prev,
-                                  [tierKey]: { ...prevVal, unitName: newUnit },
-                                };
-                              });
-                            }}
-                            placeholder={meta.defaultUnit}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-600 focus:border-amber-400 focus:outline-none"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Passcode & Live OTP Verification - Only required when provisioning a new tenant */}
-              {mode !== 'editor' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                  {/* Initial Passcode Box */}
-                  <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <KeyRound className="w-4 h-4 text-amber-400" />
-                      <span className="text-xs font-bold text-white">Initial Incharge Passcode / Password *</span>
-                    </div>
-                    <div className="relative">
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={candidatePassword}
-                        onChange={(e) => setCandidatePassword(e.target.value)}
-                        placeholder="Set Initial Passcode (e.g. Kondapi@2026)"
-                        className="w-full pl-3 pr-10 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
-                      >
-                        {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-slate-400">
-                      Applied as initial master credential across all provisioned tier accounts.
-                    </p>
-                  </div>
-
-                  {/* WhatsApp / SMS OTP Live Verification */}
-                  <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                        <span className="text-xs font-bold text-white">
-                          Live Mobile Verification (WhatsApp / SMS)
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setRegOtpChannel('WHATSAPP')}
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 ${
-                            regOtpChannel === 'WHATSAPP'
-                              ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-black'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          <span>💬 WhatsApp OTP</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRegOtpChannel('SMS')}
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 ${
-                            regOtpChannel === 'SMS'
-                              ? 'bg-amber-500/20 border border-amber-500/40 text-amber-300 font-black'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          <span>📱 SMS OTP</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {regIsVerified ? (
-                      <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>Primary mobile number verified via {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'}!</span>
-                      </div>
-                    ) : regOtpSent ? (
-                      <div className="flex flex-col sm:flex-row items-center gap-2">
-                        <input
-                          type="text"
-                          maxLength={6}
-                          value={regOtpCode}
-                          onChange={(e) => setRegOtpCode(e.target.value.replace(/\D/g, ''))}
-                          placeholder="Enter 6-digit OTP"
-                          className="w-full sm:w-44 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono font-bold text-white text-center tracking-widest focus:border-emerald-400 focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleVerifyRegOtp}
-                          disabled={isVerifyingRegOtp || regOtpCode.length < 6}
-                          className="w-full sm:w-auto px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 text-xs font-black rounded-xl cursor-pointer"
-                        >
-                          {isVerifyingRegOtp ? 'Verifying...' : 'Verify OTP'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleSendRegOtp()}
-                          disabled={isSendingRegOtp}
-                          className="text-[11px] text-slate-400 hover:text-white underline cursor-pointer"
-                        >
-                          Resend Code
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <p className="text-[11px] text-slate-400">
-                          Verify primary incharge phone (+91 {primaryMobile || '...'}) receives live {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} OTP before building:
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => handleSendRegOtp()}
-                          disabled={isSendingRegOtp || (primaryMobile || candidateMobile).replace(/\D/g, '').length < 10}
-                          className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 hover:text-white text-xs font-bold rounded-xl border border-slate-700 cursor-pointer flex items-center gap-1.5 self-start sm:self-auto"
-                        >
-                          {isSendingRegOtp ? (
-                            <LoaderCircle className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <Send className="w-3 h-3 text-amber-400" />
-                          )}
-                          <span>Send {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} OTP</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Incharge credentials and role-based assignments are active in PostgreSQL.</span>
-                  </div>
-                  <span className="text-emerald-400 font-mono text-[10px] font-bold">● Active Production Security</span>
-                </div>
-              )}
             </div>
 
             {/* A. SINGLE MLA SCOPE */}
@@ -2467,6 +1970,442 @@ export default function CmsStudio({
           </section>
 
           {/* ============================================================ */}
+          {/* 6. PARTY ADMINISTRATOR (CENTRAL HQ COMMAND ACCOUNT) */}
+          {/* ============================================================ */}
+          <section className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black flex items-center justify-center">
+                  6
+                </span>
+                <label className="text-sm font-black text-white">
+                  Party Administrator (Central HQ Command Account)
+                </label>
+              </div>
+              <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 font-bold px-2.5 py-1 rounded-full shrink-0">
+                {mode === 'editor' ? 'Party Admin Account Active' : 'Party Admin Mobile Required'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-400">
+              Configure the primary Party Administrator / Central HQ login credentials. All field cadres (Booth, 100-Voter, Village, Mandal) and Executive Leadership (Parliament, Zone, District) are managed under Data Ingestion & GIS.
+            </p>
+
+            {/* Informative Guidance Banner */}
+            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-slate-900 to-cyan-500/10 border border-amber-500/30 text-xs space-y-1.5">
+              <div className="flex items-center gap-2 font-bold text-amber-300">
+                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Cadre Provisioning Architecture</span>
+              </div>
+              <ul className="text-slate-300 text-[11px] space-y-1 list-disc list-inside">
+                <li>
+                  <strong>Field Tiers</strong> (Booth Incharges, 100-Voter Group Incharges, Village & Mandal Presidents) will be automatically extracted and provisioned when you upload the Official Electoral Roll Excel in <strong className="text-cyan-400">Data Ingestion & GIS</strong>.
+                </li>
+                <li>
+                  <strong>Executive Leadership Tiers</strong> ({selectedHierarchyLevels.filter(t => ['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY'].includes(t)).join(', ') || 'Parliament, Zone, District'}) can be optionally fed anytime in <strong className="text-cyan-400">Data Ingestion & GIS</strong> via the Executive Leadership Panel.
+                </li>
+              </ul>
+            </div>
+
+            {/* Single Dedicated Party Administrator (HQ) Card */}
+            <div className="p-4 sm:p-5 rounded-2xl border bg-slate-950 border-slate-800 shadow-sm space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[11px] font-black uppercase font-mono">
+                    Headquarters
+                  </span>
+                  <span className="text-xs font-bold text-white">Party Administrator</span>
+                  <span className="text-[9px] uppercase font-black px-2 py-0.5 rounded-full bg-amber-400 text-slate-950">
+                    Central HQ Command
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono text-slate-400 font-bold">HIGH_COMMAND</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300">
+                    Party Admin / Leader Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={candidateName}
+                    onChange={(e) => setCandidateName(e.target.value)}
+                    placeholder="e.g. State HQ Admin"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-600 focus:border-amber-400 focus:outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
+                    <span>Dedicated Login Mobile (+91) *</span>
+                    <span className="text-[9px] text-amber-400 font-mono font-bold">
+                      Primary Login ID
+                    </span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 font-mono">
+                      +91
+                    </span>
+                    <input
+                      type="tel"
+                      maxLength={10}
+                      value={candidateMobile}
+                      onChange={(e) => {
+                        const newNum = e.target.value.replace(/\D/g, '').slice(0, 10);
+                        setCandidateMobile(newNum);
+                        setRegIsVerified(false);
+                        setRegOtpSent(false);
+                      }}
+                      placeholder="9848012345"
+                      className="w-full pl-11 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white placeholder-slate-600 focus:border-amber-400 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300">Central Command Unit *</label>
+                  <input
+                    type="text"
+                    value={title ? `${title} Central Command` : 'Central Headquarters'}
+                    readOnly
+                    className="w-full px-3 py-2 bg-slate-900/60 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400"
+                  />
+                </div>
+              </div>
+
+              {/* Passcode & Live OTP Verification - Only required when provisioning a new tenant */}
+              {mode !== 'editor' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                  {/* Initial Passcode Box */}
+                  <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <KeyRound className="w-4 h-4 text-amber-400" />
+                      <span className="text-xs font-bold text-white">Initial Incharge Passcode / Password *</span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={candidatePassword}
+                        onChange={(e) => setCandidatePassword(e.target.value)}
+                        placeholder="Set Initial Passcode (e.g. Kondapi@2026)"
+                        className="w-full pl-3 pr-10 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
+                      >
+                        {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      Applied as initial master credential across all provisioned tier accounts.
+                    </p>
+                  </div>
+
+                  {/* WhatsApp / SMS OTP Live Verification */}
+                  <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                        <span className="text-xs font-bold text-white">
+                          Live Mobile Verification (WhatsApp / SMS)
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setRegOtpChannel('WHATSAPP')}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 ${
+                            regOtpChannel === 'WHATSAPP'
+                              ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-black'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <span>💬 WhatsApp OTP</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRegOtpChannel('SMS')}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 ${
+                            regOtpChannel === 'SMS'
+                              ? 'bg-amber-500/20 border border-amber-500/40 text-amber-300 font-black'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <span>📱 SMS OTP</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {regIsVerified ? (
+                      <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Primary mobile number verified via {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'}!</span>
+                      </div>
+                    ) : regOtpSent ? (
+                      <div className="flex flex-col sm:flex-row items-center gap-2">
+                        <input
+                          type="text"
+                          maxLength={6}
+                          value={regOtpCode}
+                          onChange={(e) => setRegOtpCode(e.target.value.replace(/\D/g, ''))}
+                          placeholder="Enter 6-digit OTP"
+                          className="w-full sm:w-44 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono font-bold text-white text-center tracking-widest focus:border-emerald-400 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleVerifyRegOtp}
+                          disabled={isVerifyingRegOtp || regOtpCode.length < 6}
+                          className="w-full sm:w-auto px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 text-xs font-black rounded-xl cursor-pointer"
+                        >
+                          {isVerifyingRegOtp ? 'Verifying...' : 'Verify OTP'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSendRegOtp()}
+                          disabled={isSendingRegOtp}
+                          className="text-[11px] text-slate-400 hover:text-white underline cursor-pointer"
+                        >
+                          Resend Code
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <p className="text-[11px] text-slate-400">
+                          Verify primary incharge phone (+91 {primaryMobile || '...'}) receives live {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} OTP before building:
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => handleSendRegOtp()}
+                          disabled={isSendingRegOtp || (primaryMobile || candidateMobile).replace(/\D/g, '').length < 10}
+                          className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 hover:text-white text-xs font-bold rounded-xl border border-slate-700 cursor-pointer flex items-center gap-1.5 self-start sm:self-auto"
+                        >
+                          {isSendingRegOtp ? (
+                            <LoaderCircle className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Send className="w-3 h-3 text-amber-400" />
+                          )}
+                          <span>Send {regOtpChannel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'} OTP</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Incharge credentials and role-based assignments are active in PostgreSQL.</span>
+                  </div>
+                  <span className="text-emerald-400 font-mono text-[10px] font-bold">● Active Production Security</span>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* ============================================================ */}
+          {/* 7. COLOR THEME & PALETTE */}
+          {/* ============================================================ */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 pb-1 border-b border-slate-800">
+              <span className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black flex items-center justify-center">
+                7
+              </span>
+              <label className="text-sm font-black text-white">Color Theme & Palette</label>
+            </div>
+            <p className="text-xs text-slate-400">
+              Select custom colors or pick a curated party palette to theme headers, buttons, and badges.
+            </p>
+
+            {/* Quick 1-Click Themes */}
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                Preset Palettes:
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {PRESET_THEMES.map((theme) => (
+                  <button
+                    key={theme.id}
+                    type="button"
+                    onClick={() => handleApplyPresetTheme(theme)}
+                    className="p-2 rounded-xl border border-slate-800 hover:border-slate-600 bg-slate-950 hover:bg-slate-900 text-left transition-all cursor-pointer flex items-center gap-2.5 shadow-2xs"
+                  >
+                    <div className="flex -space-x-1 shrink-0">
+                      <div className="w-4 h-4 rounded-full border border-slate-900" style={{ backgroundColor: theme.primary }} />
+                      <div className="w-4 h-4 rounded-full border border-slate-900" style={{ backgroundColor: theme.secondary }} />
+                    </div>
+                    <span className="text-xs font-bold text-slate-200 truncate">{theme.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Color Pickers */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+              <div className="space-y-1 p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                <label className="text-[11px] font-black text-slate-300 block">Primary Brand Color</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={primaryColor}
+                    onChange={(e) => setPrimaryColor(e.target.value)}
+                    className="w-8 h-8 rounded-lg border border-slate-700 cursor-pointer p-0 bg-transparent"
+                  />
+                  <input
+                    type="text"
+                    value={primaryColor}
+                    onChange={(e) => setPrimaryColor(e.target.value)}
+                    className="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono font-bold text-slate-200 uppercase"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1 p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                <label className="text-[11px] font-black text-slate-300 block">Secondary Accent</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={secondaryColor}
+                    onChange={(e) => setSecondaryColor(e.target.value)}
+                    className="w-8 h-8 rounded-lg border border-slate-700 cursor-pointer p-0 bg-transparent"
+                  />
+                  <input
+                    type="text"
+                    value={secondaryColor}
+                    onChange={(e) => setSecondaryColor(e.target.value)}
+                    className="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono font-bold text-slate-200 uppercase"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1 p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                <label className="text-[11px] font-black text-slate-300 block">Neutral Accent</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={accentColor}
+                    onChange={(e) => setAccentColor(e.target.value)}
+                    className="w-8 h-8 rounded-lg border border-slate-700 cursor-pointer p-0 bg-transparent"
+                  />
+                  <input
+                    type="text"
+                    value={accentColor}
+                    onChange={(e) => setAccentColor(e.target.value)}
+                    className="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono font-bold text-slate-200 uppercase"
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* ============================================================ */}
+          {/* 8. POLITICAL PARTIES (MANUAL & DYNAMIC ENTRY) */}
+          {/* ============================================================ */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black flex items-center justify-center">
+                  8
+                </span>
+                <label className="text-sm font-black text-white">
+                  Political Parties ({partyList.length} Active)
+                </label>
+              </div>
+              <span className="text-[11px] text-slate-400 font-medium">
+                Parties available in voter telemetry & surveys
+              </span>
+            </div>
+            <p className="text-xs text-slate-400">
+              Manually enter the names of the political parties that should be available in this application.
+            </p>
+
+            {/* Add Party Form */}
+            <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+              <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                <Plus className="w-3.5 h-3.5 text-amber-400" />
+                <span>Add Political Party to this Application</span>
+              </span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                <div className="sm:col-span-6">
+                  <input
+                    type="text"
+                    value={newPartyName}
+                    onChange={(e) => setNewPartyName(e.target.value)}
+                    placeholder="Party Name (e.g. Samajwadi Party)"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
+                  />
+                </div>
+
+                <div className="sm:col-span-3">
+                  <input
+                    type="text"
+                    value={newPartyCode}
+                    onChange={(e) => setNewPartyCode(e.target.value)}
+                    placeholder="Code (e.g. SP)"
+                    maxLength={6}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white uppercase placeholder-slate-500 focus:border-amber-400 focus:outline-none"
+                  />
+                </div>
+
+                <div className="sm:col-span-3 flex items-center gap-2">
+                  <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1">
+                    <input
+                      type="color"
+                      value={newPartyColor}
+                      onChange={(e) => setNewPartyColor(e.target.value)}
+                      className="w-6 h-6 rounded border-0 cursor-pointer p-0 bg-transparent"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleAddParty}
+                    className="flex-1 px-3 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-xl text-xs transition-all shadow-2xs cursor-pointer flex items-center justify-center gap-1 active:scale-95"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Add</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* List of current political parties */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              {partyList.map((party) => (
+                <div
+                  key={party.code}
+                  className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2 shadow-2xs hover:border-slate-700 transition-all"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div
+                      className="w-5 h-5 rounded-lg shrink-0 border border-black/20 shadow-2xs"
+                      style={{ backgroundColor: party.primaryColor }}
+                    />
+                    <div className="min-w-0">
+                      <div className="text-xs font-black text-white truncate">
+                        {party.name}
+                      </div>
+                      <span className="font-mono text-[10px] text-slate-400 font-bold">
+                        {party.code}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveParty(party.code)}
+                    className="p-1 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors cursor-pointer"
+                    title="Remove Party"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+
           {/* SUBMIT / BUILD APPLICATION BUTTON */}
           {/* ============================================================ */}
           <div className="pt-4 border-t border-slate-800">

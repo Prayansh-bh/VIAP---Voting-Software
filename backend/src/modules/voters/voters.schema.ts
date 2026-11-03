@@ -17,7 +17,7 @@ export const voterQuerySchema = z.object({
   voterGroupId: z.string().uuid().optional(),
   unitId: z.string().uuid().optional(),
   assignedInchargeId: z.string().uuid().optional(),
-  voterStatus: z.nativeEnum(VoterStatus).optional(),
+  voterStatus: z.preprocess((val) => (typeof val === 'string' ? val.toUpperCase() : val), z.nativeEnum(VoterStatus)).optional(),
   surveyStatus: z.nativeEnum(SurveyStatus).optional(),
   voteStatus: z.nativeEnum(VoteStatus).optional(),
   voterLocationStatus: z.nativeEnum(VoterLocationStatus).optional(),
@@ -37,7 +37,7 @@ export const createVoterSchema = z.object({
   relationType: z.nativeEnum(RelationType).default(RelationType.FATHER),
   houseNumber: z.string().min(1),
   age: z.number().min(18).max(120),
-  gender: z.nativeEnum(Gender),
+  gender: z.preprocess((val) => (typeof val === 'string' ? val.toUpperCase() : val), z.nativeEnum(Gender)),
   mobileNumber: z.string().optional(),
   constituencyId: z.string().uuid().optional(),
   mandalId: z.string().uuid().optional(),
@@ -50,7 +50,7 @@ export const createVoterSchema = z.object({
   subCaste: z.string().optional(),
   profession: z.string().optional(),
   politicalPreference: z.string().default('NEUTRAL'),
-  voterStatus: z.nativeEnum(VoterStatus).default(VoterStatus.ACTIVE),
+  voterStatus: z.preprocess((val) => (typeof val === 'string' ? val.toUpperCase() : val), z.nativeEnum(VoterStatus)).default(VoterStatus.ACTIVE),
   surveyStatus: z.nativeEnum(SurveyStatus).default(SurveyStatus.NOT_SURVEYED),
   voterLocationStatus: z.nativeEnum(VoterLocationStatus).default(VoterLocationStatus.LOCAL),
   currentLocation: z.string().optional(),
@@ -60,14 +60,14 @@ export const createVoterSchema = z.object({
 export const updateVoterSchema = createVoterSchema.partial();
 
 export const updateVoterStatusSchema = z.object({
-  status: z.nativeEnum(VoterStatus),
+  status: z.preprocess((val) => (typeof val === 'string' ? val.toUpperCase() : val), z.nativeEnum(VoterStatus)),
   reason: z.string().optional(),
 });
 
 export const flagFakeVoterSchema = z.object({
   reason: z.string().min(3),
   evidenceUrl: z.string().url().optional(),
-  status: z.nativeEnum(FakeVoterStatus).default(FakeVoterStatus.FLAGGED),
+  status: z.preprocess((val) => (typeof val === 'string' ? val.toUpperCase() : val), z.nativeEnum(FakeVoterStatus)).default(FakeVoterStatus.FLAGGED),
 });
 
 export const updateMigrationSchema = z.object({

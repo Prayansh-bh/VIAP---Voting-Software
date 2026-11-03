@@ -34,7 +34,9 @@ import {
 import { VoterPreference } from '../types';
 import { useNotification } from '../context/NotificationContext';
 import { useCms } from '../context/CmsContext';
-import { fetchNewsArticles, fetchSocialTrends, askAiStrategy, generateStrategicReport } from '../lib/api/ai.api';
+import { fetchNewsArticles, fetchSocialTrends, askAiStrategy, generateStrategicReport, fetchAiInsights, fetchElectionProjections, crawlNews } from '../lib/api/ai.api';
+import { fetchCadreNetwork } from '../lib/api/cadre.api';
+import { apiFetch } from '../lib/api/client';
 
 export interface AIStrategicIntelligenceCenterProps {
   session?: any;
@@ -150,14 +152,63 @@ export default function AIStrategicIntelligenceCenter({
     detected: string;
     updated: string;
   }>>([]);
+  const [cadreList, setCadreList] = useState<any[]>([]);
+  const [liveProjects, setLiveProjects] = useState<any[]>([]);
+  const [liveAiInsights, setLiveAiInsights] = useState<any[]>([]);
+  const [liveProjections, setLiveProjections] = useState<any[]>([]);
+  const [crawlingNews, setCrawlingNews] = useState<boolean>(false);
+
+  const handleCrawlNews = async () => {
+    setCrawlingNews(true);
+    try {
+      const res = await crawlNews(`${areaName} Election Andhra Pradesh`);
+      notify.success(`Crawled and indexed ${res?.inserted ?? 0} new regional headlines.`, 'News Crawler');
+      const updatedNews = await fetchNewsArticles().catch(() => []);
+      if (Array.isArray(updatedNews) && updatedNews.length > 0) {
+        setLiveNews(updatedNews.map((n: any) => ({
+          id: n.id,
+          headline: n.headline,
+          summary: n.summary || '',
+          source: n.sourceName || 'News Agency',
+          date: n.publishedAt ? new Date(n.publishedAt).toLocaleDateString() : 'Today',
+          relevance: n.sentiment === 'POSITIVE' ? 'High Impact' : 'Regional Intelligence',
+          topic: 'Constituency News',
+          url: n.url || '#',
+        })));
+      }
+    } catch (err: any) {
+      notify.error(err?.message || 'Failed to crawl regional news headlines.', 'Crawler Error');
+    } finally {
+      setCrawlingNews(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
+    const targetConstituencyId = session?.assignedConstituencyId || session?.unitId;
+
     Promise.all([
       fetchNewsArticles().catch(() => []),
       fetchSocialTrends().catch(() => []),
-    ]).then(([newsRes, trendsRes]) => {
+      fetchCadreNetwork().catch(() => ({ items: [] })),
+      apiFetch<any[]>('/api/ai/development-projects').catch(() => []),
+      fetchAiInsights(targetConstituencyId).catch(() => []),
+      fetchElectionProjections(targetConstituencyId).catch(() => []),
+    ]).then(([newsRes, trendsRes, cadreRes, projectsRes, insightsRes, projectionsRes]) => {
       if (!active) return;
+      if (Array.isArray(insightsRes) && insightsRes.length > 0) {
+        setLiveAiInsights(insightsRes);
+      }
+      if (Array.isArray(projectionsRes) && projectionsRes.length > 0) {
+        setLiveProjections(projectionsRes);
+      }
+      if (Array.isArray(projectsRes) && projectsRes.length > 0) {
+        setLiveProjects(projectsRes);
+      }
+      if (cadreRes) {
+        const items = cadreRes?.items || (Array.isArray(cadreRes) ? cadreRes : []);
+        setCadreList(items);
+      }
       if (Array.isArray(newsRes) && newsRes.length > 0) {
         setLiveNews(newsRes.map((n: any) => ({
           id: n.id,
@@ -340,31 +391,48 @@ export default function AIStrategicIntelligenceCenter({
   const socialTrends = liveTrends;
 
   // --- 6. GOVERNMENT & DEVELOPMENT MONITOR ---
-  const govtProjects = useMemo<Array<{
-    project: string;
-    dept: string;
-    location: string;
-    date: string;
-    status: string;
-    mandal: string;
-    source: string;
-  }>>(() => [], []);
+  const govtProjects = liveProjects;
 
   // --- 7. CADRE HEALTH RATIOS ---
   const cadreHealth = useMemo(() => {
+    const totalMandals = mandalsData.length || 0;
+    const assignedMandals = cadreList.filter((c: any) => c.role === 'MANDAL_INCHARGE').length;
+
+    const totalVillages = villagesData.length || 0;
+    const assignedVillages = cadreList.filter((c: any) => c.role === 'VILLAGE_INCHARGE').length;
+
+    const totalBooths = constituencyStats.booths || 0;
+    const assignedBooths = cadreList.filter((c: any) => c.role === 'BOOTH_PRESIDENT' || c.role === 'BOOTH_INCHARGE').length;
+
+    const totalVoter100 = Math.ceil((constituencyStats.voters || 0) / 100);
+    const assignedVoter100 = cadreList.filter((c: any) => c.role === 'VOTER_100_INCHARGE').length;
+
+    const mandalCov = totalMandals > 0 
+      ? Math.min(100, Math.round((assignedMandals / totalMandals) * 100)) 
+      : (assignedMandals > 0 ? 100 : 0);
+    const villageCov = totalVillages > 0 
+      ? Math.min(100, Math.round((assignedVillages / totalVillages) * 100)) 
+      : (assignedVillages > 0 ? 100 : 0);
+    const boothCov = totalBooths > 0 
+      ? Math.min(100, Math.round((assignedBooths / totalBooths) * 100)) 
+      : (assignedBooths > 0 ? 100 : 0);
+    const voter100Cov = totalVoter100 > 0 
+      ? Math.min(100, Math.round((assignedVoter100 / totalVoter100) * 100)) 
+      : (assignedVoter100 > 0 ? 100 : 0);
+
     return {
-      mandalInchargeCoverage: mandalsData.length > 0 ? 100 : 0,
-      villageInchargeCoverage: villagesData.length > 0 ? 100 : 0,
-      boothInchargeCoverage: constituencyStats.booths > 0 ? 100 : 0,
-      voter100Coverage: constituencyStats.voters > 0 ? 100 : 0,
+      mandalInchargeCoverage: mandalCov,
+      villageInchargeCoverage: villageCov,
+      boothInchargeCoverage: boothCov,
+      voter100Coverage: voter100Cov,
       unfilledPositions: {
-        mandal: 0,
-        village: 0,
-        booth: 0,
-        voter100: 0,
+        mandal: Math.max(0, totalMandals - assignedMandals),
+        village: Math.max(0, totalVillages - assignedVillages),
+        booth: Math.max(0, totalBooths - assignedBooths),
+        voter100: Math.max(0, totalVoter100 - assignedVoter100),
       }
     };
-  }, [mandalsData, villagesData, constituencyStats]);
+  }, [mandalsData, villagesData, constituencyStats, cadreList]);
 
   // --- 8. REAL AI CHAT BOT RESPONSES ---
   const handleChatSubmit = async (e: React.FormEvent) => {
@@ -921,6 +989,32 @@ export default function AIStrategicIntelligenceCenter({
                   </p>
                 </div>
 
+                {liveProjections.length > 0 && (
+                  <div className="space-y-2 bg-amber-50/60 p-3.5 border border-amber-200 rounded-lg">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="px-1.5 py-0.5 bg-amber-400 text-slate-950 font-black rounded text-[9px] uppercase tracking-wide">
+                          3. AI Projection Model Scenario
+                        </span>
+                        <span className="text-[9px] text-amber-700 uppercase font-bold">[POSTGRESQL AI ENGINE]</span>
+                      </div>
+                      <span className="text-[10px] font-mono font-bold text-slate-600">
+                        Confidence: {Math.round((liveProjections[0].confidenceScore || 0.92) * 100)}%
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-800 flex flex-wrap items-center justify-between gap-2">
+                      <span><strong>Projected Leading Party:</strong> {liveProjections[0].leadingPartyCode}</span>
+                      <span><strong>Lead Margin:</strong> +{(liveProjections[0].leadMarginVotes || 0).toLocaleString()} votes</span>
+                      <span><strong>Projected Turnout:</strong> {liveProjections[0].projectedTurnout}%</span>
+                    </div>
+                    {liveProjections[0].insightsSummary && (
+                      <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
+                        {liveProjections[0].insightsSummary}
+                      </p>
+                    )}
+                  </div>
+                )}
+
               </div>
             </div>
           )}
@@ -1232,9 +1326,20 @@ export default function AIStrategicIntelligenceCenter({
              ----------------------------------------- */}
           {activeSubTab === 'news' && (
             <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4 animate-fade-in">
-              <div>
-                <h3 className="text-slate-950 text-sm font-black uppercase tracking-wider">{areaName} News Intelligence</h3>
-                <p className="text-xs text-slate-500 font-medium">Permitted public news tracking relevant to local administration and development project declarations.</p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-slate-950 text-sm font-black uppercase tracking-wider">{areaName} News Intelligence</h3>
+                  <p className="text-xs text-slate-500 font-medium">Permitted public news tracking relevant to local administration and development project declarations.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCrawlNews}
+                  disabled={crawlingNews}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${crawlingNews ? 'animate-spin text-amber-500' : 'text-slate-500'}`} />
+                  <span>{crawlingNews ? 'Crawling Live Feeds...' : 'Crawl & Sync Regional News'}</span>
+                </button>
               </div>
 
               <div className="space-y-4 pt-2">
@@ -1402,26 +1507,42 @@ export default function AIStrategicIntelligenceCenter({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-bold text-slate-700">
                 <div className="p-4 bg-slate-50 border border-slate-150 rounded-xl text-center space-y-1">
                   <span className="text-[10px] text-slate-400 uppercase">Mandal Incharge</span>
-                  <span className="text-xl font-black text-slate-950 block mt-1">100%</span>
-                  <span className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide block w-max mx-auto">FULL COVERAGE</span>
+                  <span className="text-xl font-black text-slate-950 block mt-1">{cadreHealth.mandalInchargeCoverage}%</span>
+                  {cadreHealth.unfilledPositions.mandal === 0 ? (
+                    <span className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide block w-max mx-auto">FULL COVERAGE</span>
+                  ) : (
+                    <span className="text-amber-600 font-black text-[10px]">{cadreHealth.unfilledPositions.mandal} unfilled</span>
+                  )}
                 </div>
 
                 <div className="p-4 bg-slate-50 border border-slate-150 rounded-xl text-center space-y-1">
                   <span className="text-[10px] text-slate-400 uppercase">Village Incharge</span>
-                  <span className="text-xl font-black text-slate-950 block mt-1">95.8%</span>
-                  <span className="text-slate-400 text-[10px]">2 vacancies in Marripudi</span>
+                  <span className="text-xl font-black text-slate-950 block mt-1">{cadreHealth.villageInchargeCoverage}%</span>
+                  {cadreHealth.unfilledPositions.village === 0 ? (
+                    <span className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide block w-max mx-auto">FULL COVERAGE</span>
+                  ) : (
+                    <span className="text-slate-500 font-bold text-[10px]">{cadreHealth.unfilledPositions.village} vacancies</span>
+                  )}
                 </div>
 
                 <div className="p-4 bg-slate-50 border border-slate-150 rounded-xl text-center space-y-1">
                   <span className="text-[10px] text-slate-400 uppercase">Booth Presidents</span>
-                  <span className="text-xl font-black text-slate-950 block mt-1">91.1%</span>
-                  <span className="text-red-600 font-black text-[10px]">25 Booths vacant</span>
+                  <span className="text-xl font-black text-slate-950 block mt-1">{cadreHealth.boothInchargeCoverage}%</span>
+                  {cadreHealth.unfilledPositions.booth === 0 ? (
+                    <span className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide block w-max mx-auto">FULL COVERAGE</span>
+                  ) : (
+                    <span className="text-red-600 font-black text-[10px]">{cadreHealth.unfilledPositions.booth} Booths vacant</span>
+                  )}
                 </div>
 
                 <div className="p-4 bg-slate-50 border border-slate-150 rounded-xl text-center space-y-1">
                   <span className="text-[10px] text-slate-400 uppercase">100-Voter Incharges</span>
-                  <span className="text-xl font-black text-slate-950 block mt-1">87.0%</span>
-                  <span className="text-red-600 font-black text-[10px]">324 spots unfilled</span>
+                  <span className="text-xl font-black text-slate-950 block mt-1">{cadreHealth.voter100Coverage}%</span>
+                  {cadreHealth.unfilledPositions.voter100 === 0 ? (
+                    <span className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide block w-max mx-auto">FULL COVERAGE</span>
+                  ) : (
+                    <span className="text-red-600 font-black text-[10px]">{cadreHealth.unfilledPositions.voter100} spots unfilled</span>
+                  )}
                 </div>
               </div>
 
@@ -1429,8 +1550,16 @@ export default function AIStrategicIntelligenceCenter({
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-3 font-bold text-xs text-slate-700">
                 <h4 className="text-slate-950 uppercase text-xs font-black">AI Recommendations for Cadre Recruitment</h4>
                 <ul className="list-disc pl-4 space-y-2 leading-relaxed">
-                  <li>**Target Marripudi**: Direct Singarayakonda youth supervisors to assist Marripudi local incharge. Singarayakonda has surplus trained members who can be cross-deployed.</li>
-                  <li>**Booth Committee Gaps**: Focus on the 25 unstaffed booths. 14 are in Ponnaluru Mandal where local coordination has been slow. Scheduled a recruitment drive next Monday.</li>
+                  {cadreHealth.unfilledPositions.booth > 0 ? (
+                    <li>**Priority Booth Committees**: Focus recruitment on the {cadreHealth.unfilledPositions.booth} unstaffed polling booths. Dispatch constituency supervisors to assign verified booth presidents before election week.</li>
+                  ) : (
+                    <li>**Booth Coverage Secured**: All polling stations have designated booth presidents. Maintain active coordination checks.</li>
+                  )}
+                  {cadreHealth.unfilledPositions.voter100 > 0 ? (
+                    <li>**100-Voter Clusters**: Activate local youth cadre to cover the {cadreHealth.unfilledPositions.voter100} pending voter clusters for door-to-door survey delivery.</li>
+                  ) : (
+                    <li>**Voter Cluster Coverage**: 100-voter coordinators are fully appointed across all clusters.</li>
+                  )}
                 </ul>
               </div>
             </div>
@@ -1448,6 +1577,36 @@ export default function AIStrategicIntelligenceCenter({
 
               {/* Dynamic validation alerts list */}
               <div className="space-y-4">
+                {/* Live AI Insights from PostgreSQL */}
+                {liveAiInsights.map((insight) => (
+                  <div key={insight.id} className="border-l-4 border-indigo-600 bg-indigo-50/60 p-4 rounded-xl shadow-sm space-y-3 font-bold text-xs text-slate-700">
+                    <div className="flex justify-between items-center">
+                      <h4 className="text-indigo-950 text-sm font-black uppercase tracking-wide flex items-center gap-1.5">
+                        <Sparkles className="w-5 h-5 text-indigo-600 shrink-0" /> {insight.title}
+                      </h4>
+                      <div className="flex items-center gap-2">
+                        <span className="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded text-[9px] font-black uppercase">
+                          {insight.category || 'STRATEGY'}
+                        </span>
+                        <span className="bg-indigo-200 text-indigo-950 px-2 py-0.5 rounded text-[9px] font-black uppercase font-mono">
+                          {Math.round((insight.sentimentScore ?? 0.75) * 100)}% CONFIDENCE
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-slate-700 font-medium leading-relaxed">
+                      {insight.content}
+                    </p>
+
+                    {insight.recommendedAction && (
+                      <div className="text-[11px] text-indigo-900 bg-white p-3 rounded-lg border border-indigo-100 leading-relaxed font-semibold">
+                        <span className="text-indigo-950 font-black block uppercase mb-0.5">REMEDIATION DIRECTIVE:</span>
+                        {insight.recommendedAction}
+                      </div>
+                    )}
+                  </div>
+                ))}
+
                 {dataQualityAlerts.map(da => (
                   <div key={da.id} className="border-l-4 border-red-600 bg-red-50 p-4 rounded-xl shadow-sm space-y-3 font-bold text-xs text-slate-700">
                     <div className="flex justify-between items-center">

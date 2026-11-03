@@ -45,6 +45,7 @@ import {
   fetchHierarchySummaryByUser,
   fetchReportsForUnit,
   fetchTasksForUnit,
+  fetchBoothAnalytics,
   fetchTrainingProgress,
   fetchTrainingVideos,
   fetchVoters,
@@ -53,6 +54,10 @@ import {
   type HierarchySummaryPayload,
   type TrainingProgressItem,
   syncVoter,
+  createApprovalRequest,
+  createVoter,
+  getVoterById,
+  updateVoterMigration,
   updateTaskStatus,
   updateTrainingProgress,
 } from '../lib/api';
@@ -97,8 +102,6 @@ export function getVoterCategory(v: Voter): 'SC' | 'ST' | 'BC' | 'OC' | 'OBC' | 
   if (['yadava', 'goud', 'rajaka', 'nayee brahmin', 'vaddera', 'devanga', 'padmasali', 'viswabrahmin', 'mudhiraj', 'munnuru kapu'].includes(cLower)) return 'BC';
   if (['kamma', 'reddy', 'kapu', 'balija', 'telaga', 'brahmin', 'arya vysya', 'velama'].includes(cLower)) return 'OC';
   if (['obc'].includes(cLower)) return 'OBC';
-  if (cLower === 'muslim') return 'BC';
-  if (cLower === 'christian') return 'OC';
   
   return 'Unknown';
 }
@@ -326,6 +329,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
       fetchTrainingProgress(session.userId).catch(() => null),
       fetchVotersForUnit(session.unitId).catch(() => null),
       fetchCadreNetwork(session.unitId).catch(() => null),
+      fetchBoothAnalytics(session.unitId).catch(() => null),
     ])
       .then(([payload, reportsPayload, tasksPayload, videosPayload, progressItems, voterItems, cadrePayload]) => {
         if (!active) {
@@ -415,18 +419,26 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   const fakeCount = backendSummary?.snapshot?.summary?.fakeVoters ?? voters.filter(v => v.voterStatus === 'Fake').length;
   const doubtfulCount = voters.filter(v => v.voterStatus === 'Doubtful').length;
 
-  // Forecast leading calculation
+  // Dynamic competitive leading party forecast calculation across any parties
   const forecast = useMemo(() => {
     if (totalVoters === 0) {
       return { status: "AWAITING DATA INGESTION", lead: 0 };
     }
-    const tdpVotes = (partyStats.TDP as number) + (partyStats.JSP as number) + (partyStats.BJP as number); // NDA alliance
-    const ysrcpVotes = partyStats.YSRCP as number;
-    
-    if (tdpVotes > ysrcpVotes) {
-      return { status: "TDP LEADS", lead: tdpVotes - ysrcpVotes };
-    } else if (ysrcpVotes > tdpVotes) {
-      return { status: "YSRCP LEADS", lead: ysrcpVotes - tdpVotes };
+    const sortedParties = Object.entries(partyStats)
+      .filter(([party]) => party !== 'Neutral')
+      .map(([party, count]) => ({ party, count: Number(count) || 0 }))
+      .sort((a, b) => b.count - a.count);
+
+    if (sortedParties.length === 0 || sortedParties[0].count === 0) {
+      return { status: "TOO CLOSE TO CALL", lead: 0 };
+    }
+
+    const topParty = sortedParties[0];
+    const secondParty = sortedParties[1] || { party: 'Others', count: 0 };
+    const lead = topParty.count - secondParty.count;
+
+    if (lead > 0) {
+      return { status: `${topParty.party} LEADS`, lead };
     } else {
       return { status: "TOO CLOSE TO CALL", lead: 0 };
     }
@@ -448,6 +460,20 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   const [registryTotal, setRegistryTotal] = useState<number>(0);
   const [isRegistryLoading, setIsRegistryLoading] = useState<boolean>(false);
   const [registryError, setRegistryError] = useState<string | null>(null);
+  const [isRegisterVoterOpen, setIsRegisterVoterOpen] = useState(false);
+  const [isRegisteringVoter, setIsRegisteringVoter] = useState(false);
+  const [registerVoterFeedback, setRegisterVoterFeedback] = useState<string | null>(null);
+  const [newVoterForm, setNewVoterForm] = useState({
+    name: '',
+    epicNumber: '',
+    fatherHusbandName: '',
+    relationType: 'FATHER',
+    houseNumber: '',
+    age: 25,
+    gender: 'MALE',
+    mobileNumber: '',
+    politicalPreference: 'NEUTRAL',
+  });
 
   useEffect(() => {
     let active = true;
@@ -517,7 +543,52 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   // --------------------------------------------------------
   const [editingVoter, setEditingVoter] = useState<Voter | null>(null);
 
-  const handleUpdateVoter = (updated: Voter) => {
+  const handleRegisterNewVoter = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newVoterForm.name.trim() || !newVoterForm.epicNumber.trim()) {
+      setRegisterVoterFeedback('Full name and EPIC number are required.');
+      return;
+    }
+    setIsRegisteringVoter(true);
+    setRegisterVoterFeedback(null);
+    try {
+      const created = await createVoter({
+        name: newVoterForm.name.trim(),
+        epicNumber: newVoterForm.epicNumber.trim().toUpperCase(),
+        fatherHusbandName: newVoterForm.fatherHusbandName.trim() || 'Not Provided',
+        relationType: newVoterForm.relationType as any,
+        houseNumber: newVoterForm.houseNumber.trim() || 'N/A',
+        age: Number(newVoterForm.age) || 18,
+        gender: newVoterForm.gender as any,
+        mobileNumber: newVoterForm.mobileNumber.trim() || undefined,
+        politicalPreference: newVoterForm.politicalPreference as any,
+        boothNumber: session.assignedBooth || '1',
+        voterStatus: 'Active',
+      });
+      if (created) {
+        setRegistryVoters((prev) => [created, ...prev]);
+        setRegistryTotal((prev) => prev + 1);
+        setIsRegisterVoterOpen(false);
+        setNewVoterForm({
+          name: '',
+          epicNumber: '',
+          fatherHusbandName: '',
+          relationType: 'FATHER',
+          houseNumber: '',
+          age: 25,
+          gender: 'MALE',
+          mobileNumber: '',
+          politicalPreference: 'NEUTRAL',
+        });
+      }
+    } catch (err: any) {
+      setRegisterVoterFeedback(err.message || 'Failed to register voter.');
+    } finally {
+      setIsRegisteringVoter(false);
+    }
+  };
+
+  const handleUpdateVoter = (updated: Voter, isCorrectionRequest: boolean = false) => {
     setRegistryVoters((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
     setVoters((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
     setEditingVoter(null);
@@ -525,6 +596,40 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
     void syncVoter(updated, session.userId).catch(() => {
       console.warn('Failed to sync voter update to backend');
     });
+
+    if (updated.voterLocationStatus === 'Migrated') {
+      void updateVoterMigration(updated.id, {
+        locationStatus: 'MIGRATED',
+        migrationCity: updated.currentLocation || 'MIGRATED',
+      }).catch(() => {});
+    }
+
+    if (isCorrectionRequest) {
+      void createApprovalRequest({
+        partyId: (session as any).partyId || session.organisationId || 'SDS',
+        type: 'DATA_CORRECTION',
+        title: `Voter Profile Correction: ${updated.name} (EPIC: ${updated.epicNumber || 'N/A'})`,
+        description: `Booth ${session.assignedBooth || ''} incharge requested verification for voter ${updated.name}. Status: ${updated.voterStatus || 'Active'}. Remarks: ${updated.notes || 'None'}.`,
+        entityId: updated.id,
+        entityType: 'Voter',
+        payload: {
+          voterId: updated.id,
+          updates: {
+            voterStatus: updated.voterStatus,
+            mobileNumber: updated.mobileNumber,
+            voterLocationStatus: updated.voterLocationStatus,
+            currentLocation: updated.currentLocation,
+            notes: updated.notes,
+            houseNumber: updated.houseNumber,
+          },
+        },
+        requestedByName: session.userName,
+        requestedByRole: session.role,
+        requestedByMobile: session.mobileNumber || '',
+      }).catch((err) => {
+        console.warn('Failed to dispatch approval request:', err);
+      });
+    }
   };
 
   // --------------------------------------------------------
@@ -642,16 +747,20 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   };
 
   const handleToggleTaskStatus = (taskId: string) => {
+    let nextApiStatus = 'PENDING';
     let nextStatus: VoterTask['status'] = 'Pending';
     setTasks(prev => prev.map(t => {
       if (t.id === taskId) {
-        nextStatus = t.status === 'Completed' ? 'Pending' : 'Completed';
+        const isCompleted = String(t.status).toUpperCase() === 'COMPLETED';
+        nextStatus = isCompleted ? 'Pending' : 'Completed';
+        nextApiStatus = isCompleted ? 'PENDING' : 'COMPLETED';
         return { ...t, status: nextStatus };
       }
       return t;
     }));
 
-    void updateTaskStatus(taskId, nextStatus).catch(() => {
+    void updateTaskStatus(taskId, nextApiStatus).catch((err) => {
+      console.error('Failed to update task status:', err);
     });
   };
 
@@ -784,6 +893,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   const [complaintDesc, setComplaintDesc] = useState('');
   const [affectedVotersCount, setAffectedVotersCount] = useState(1);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
 
   const handleGeneralSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -807,8 +917,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
 
     setReports([newReport, ...reports]);
     setGeneralContent('');
-    setShowSuccessToast(true);
-    setTimeout(() => setShowSuccessToast(false), 3000);
+    setReportError(null);
 
     void createReport({
       reportType: newReport.reportType,
@@ -819,8 +928,14 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
     })
       .then((savedReport) => {
         setReports((prev) => [savedReport, ...prev.filter((item) => item.id !== newReport.id)]);
+        setShowSuccessToast(true);
+        setTimeout(() => setShowSuccessToast(false), 3000);
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('Failed to upload ground report:', err);
+        setReports((prev) => prev.filter((item) => item.id !== newReport.id));
+        setReportError('Failed to upload report to Command Center. Please retry.');
+        setTimeout(() => setReportError(null), 4000);
       });
   };
 
@@ -849,8 +964,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
     setReports([newReport, ...reports]);
     setComplaintDesc('');
     setAffectedVotersCount(1);
-    setShowSuccessToast(true);
-    setTimeout(() => setShowSuccessToast(false), 3000);
+    setReportError(null);
 
     void createReport({
       reportType: newReport.reportType,
@@ -863,8 +977,14 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
     })
       .then((savedReport) => {
         setReports((prev) => [savedReport, ...prev.filter((item) => item.id !== newReport.id)]);
+        setShowSuccessToast(true);
+        setTimeout(() => setShowSuccessToast(false), 3000);
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('Failed to upload complaint report:', err);
+        setReports((prev) => prev.filter((item) => item.id !== newReport.id));
+        setReportError('Failed to upload complaint to Command Center. Please retry.');
+        setTimeout(() => setReportError(null), 4000);
       });
   };
 
@@ -877,7 +997,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
         return;
       }
 
-      void updateTrainingProgress(existing.id, 'WATCHED')
+      void updateTrainingProgress(video.id, 'WATCHED')
         .then(() => {
           setTrainingProgress((prev) => ({
             ...prev,
@@ -890,7 +1010,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
     }
 
     void ensureTrainingAssigned(session.userId, video.id)
-      .then((progress) => updateTrainingProgress(progress.id, 'WATCHED').then(() => progress))
+      .then((progress) => updateTrainingProgress(video.id, 'WATCHED').then(() => progress))
       .then((progress) => {
         setTrainingProgress((prev) => ({
           ...prev,
@@ -1455,6 +1575,12 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                       Report uploaded to Command Center!
                     </div>
                   )}
+                  {reportError && (
+                    <div className="p-2.5 bg-red-50 border border-red-200 text-red-800 text-[10px] font-black rounded-lg flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                      {reportError}
+                    </div>
+                  )}
 
                   {/* Report Dispatched History */}
                   <div className="space-y-2 pt-2 border-t border-gray-100">
@@ -1520,6 +1646,14 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                     </button>
                   )}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setIsRegisterVoterOpen(true)}
+                  className="px-4 py-2.5 bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-black text-xs rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm shrink-0"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Register Voter</span>
+                </button>
               </div>
 
               {/* Compact Filters row */}
@@ -1742,7 +1876,10 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
 
                               {/* Edit button */}
                               <button
-                                onClick={() => setEditingVoter(v)}
+                                onClick={() => {
+                                  setEditingVoter(v);
+                                  void getVoterById(v.id).then((f) => { if (f) setEditingVoter(f); }).catch(() => {});
+                                }}
                                 className="w-9 h-9 rounded-full border border-slate-200 flex items-center justify-center hover:bg-slate-50 text-slate-500 hover:text-slate-800 active:scale-90 hover:scale-105 transition-all cursor-pointer"
                                 title="Edit Voter Details"
                               >
@@ -1980,7 +2117,10 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                           </td>
                           <td className="px-4 py-4 text-right">
                             <button
-                              onClick={() => setEditingVoter(v)}
+                              onClick={() => {
+                                setEditingVoter(v);
+                                void getVoterById(v.id).then((f) => { if (f) setEditingVoter(f); }).catch(() => {});
+                              }}
                               className="px-2.5 py-1 text-[11px] font-black text-yellow-700 bg-yellow-50 hover:bg-yellow-100 border border-yellow-100 rounded transition-all cursor-pointer"
                             >
                               Update
@@ -2091,7 +2231,10 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                             </td>
                             <td className="px-4 py-4 text-right">
                               <button
-                                onClick={() => setEditingVoter(v)}
+                                onClick={() => {
+                                  setEditingVoter(v);
+                                  void getVoterById(v.id).then((f) => { if (f) setEditingVoter(f); }).catch(() => {});
+                                }}
                                 className="px-2.5 py-1 text-[11px] font-black text-yellow-700 hover:text-yellow-800 bg-yellow-50 border border-yellow-200 rounded transition-all cursor-pointer"
                               >
                                 Edit / Resolve
@@ -2482,69 +2625,36 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                   <ArrowLeft className="w-4 h-4" /> Back to Videos List
                 </button>
                 
-                {/* Simulated High-Fidelity Video Player */}
-                <div className="relative aspect-video w-full max-w-3xl mx-auto rounded-xl overflow-hidden border border-slate-200 bg-slate-950 shadow-md flex flex-col justify-between group">
-                  {/* Mock Thumbnail Image Poster */}
-                  <img 
-                    src={watchingVideo.thumbnailUrl} 
-                    alt={watchingVideo.title} 
-                    className="absolute inset-0 w-full h-full object-cover opacity-25"
-                    referrerPolicy="no-referrer"
-                  />
-                  
-                  {/* Top Bar Overlay */}
-                  <div className="relative z-10 p-4 bg-gradient-to-b from-black/90 to-transparent flex items-center justify-between text-white">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-[9px] bg-yellow-400 text-slate-950 font-black uppercase px-2 py-0.5 rounded shrink-0">
-                        {watchingVideo.category}
-                      </span>
-                      <h4 className="text-xs font-bold truncate max-w-xs sm:max-w-md">{watchingVideo.title}</h4>
-                    </div>
-                    <span className="text-[10px] font-mono font-bold bg-slate-900/85 text-yellow-400 border border-yellow-400/20 px-2 py-0.5 rounded shrink-0">
-                      TRAINING PREVIEW
-                    </span>
-                  </div>
-
-                  {/* Play Center Overlay */}
-                  <div className="relative z-10 flex flex-col items-center justify-center text-white gap-2 py-6">
-                    <div className="p-4 bg-yellow-400 text-slate-950 rounded-full shadow-lg ring-4 ring-yellow-400/30 cursor-pointer hover:scale-105 transition-transform">
-                      <Play className="w-6 h-6 fill-slate-950 text-slate-950" />
-                    </div>
-                    <p className="text-xs font-black uppercase tracking-wider text-yellow-400 mt-2">
-                      Playing Training Simulation...
-                    </p>
-                    <p className="text-[10px] text-slate-300 max-w-sm text-center px-4">
-                      This official video playback is running in full-fidelity simulation mode. All guidelines are verified.
-                    </p>
-                  </div>
-
-                  {/* Player Controls Overlay */}
-                  <div className="relative z-10 p-4 bg-gradient-to-t from-black/95 to-transparent space-y-2.5">
-                    {/* Progress Bar */}
-                    <div className="space-y-1">
-                      <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
-                        <div className="w-2/5 h-full bg-yellow-400 rounded-full" />
-                      </div>
-                      <div className="flex justify-between text-[9px] text-slate-400 font-mono font-bold">
-                        <span>04:42</span>
-                        <span>{watchingVideo.duration}</span>
-                      </div>
-                    </div>
-
-                    {/* Bottom buttons */}
-                    <div className="flex items-center justify-between text-white text-[10px] font-bold">
-                      <div className="flex items-center gap-3">
-                        <span className="text-yellow-400 cursor-pointer hover:underline">PAUSE</span>
-                        <span className="text-slate-400">|</span>
-                        <span className="text-slate-300 cursor-pointer hover:underline">RESTART</span>
-                        <span className="text-slate-400">|</span>
-                        <span className="text-slate-300 cursor-pointer hover:underline">MUTE</span>
-                      </div>
-                      <span className="text-slate-400 font-mono font-medium">
-                        {session.assignedBooth || 'Booth Operation'} Portal
-                      </span>
-                    </div>
-                  </div>
+                {/* Official Video Player */}
+                <div className="relative aspect-video w-full max-w-3xl mx-auto rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl flex flex-col justify-between group">
+                  {watchingVideo.videoUrl && (watchingVideo.videoUrl.includes('youtube.com') || watchingVideo.videoUrl.includes('youtu.be')) ? (
+                    <iframe
+                      src={watchingVideo.videoUrl.replace('watch?v=', 'embed/')}
+                      title={watchingVideo.title}
+                      className="w-full h-full border-0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    />
+                  ) : (
+                    <video
+                      controls
+                      autoPlay
+                      poster={watchingVideo.thumbnailUrl}
+                      src={watchingVideo.videoUrl || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"}
+                      className="w-full h-full object-cover"
+                      onEnded={() => {
+                        void updateTrainingProgress(watchingVideo.id, 'COMPLETED');
+                        setTrainingProgress((prev) => ({
+                          ...prev,
+                          [watchingVideo.id]: {
+                            ...prev[watchingVideo.id],
+                            status: 'COMPLETED',
+                            completedAt: new Date().toISOString(),
+                          } as any,
+                        }));
+                      }}
+                    />
+                  )}
                 </div>
 
                 <div className="max-w-3xl mx-auto space-y-2">
@@ -2667,7 +2777,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
             <form 
               onSubmit={(e) => {
                 e.preventDefault();
-                handleUpdateVoter(editingVoter);
+                handleUpdateVoter(editingVoter, true);
               }}
               className="p-6 space-y-4 max-h-[75vh] overflow-y-auto font-semibold"
             >
@@ -2855,6 +2965,187 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                 </button>
               </div>
 
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* REGISTER NEW VOTER MODAL */}
+      {isRegisterVoterOpen && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden border border-slate-100 flex flex-col max-h-[90vh]">
+            <div className="bg-slate-950 text-white px-5 py-4 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-yellow-400 text-slate-950 flex items-center justify-center font-black">
+                  <Plus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">Register Unlisted Voter</h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                    Booth {session.assignedBooth || 'Assignment'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsRegisterVoterOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-900 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleRegisterNewVoter} className="p-5 space-y-4 overflow-y-auto">
+              {registerVoterFeedback && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-bold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+                  <span>{registerVoterFeedback}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newVoterForm.name}
+                    onChange={(e) => setNewVoterForm({ ...newVoterForm, name: e.target.value })}
+                    placeholder="Enter full legal name"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:bg-white focus:border-yellow-400 focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">EPIC Number *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newVoterForm.epicNumber}
+                    onChange={(e) => setNewVoterForm({ ...newVoterForm, epicNumber: e.target.value.toUpperCase() })}
+                    placeholder="e.g. ABC1234567"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 focus:bg-white focus:border-yellow-400 focus:outline-none uppercase"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Father / Husband Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newVoterForm.fatherHusbandName}
+                    onChange={(e) => setNewVoterForm({ ...newVoterForm, fatherHusbandName: e.target.value })}
+                    placeholder="Parent or spouse name"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:bg-white focus:border-yellow-400 focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Relation Type</label>
+                  <select
+                    value={newVoterForm.relationType}
+                    onChange={(e) => setNewVoterForm({ ...newVoterForm, relationType: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:bg-white focus:border-yellow-400 focus:outline-none cursor-pointer"
+                  >
+                    <option value="FATHER">Father</option>
+                    <option value="HUSBAND">Husband</option>
+                    <option value="MOTHER">Mother</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">House No *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newVoterForm.houseNumber}
+                    onChange={(e) => setNewVoterForm({ ...newVoterForm, houseNumber: e.target.value })}
+                    placeholder="e.g. 4-12/A"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:bg-white focus:border-yellow-400 focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Age *</label>
+                  <input
+                    type="number"
+                    min="18"
+                    max="120"
+                    required
+                    value={newVoterForm.age}
+                    onChange={(e) => setNewVoterForm({ ...newVoterForm, age: parseInt(e.target.value) || 18 })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:bg-white focus:border-yellow-400 focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Gender</label>
+                  <select
+                    value={newVoterForm.gender}
+                    onChange={(e) => setNewVoterForm({ ...newVoterForm, gender: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:bg-white focus:border-yellow-400 focus:outline-none cursor-pointer"
+                  >
+                    <option value="MALE">Male</option>
+                    <option value="FEMALE">Female</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Mobile Number</label>
+                  <input
+                    type="tel"
+                    maxLength={10}
+                    value={newVoterForm.mobileNumber}
+                    onChange={(e) => setNewVoterForm({ ...newVoterForm, mobileNumber: e.target.value.replace(/\D/g, '') })}
+                    placeholder="10-digit mobile"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:bg-white focus:border-yellow-400 focus:outline-none font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Political Choice</label>
+                  <select
+                    value={newVoterForm.politicalPreference}
+                    onChange={(e) => setNewVoterForm({ ...newVoterForm, politicalPreference: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:bg-white focus:border-yellow-400 focus:outline-none cursor-pointer"
+                  >
+                    <option value="NEUTRAL">Neutral</option>
+                    <option value="TDP">TDP</option>
+                    <option value="YSRCP">YSRCP</option>
+                    <option value="JSP">JSP</option>
+                    <option value="BJP">BJP</option>
+                    <option value="INC">INC</option>
+                    <option value="OTH">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="pt-3 flex gap-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsRegisterVoterOpen(false)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black rounded-xl transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isRegisteringVoter}
+                  className="flex-1 py-2.5 bg-yellow-400 hover:bg-yellow-500 text-slate-950 text-xs font-black rounded-xl shadow-sm hover:shadow transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  {isRegisteringVoter ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Registering...</span>
+                    </>
+                  ) : (
+                    <span>Confirm Registration</span>
+                  )}
+                </button>
+              </div>
             </form>
           </div>
         </div>

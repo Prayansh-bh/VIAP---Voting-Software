@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
 import {
   CheckCircle2,
   AlertCircle,
@@ -10,6 +10,7 @@ import {
   ShieldAlert,
   HelpCircle,
 } from 'lucide-react';
+import { fetchNotifications, markNotificationRead, markAllNotificationsRead } from '../lib/api/notifications.api';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
 
@@ -38,6 +39,11 @@ interface NotificationContextType {
     info: (message: string, title?: string) => void;
   };
   confirmDialog: (options: ConfirmOptions) => Promise<boolean>;
+  dbNotifications: any[];
+  unreadCount: number;
+  refreshDbNotifications: () => Promise<void>;
+  markAsRead: (id: string) => Promise<void>;
+  markAllAsRead: () => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationContextType | null>(null);
@@ -49,6 +55,41 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     options: ConfirmOptions;
     resolve: (value: boolean) => void;
   } | null>(null);
+
+  const [dbNotifications, setDbNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+
+  const refreshDbNotifications = useCallback(async () => {
+    try {
+      const res = await fetchNotifications();
+      if (res) {
+        setDbNotifications(res.items || []);
+        setUnreadCount(res.unreadCount || 0);
+      }
+    } catch {
+      // In unauthenticated contexts, ignore
+    }
+  }, []);
+
+  const markAsRead = useCallback(async (id: string) => {
+    try {
+      await markNotificationRead(id);
+      setDbNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, readAt: new Date().toISOString() } : n)));
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+    } catch (err) {
+      console.warn('Failed to mark notification read:', err);
+    }
+  }, []);
+
+  const markAllAsRead = useCallback(async () => {
+    try {
+      await markAllNotificationsRead();
+      setDbNotifications((prev) => prev.map((n) => ({ ...n, readAt: new Date().toISOString() })));
+      setUnreadCount(0);
+    } catch (err) {
+      console.warn('Failed to mark all notifications read:', err);
+    }
+  }, []);
 
   const addToast = useCallback((type: ToastType, message: string, title?: string) => {
     const id = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -86,7 +127,17 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <NotificationContext.Provider value={{ notify, confirmDialog }}>
+    <NotificationContext.Provider
+      value={{
+        notify,
+        confirmDialog,
+        dbNotifications,
+        unreadCount,
+        refreshDbNotifications,
+        markAsRead,
+        markAllAsRead,
+      }}
+    >
       {children}
 
       {/* Floating Modern Toast Stack */}

@@ -26,6 +26,7 @@ const DEFAULT_FEATURE_TOGGLES = {
 };
 
 const DEFAULT_HIERARCHY_LABELS: Record<string, string> = {
+  PARTY_ADMIN: 'Party Administrator',
   STATE: 'State Incharge',
   ZONE: 'Zone Coordinator',
   PARLIAMENT: 'Parliament Incharge',
@@ -429,7 +430,7 @@ export async function loadCmsBundle(options?: {
       NOT: {
         code: { startsWith: 'TEST_' },
       },
-      ...(orgId ? { organisationId: orgId } : {}),
+      ...(orgId ? { OR: [{ organisationId: orgId }, { organisationId: null }] } : {}),
     },
     orderBy: { sortOrder: 'asc' },
   });
@@ -530,6 +531,8 @@ export async function loadCmsBundle(options?: {
     });
 
     const roleToTier: Record<string, string> = {
+      HIGH_COMMAND: 'PARTY_ADMIN',
+      PARTY_ADMIN: 'PARTY_ADMIN',
       STATE_ADMIN: 'STATE',
       ZONE_INCHARGE: 'ZONE',
       PARLIAMENT_INCHARGE: 'PARLIAMENT',
@@ -543,7 +546,8 @@ export async function loadCmsBundle(options?: {
 
     const seenTiers = new Set<string>();
     for (const a of assignments) {
-      const tierLevel = a.stateId && !a.zoneId ? 'STATE'
+      const tierLevel = (a.roleType === RoleType.HIGH_COMMAND || (a.roleType as any) === 'PARTY_ADMIN') ? 'PARTY_ADMIN'
+        : a.stateId && !a.zoneId && a.roleType === 'STATE_ADMIN' ? 'STATE'
         : a.zoneId && !a.parliamentId ? 'ZONE'
         : a.parliamentId && !a.constituencyId ? 'PARLIAMENT'
         : a.constituencyId && !a.mandalId ? 'CONSTITUENCY'
@@ -639,7 +643,7 @@ export const buildApplicationSchema = z.object({
   accentColor: z.string().nullish().default('#3b82f6'),
   activePartyCode: z.string().nullish().default('TDP'),
   appScope: z.enum(['SINGLE_MLA', 'PARLIAMENT_MP', 'ZONE', 'STATE']).default('SINGLE_MLA'),
-  activeHierarchyLevels: z.array(z.string()).default(['STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP']),
+  activeHierarchyLevels: z.array(z.string()).default(['PARTY_ADMIN', 'STATE', 'ZONE', 'PARLIAMENT', 'DISTRICT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP']),
   parliamentName: z.string().nullish(),
   parliamentCode: z.string().nullish(),
   constituencies: z.array(z.object({
@@ -752,6 +756,8 @@ export async function provisionApplication(
     seenMobiles.add(cleanMobile);
 
     const ALLOWED_TIER_ROLES = [
+      RoleType.HIGH_COMMAND,
+      'PARTY_ADMIN',
       RoleType.STATE_ADMIN,
       RoleType.ZONE_INCHARGE,
       RoleType.PARLIAMENT_INCHARGE,
@@ -1065,6 +1071,13 @@ export async function provisionApplication(
         };
 
         const configKey = org.code.toLowerCase();
+        const effectivePartyCode = (body.activePartyCode || 'TDP').toUpperCase();
+        const tenantAnalyticsConfig = {
+          ...DEFAULT_ANALYTICS_CONFIG,
+          leadParty: effectivePartyCode,
+          trackedParties: Array.from(new Set([effectivePartyCode, ...incomingParties.map((p) => p.code.trim().toUpperCase()), 'NEUTRAL', 'OTH'])),
+        };
+
         const updatedConfig = await tx.cMSConfiguration.upsert({
           where: { configKey },
           update: {
@@ -1077,7 +1090,7 @@ export async function provisionApplication(
             primaryColor: body.primaryColor || '#eab308',
             secondaryColor: body.secondaryColor || '#1e293b',
             accentColor: body.accentColor || '#3b82f6',
-            activePartyCode: body.activePartyCode || 'TDP',
+            activePartyCode: effectivePartyCode,
             appScope: body.appScope || 'SINGLE_MLA',
             parliamentName: parliament.name,
             parliamentCode: parliament.code,
@@ -1086,7 +1099,7 @@ export async function provisionApplication(
             hierarchyLabels: mergedHierarchyLabels,
             featureToggles: body.featureToggles || DEFAULT_FEATURE_TOGGLES,
             dashboardConfig: DEFAULT_DASHBOARD_CONFIG,
-            analyticsConfig: DEFAULT_ANALYTICS_CONFIG,
+            analyticsConfig: tenantAnalyticsConfig,
             aiEnabled: true,
           },
           create: {
@@ -1100,7 +1113,7 @@ export async function provisionApplication(
             primaryColor: body.primaryColor || '#eab308',
             secondaryColor: body.secondaryColor || '#1e293b',
             accentColor: body.accentColor || '#3b82f6',
-            activePartyCode: body.activePartyCode || 'TDP',
+            activePartyCode: effectivePartyCode,
             appScope: body.appScope || 'SINGLE_MLA',
             parliamentName: parliament.name,
             parliamentCode: parliament.code,
@@ -1109,7 +1122,7 @@ export async function provisionApplication(
             hierarchyLabels: mergedHierarchyLabels,
             featureToggles: body.featureToggles || DEFAULT_FEATURE_TOGGLES,
             dashboardConfig: DEFAULT_DASHBOARD_CONFIG,
-            analyticsConfig: DEFAULT_ANALYTICS_CONFIG,
+            analyticsConfig: tenantAnalyticsConfig,
             aiEnabled: true,
           },
         });
@@ -1198,6 +1211,11 @@ export async function provisionApplication(
         });
 
         const tierDataMap: Record<string, { unit: any; role: RoleType; assignment: any }> = {
+          PARTY_ADMIN: {
+            unit: stateUnitRecord,
+            role: RoleType.HIGH_COMMAND,
+            assignment: { stateId: state.id },
+          },
           STATE: {
             unit: stateUnitRecord,
             role: RoleType.STATE_ADMIN,
@@ -1251,7 +1269,12 @@ export async function provisionApplication(
           const cleanMobile = incharge.mobileNumber.replace(/\D/g, '').slice(-10);
           const tierKey = ((incharge as any).tierLevel || incharge.tier || 'CONSTITUENCY').toUpperCase();
           const tierData = tierDataMap[tierKey] || tierDataMap.CONSTITUENCY;
-          const inchargeRole = incharge.role || tierData.role;
+          let inchargeRole: RoleType = (incharge.role && (incharge.role as string) !== 'PARTY_ADMIN' && Object.values(RoleType).includes(incharge.role as RoleType))
+            ? (incharge.role as RoleType)
+            : tierData.role;
+          if ((inchargeRole as any) === 'PARTY_ADMIN' || tierKey === 'PARTY_ADMIN') {
+            inchargeRole = RoleType.HIGH_COMMAND;
+          }
           const resolvedUnitId = incharge.unitId || tierData.unit?.id || null;
 
           let userCode = `LEADER-${inchargeRole.slice(0, 3)}-${cleanMobile.slice(-4)}`;

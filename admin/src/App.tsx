@@ -40,6 +40,7 @@ import {
   fetchApprovals,
   approveRequest,
   rejectRequest,
+  switchActiveApplication,
 } from './lib/api';
 import {
   getAdminSession,
@@ -366,7 +367,15 @@ export default function App() {
     }
   };
 
-  const handleSetDefault = (id: string) => {
+  const handleSetDefault = async (id: string) => {
+    const target = apps.find((a) => a.id === id);
+    if (target) {
+      try {
+        await switchActiveApplication(target.tenantCode || target.configKey || target.party || 'default');
+      } catch (err) {
+        console.warn('Tenant active switch notice:', err);
+      }
+    }
     setApps(apps.map((a) => ({ ...a, isDefault: a.id === id })));
     notify.success('Default political application updated.', 'Default Tenant');
   };

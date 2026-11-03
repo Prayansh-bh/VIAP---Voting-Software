@@ -23,8 +23,15 @@ export async function createTask(data: Partial<VoterTask>): Promise<VoterTask> {
 }
 
 export async function updateTaskStatus(id: string, status: string, comments?: string): Promise<VoterTask> {
+  const normalizedStatus = String(status || '').trim().toUpperCase().replace(/\s+/g, '_');
   return apiFetch<VoterTask>(`/api/tasks/${id}/status`, {
     method: 'PATCH',
-    body: JSON.stringify({ status, comments }),
+    body: JSON.stringify({ status: normalizedStatus, comments }),
+  });
+}
+
+export async function deleteTask(id: string): Promise<{ id: string; deleted: boolean; softArchived?: boolean }> {
+  return apiFetch<{ id: string; deleted: boolean; softArchived?: boolean }>(`/api/tasks/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
   });
 }

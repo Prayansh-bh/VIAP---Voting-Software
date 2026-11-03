@@ -51,7 +51,7 @@ export class AnalyticsService {
           age: { '18-25': 0, '26-40': 0, '41-60': 0, '60+': 0 },
           gender: { Male: 0, Female: 0, Other: 0 },
         },
-        partyPreference: { TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, NEUTRAL: 0, OTH: 0 },
+        partyPreference: { NEUTRAL: 0, OTH: 0 },
         projections: {
           winningAreasCount: 0,
           trailingAreasCount: 0,
@@ -71,6 +71,145 @@ export class AnalyticsService {
 
     const unitSqlList = descendantUnitIds.map((id) => Prisma.sql`${id}::uuid`);
 
+    // Dual-Hierarchy Geographic Scope Bridge (handles Excel ingested rolls)
+    let geoCondition: Prisma.Sql | null = null;
+    let targetGeoLevel: OrgHierarchyLevel = currentUnit?.level || OrgHierarchyLevel.STATE;
+    let resolvedEntityName: string = currentUnit?.name || 'Jurisdiction Unit';
+    let resolvedEntityCode: string = currentUnit?.code || unitId.slice(0, 8);
+
+    if (currentUnit) {
+      if (currentUnit.level === OrgHierarchyLevel.STATE) {
+        const state = await prisma.state.findFirst({
+          where: { OR: [{ code: currentUnit.code || undefined }, { name: currentUnit.name }] },
+          select: { id: true, name: true, code: true },
+        });
+        if (state) {
+          geoCondition = Prisma.sql`"stateId" = ${state.id}::uuid`;
+          resolvedEntityName = state.name;
+        }
+      } else if (currentUnit.level === OrgHierarchyLevel.ZONE) {
+        const zone = await prisma.zone.findFirst({
+          where: { OR: [{ code: currentUnit.code || undefined }, { name: currentUnit.name }] },
+          select: { id: true, name: true },
+        });
+        if (zone) {
+          geoCondition = Prisma.sql`"zoneId" = ${zone.id}::uuid`;
+          resolvedEntityName = zone.name;
+        }
+      } else if (currentUnit.level === OrgHierarchyLevel.PARLIAMENT) {
+        const parliament = await prisma.parliament.findFirst({
+          where: { OR: [{ code: currentUnit.code || undefined }, { name: currentUnit.name }] },
+          select: { id: true, name: true },
+        });
+        if (parliament) {
+          geoCondition = Prisma.sql`"parliamentId" = ${parliament.id}::uuid`;
+          resolvedEntityName = parliament.name;
+        }
+      } else if (currentUnit.level === OrgHierarchyLevel.CONSTITUENCY) {
+        const consti = await prisma.constituency.findFirst({
+          where: { OR: [{ code: currentUnit.code || undefined }, { name: currentUnit.name }] },
+          select: { id: true, name: true },
+        });
+        if (consti) {
+          geoCondition = Prisma.sql`"constituencyId" = ${consti.id}::uuid`;
+          resolvedEntityName = consti.name;
+        }
+      } else if (currentUnit.level === OrgHierarchyLevel.MANDAL) {
+        const mandal = await prisma.mandal.findFirst({
+          where: { OR: [{ code: currentUnit.code || undefined }, { name: currentUnit.name }] },
+          select: { id: true, name: true },
+        });
+        if (mandal) {
+          geoCondition = Prisma.sql`"mandalId" = ${mandal.id}::uuid`;
+          resolvedEntityName = mandal.name;
+        }
+      } else if (currentUnit.level === OrgHierarchyLevel.VILLAGE) {
+        const village = await prisma.village.findFirst({
+          where: { OR: [{ code: currentUnit.code || undefined }, { name: currentUnit.name }] },
+          select: { id: true, name: true },
+        });
+        if (village) {
+          geoCondition = Prisma.sql`"villageId" = ${village.id}::uuid`;
+          resolvedEntityName = village.name;
+        }
+      } else if (currentUnit.level === OrgHierarchyLevel.BOOTH) {
+        const booth = await prisma.booth.findFirst({
+          where: { OR: [{ code: currentUnit.code || undefined }, { boothNumber: currentUnit.name }, { name: currentUnit.name }] },
+          select: { id: true, name: true, boothNumber: true },
+        });
+        if (booth) {
+          geoCondition = Prisma.sql`"boothId" = ${booth.id}::uuid`;
+          resolvedEntityName = booth.name || `Booth ${booth.boothNumber}`;
+        }
+      } else if (currentUnit.level === OrgHierarchyLevel.VOTER_GROUP) {
+        const vg = await prisma.voterGroup.findFirst({
+          where: { OR: [{ code: currentUnit.code || undefined }, { name: currentUnit.name }] },
+          select: { id: true, name: true },
+        });
+        if (vg) {
+          geoCondition = Prisma.sql`"voterGroupId" = ${vg.id}::uuid`;
+          resolvedEntityName = vg.name;
+        }
+      }
+    } else {
+      // unitId might be a direct geographic entity ID
+      const [m, v, b, c, s, vg] = await Promise.all([
+        prisma.mandal.findUnique({ where: { id: unitId }, select: { id: true, name: true, code: true } }),
+        prisma.village.findUnique({ where: { id: unitId }, select: { id: true, name: true, code: true } }),
+        prisma.booth.findUnique({ where: { id: unitId }, select: { id: true, boothNumber: true, name: true, code: true } }),
+        prisma.constituency.findUnique({ where: { id: unitId }, select: { id: true, name: true, code: true } }),
+        prisma.state.findUnique({ where: { id: unitId }, select: { id: true, name: true, code: true } }),
+        prisma.voterGroup.findUnique({ where: { id: unitId }, select: { id: true, name: true, code: true } }),
+      ]);
+      if (m) {
+        geoCondition = Prisma.sql`"mandalId" = ${m.id}::uuid`;
+        targetGeoLevel = OrgHierarchyLevel.MANDAL;
+        resolvedEntityName = m.name;
+        resolvedEntityCode = m.code || unitId.slice(0, 8);
+      } else if (v) {
+        geoCondition = Prisma.sql`"villageId" = ${v.id}::uuid`;
+        targetGeoLevel = OrgHierarchyLevel.VILLAGE;
+        resolvedEntityName = v.name;
+        resolvedEntityCode = v.code || unitId.slice(0, 8);
+      } else if (b) {
+        geoCondition = Prisma.sql`"boothId" = ${b.id}::uuid`;
+        targetGeoLevel = OrgHierarchyLevel.BOOTH;
+        resolvedEntityName = b.name || `Booth ${b.boothNumber}`;
+        resolvedEntityCode = b.code || unitId.slice(0, 8);
+      } else if (c) {
+        geoCondition = Prisma.sql`"constituencyId" = ${c.id}::uuid`;
+        targetGeoLevel = OrgHierarchyLevel.CONSTITUENCY;
+        resolvedEntityName = c.name;
+        resolvedEntityCode = c.code || unitId.slice(0, 8);
+      } else if (s) {
+        geoCondition = Prisma.sql`"stateId" = ${s.id}::uuid`;
+        targetGeoLevel = OrgHierarchyLevel.STATE;
+        resolvedEntityName = s.name;
+        resolvedEntityCode = s.code || unitId.slice(0, 8);
+      } else if (vg) {
+        geoCondition = Prisma.sql`"voterGroupId" = ${vg.id}::uuid`;
+        targetGeoLevel = OrgHierarchyLevel.VOTER_GROUP;
+        resolvedEntityName = vg.name;
+        resolvedEntityCode = vg.code || unitId.slice(0, 8);
+      }
+    }
+
+    const effectiveUnit = currentUnit || {
+      id: unitId,
+      name: resolvedEntityName,
+      code: resolvedEntityCode,
+      level: targetGeoLevel,
+      parentId: null,
+    };
+
+    const whereClause = geoCondition
+      ? (unitSqlList.length > 0
+          ? Prisma.sql`("unitId" IN (${Prisma.join(unitSqlList)}) OR ${geoCondition})`
+          : geoCondition)
+      : (unitSqlList.length > 0
+          ? Prisma.sql`"unitId" IN (${Prisma.join(unitSqlList)})`
+          : Prisma.sql`1=1`);
+
     // Execute PostgreSQL-level pushdown aggregations in parallel without loading voter objects into memory
     const [
       summaryRows,
@@ -81,6 +220,7 @@ export class AnalyticsService {
       cadres,
       taskCounts,
       trainingCounts,
+      cmsConfigRow,
     ] = await Promise.all([
       prisma.$queryRaw<Array<{
         totalVoters: number;
@@ -118,24 +258,24 @@ export class AnalyticsService {
           COUNT(*) FILTER (WHERE "gender" = 'FEMALE')::int AS "gender_female",
           COUNT(*) FILTER (WHERE "gender" = 'OTHER')::int AS "gender_other"
         FROM "Voter"
-        WHERE "unitId" IN (${Prisma.join(unitSqlList)})
+        WHERE ${whereClause}
       `,
       prisma.$queryRaw<Array<{ politicalPreference: string | null; count: number }>>`
         SELECT COALESCE("politicalPreference", 'NEUTRAL') AS "politicalPreference", COUNT(*)::int AS count
         FROM "Voter"
-        WHERE "unitId" IN (${Prisma.join(unitSqlList)})
+        WHERE ${whereClause}
         GROUP BY "politicalPreference"
       `,
       prisma.$queryRaw<Array<{ caste: string | null; count: number }>>`
         SELECT COALESCE(NULLIF(TRIM("caste"), ''), 'Unknown') AS caste, COUNT(*)::int AS count
         FROM "Voter"
-        WHERE "unitId" IN (${Prisma.join(unitSqlList)})
+        WHERE ${whereClause}
         GROUP BY COALESCE(NULLIF(TRIM("caste"), ''), 'Unknown')
       `,
       prisma.$queryRaw<Array<{ profession: string | null; count: number }>>`
         SELECT COALESCE(NULLIF(TRIM("profession"), ''), 'Other') AS profession, COUNT(*)::int AS count
         FROM "Voter"
-        WHERE "unitId" IN (${Prisma.join(unitSqlList)})
+        WHERE ${whereClause}
         GROUP BY COALESCE(NULLIF(TRIM("profession"), ''), 'Other')
       `,
       prisma.$queryRaw<Array<{ unitId: string; total: number; tdp: number; ysrcp: number }>>`
@@ -145,7 +285,7 @@ export class AnalyticsService {
           COUNT(*) FILTER (WHERE "politicalPreference" = 'TDP')::int AS "tdp",
           COUNT(*) FILTER (WHERE "politicalPreference" = 'YSRCP')::int AS "ysrcp"
         FROM "Voter"
-        WHERE "unitId" IN (${Prisma.join(unitSqlList)})
+        WHERE ${whereClause}
         GROUP BY "unitId"
       `,
       prisma.user.findMany({
@@ -164,6 +304,9 @@ export class AnalyticsService {
         by: ['status'],
         where: { user: { unitId: { in: descendantUnitIds } } },
         _count: { _all: true },
+      }),
+      prisma.cMSConfiguration.findFirst({
+        select: { activePartyCode: true },
       }),
     ]);
 
@@ -198,12 +341,9 @@ export class AnalyticsService {
     const migratedVoters = Number(s.migratedVoters || 0);
     const localVoters = Number(s.localVoters || 0);
 
+    const activePartyCode = (cmsConfigRow?.activePartyCode || 'SDS').toUpperCase();
     const partyPreference: Record<string, number> = {
-      TDP: 0,
-      YSRCP: 0,
-      JSP: 0,
-      BJP: 0,
-      INC: 0,
+      [activePartyCode]: 0,
       NEUTRAL: 0,
       OTH: 0,
     };
@@ -334,7 +474,7 @@ export class AnalyticsService {
     };
 
     return {
-      unit: currentUnit,
+      unit: effectiveUnit as any,
       summary: {
         totalVoters,
         voted,

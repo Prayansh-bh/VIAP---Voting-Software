@@ -4,6 +4,7 @@ import { initSocketServer } from './lib/socket.js';
 import { prisma } from './lib/prisma.js';
 import { closeRedis } from './lib/redis.js';
 import { ImportQueueService } from './modules/applications/import-queue.service.js';
+import { initLifecycleScheduler, stopLifecycleScheduler } from './jobs/lifecycle.job.js';
 
 async function start() {
   const app = buildApp();
@@ -22,6 +23,7 @@ async function start() {
 
     // Initialize $0 in-process bulk CSV import queue processor
     ImportQueueService.init();
+    initLifecycleScheduler();
 
     // Pre-initialize WhatsApp Baileys Gateway in background if enabled
     if (env.WHATSAPP_PROVIDER === 'baileys' && env.NODE_ENV !== 'test') {
@@ -46,6 +48,7 @@ async function start() {
       isShuttingDown = true;
       app.log.info(`Received ${signal}, shutting down gracefully...`);
       ImportQueueService.stop();
+      stopLifecycleScheduler();
       try {
         const { SmsProviderFactory } = await import('./lib/sms/factory.js');
         const wa = SmsProviderFactory.getProvider('WHATSAPP');

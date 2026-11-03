@@ -17,6 +17,7 @@ import { RoleType, UserSession } from './types';
 
 // ── Lazy-loaded heavy dashboards and views (Zero initial bundle lag) ──
 const LoginPage = lazy(() => import('./pages/LoginPage'));
+const PartyAdminDashboard = lazy(() => import('./components/PartyAdminDashboard'));
 const Voter100Dashboard = lazy(() => import('./components/Voter100Dashboard'));
 const BoothInchargeDashboard = lazy(() => import('./components/BoothInchargeDashboard'));
 const VillageInchargeDashboard = lazy(() => import('./components/VillageInchargeDashboard'));
@@ -40,6 +41,8 @@ import { useCms } from './context/CmsContext';
 
 const ROUTE_BY_ROLE: Record<RoleType, string> = {
   SUPER_ADMIN: '/super-admin',
+  PARTY_ADMIN: '/party-admin',
+  HIGH_COMMAND: '/party-admin',
   STATE_ADMIN: '/state',
   ZONE_INCHARGE: '/zone',
   PARLIAMENT_INCHARGE: '/parliament',
@@ -124,12 +127,30 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
         const user = await import('./lib/api').then((m) => m.fetchCurrentUser());
         if (isMounted && user) {
           const assignment = user.hierarchyAssignment;
+          const authoritativeUnitId =
+            assignment?.voterGroupId ||
+            assignment?.boothId ||
+            assignment?.villageId ||
+            assignment?.pollingStationId ||
+            assignment?.mandalId ||
+            assignment?.constituencyId ||
+            assignment?.parliamentId ||
+            assignment?.zoneId ||
+            assignment?.stateId ||
+            assignment?.mandal?.id ||
+            assignment?.village?.id ||
+            assignment?.booth?.id ||
+            assignment?.voterGroup?.id ||
+            user.unitId ||
+            assignment?.unitId ||
+            '';
+
           const restoredSession: UserSession = {
             userName: user.name || user.userCode || 'In-Charge',
             mobileNumber: user.mobileNumber || '',
             role: user.role,
-            unitId: user.unitId || assignment?.unitId || '',
-            assignedConstituency: assignment?.constituency?.name || 'Nalgonda',
+            unitId: authoritativeUnitId,
+            assignedConstituency: assignment?.constituency?.name || user.organisation?.name || 'Assigned Segment',
             assignedMandal: assignment?.mandal?.name || user.unitName,
             assignedVillage: assignment?.village?.name,
             assignedBooth: assignment?.booth?.boothNumber || assignment?.booth?.name,
@@ -288,8 +309,8 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     navigate('/login');
   };
 
-  // Safe role switcher: prevents privilege escalation
-  const handleSwitchRole = (newRole: RoleType) => {
+  // Safe role switcher: prevents privilege escalation and handles subordinate unit re-hydration
+  const handleSwitchRole = async (newRole: RoleType) => {
     if (!activeSession) return;
     const userMaxRank = ROLE_RANK_WEIGHT[activeSession.role] || 1;
     const targetRank = ROLE_RANK_WEIGHT[newRole] || 1;
@@ -300,7 +321,57 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
       return;
     }
 
-    const updatedSession = { ...activeSession, role: newRole };
+    let targetUnitId = activeSession.unitId;
+    const extraAssignments: Partial<UserSession> = {};
+
+    // If switching downward to field roles, resolve an appropriate subordinate unit ID
+    try {
+      if (newRole === 'MANDAL_INCHARGE') {
+        const { fetchMandals } = await import('./lib/api');
+        const mandals = await fetchMandals();
+        if (Array.isArray(mandals) && mandals.length > 0) {
+          targetUnitId = mandals[0].id;
+          extraAssignments.assignedMandal = mandals[0].name;
+          extraAssignments.assignedConstituency = mandals[0].constituency?.name || activeSession.assignedConstituency;
+        }
+      } else if (newRole === 'VILLAGE_INCHARGE') {
+        const { fetchHierarchyVillages } = await import('./lib/api');
+        const villages = await fetchHierarchyVillages();
+        if (Array.isArray(villages) && villages.length > 0) {
+          targetUnitId = villages[0].id;
+          extraAssignments.assignedVillage = villages[0].name;
+          extraAssignments.assignedMandal = villages[0].mandal?.name || activeSession.assignedMandal;
+        }
+      } else if (newRole === 'BOOTH_PRESIDENT' || newRole === 'POLLING_AGENT') {
+        const { fetchHierarchyBooths } = await import('./lib/api');
+        const booths = await fetchHierarchyBooths();
+        if (Array.isArray(booths) && booths.length > 0) {
+          targetUnitId = booths[0].id;
+          extraAssignments.assignedBooth = booths[0].boothNumber || booths[0].name;
+          extraAssignments.assignedVillage = booths[0].village?.name || activeSession.assignedVillage;
+        }
+      } else if (newRole === 'VOTER_100_INCHARGE') {
+        const { apiFetch } = await import('./lib/api');
+        const groups = await apiFetch<any[]>('/api/voter-incharges').catch(() => []);
+        if (Array.isArray(groups) && groups.length > 0) {
+          const vg = groups[0];
+          targetUnitId = vg.id;
+          extraAssignments.assignedVoterGroup = vg.name;
+          extraAssignments.assignedBooth = vg.booth?.boothNumber ? `Booth ${vg.booth.boothNumber}` : (vg.booth?.name || 'Booth 1');
+          extraAssignments.assignedVillage = vg.booth?.village?.name || 'Rajupalem';
+          extraAssignments.assignedMandal = vg.booth?.village?.mandal?.name || activeSession.assignedMandal;
+          if (vg.assignedIncharge) {
+            extraAssignments.userId = vg.assignedIncharge.id;
+            extraAssignments.userName = vg.assignedIncharge.name;
+            extraAssignments.mobileNumber = vg.assignedIncharge.mobileNumber;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Subordinate unit resolution note:', err);
+    }
+
+    const updatedSession = { ...activeSession, role: newRole, unitId: targetUnitId, ...extraAssignments };
     setActiveSession(updatedSession);
     localStorage.setItem('kdp_active_session', JSON.stringify(updatedSession));
     const targetPath = ROUTE_BY_ROLE[newRole] || '/state';
@@ -315,6 +386,9 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     switch (role) {
       case 'SUPER_ADMIN':
         return <SuperAdminDashboard session={activeSession} onLogout={handleLogout} />;
+      case 'PARTY_ADMIN':
+      case 'HIGH_COMMAND':
+        return <PartyAdminDashboard session={activeSession} onLogout={handleLogout} />;
       case 'STATE_ADMIN':
         return <StateDashboard session={activeSession} onLogout={handleLogout} />;
       case 'ZONE_INCHARGE':
@@ -427,6 +501,14 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
               <Route
                 path="/super-admin/*"
                 element={renderDashboardByRole('SUPER_ADMIN')}
+              />
+              <Route
+                path="/party-admin"
+                element={renderDashboardByRole('PARTY_ADMIN')}
+              />
+              <Route
+                path="/party-admin/*"
+                element={renderDashboardByRole('PARTY_ADMIN')}
               />
               <Route
                 path="/state"

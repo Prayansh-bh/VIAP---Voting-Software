@@ -4,9 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "start": "tsx src/server.ts",
-    "start:prod": "node dist/src/server.js",
+    "dev": "tsx watch --max-old-space-size=4096 src/server.ts",
+    "start": "tsx --max-old-space-size=4096 src/server.ts",
+    "start:prod": "node --max-old-space-size=4096 dist/src/server.js",
     "build": "tsc",
     "test": "tsx src/tests/integration.ts",
     "prisma:generate": "prisma generate",

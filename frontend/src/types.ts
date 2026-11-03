@@ -5,6 +5,8 @@
 
 export type RoleType = 
   | 'SUPER_ADMIN'
+  | 'PARTY_ADMIN'
+  | 'HIGH_COMMAND'
   | 'STATE_ADMIN'
   | 'ZONE_INCHARGE'
   | 'PARLIAMENT_INCHARGE'
@@ -184,7 +186,7 @@ export const KONDAPI_HIERARCHY: MandalData[] = [
   }
 ];
 
-export type VoterPreference = 'TDP' | 'YSRCP' | 'JSP' | 'BJP' | 'INC' | 'Neutral' | 'OTH';
+export type VoterPreference = 'TDP' | 'YSRCP' | 'JSP' | 'BJP' | 'INC' | 'Neutral' | 'OTH' | (string & {});
 
 export type VoterStatus = 'Active' | 'Shifted' | 'Deceased' | 'Duplicate' | 'Fake' | 'Doubtful' | 'Unknown';
 

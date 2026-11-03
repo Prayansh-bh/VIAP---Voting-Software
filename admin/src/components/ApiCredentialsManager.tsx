@@ -16,6 +16,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { AppInstance } from '../types';
+import { useNotification } from '../context/NotificationContext';
 import {
   ApiCredentialItem,
   fetchCredentials,
@@ -46,6 +47,7 @@ export default function ApiCredentialsManager({
   apps,
   onSelectApp,
 }: ApiCredentialsManagerProps) {
+  const { notify, confirmDialog } = useNotification();
   const [credentials, setCredentials] = useState<ApiCredentialItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -164,16 +166,24 @@ export default function ApiCredentialsManager({
   };
 
   const handleDelete = async (keyName: string) => {
-    if (!window.confirm(`Are you sure you want to deactivate and soft-delete API key "${keyName}"? Live integrations using this key will immediately halt.`)) {
-      return;
-    }
+    const confirmed = await confirmDialog({
+      title: 'Deactivate API Key',
+      message: `Are you sure you want to deactivate and soft-delete API key "${keyName}"? Live integrations using this key will immediately halt.`,
+      confirmText: 'Deactivate Key',
+      cancelText: 'Cancel',
+      danger: true,
+      icon: 'trash',
+    });
+    if (!confirmed) return;
 
     try {
       await deleteCredential(keyName, effectiveOrgId);
       setSuccessMsg(`Credential "${keyName}" soft-deleted successfully.`);
+      notify.success(`Credential "${keyName}" soft-deleted successfully.`, 'API Key Deactivated');
       await loadData();
     } catch (err: any) {
       setError(err?.message || 'Failed to delete credential.');
+      notify.error(err?.message || 'Failed to delete credential.', 'Deletion Error');
     }
   };
 

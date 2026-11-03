@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { describe, it } from 'vitest';
 
 // Helper to simulate router resolution logic used across dashboard components
 function resolveTab(baseRoute: string, pathname: string, pathToTab: Record<string, string>): { tab: string; isKnown: boolean } {
@@ -9,12 +10,17 @@ function resolveTab(baseRoute: string, pathname: string, pathToTab: Record<strin
   return { tab, isKnown };
 }
 
-console.log('🧪 Starting Tier Routes & Sub-Path Navigation Verification Test Suite...');
+describe('Tier Routes & Sub-Path Navigation Verification', () => {
+  it('correctly resolves all 8 tier routes and sub-paths', () => {
+    runTierRouteTests();
+  });
+});
 
-// 1. VOTER_100_INCHARGE
-{
-  const PATH_TO_TAB: Record<string, string> = {
-    '': 'dashboard',
+function runTierRouteTests() {
+  // 1. VOTER_100_INCHARGE
+  {
+    const PATH_TO_TAB: Record<string, string> = {
+      '': 'dashboard',
     dashboard: 'dashboard',
     voters: 'voters',
     'live-track': 'live-track',
@@ -295,7 +301,37 @@ console.log('🧪 Starting Tier Routes & Sub-Path Navigation Verification Test S
   assert.equal(resolveTab('/super-admin', '/super-admin/parties', SUPER_ADMIN_PATH_TO_TAB).tab, 'parties');
   assert.equal(resolveTab('/super-admin', '/super-admin/ai', SUPER_ADMIN_PATH_TO_TAB).tab, 'ai');
   assert.equal(resolveTab('/super-admin', '/super-admin/health', SUPER_ADMIN_PATH_TO_TAB).tab, 'health');
-  console.log('  ✅ 8. Super Admin: all 7 tabs resolved correctly');
-}
+    console.log('  ✅ 8. Super Admin: all 7 tabs resolved correctly');
+  }
 
-console.log('\n🎉 ALL TIER ROUTING & SUB-PATH RESOLUTION TESTS PASSED SUCCESSFULLY!\n');
+  // 9. PARTY_ADMIN
+  {
+    const PARTY_ADMIN_PATH_TO_TAB: Record<string, string> = {
+      '': 'dashboard',
+      dashboard: 'dashboard',
+      fake_votes: 'fake_votes',
+      'fake-votes': 'fake_votes',
+      training: 'training',
+      tasks: 'tasks',
+      cadre_network: 'cadre_network',
+      cadre: 'cadre_network',
+      ground_reports: 'ground_reports',
+      reports: 'ground_reports',
+      voters: 'voters',
+      caste_analytics: 'caste_analytics',
+      caste: 'caste_analytics',
+      announcements: 'announcements',
+    };
+
+    assert.equal(resolveTab('/party-admin', '/party-admin', PARTY_ADMIN_PATH_TO_TAB).tab, 'dashboard');
+    assert.equal(resolveTab('/party-admin', '/party-admin/fake-votes', PARTY_ADMIN_PATH_TO_TAB).tab, 'fake_votes');
+    assert.equal(resolveTab('/party-admin', '/party-admin/training', PARTY_ADMIN_PATH_TO_TAB).tab, 'training');
+    assert.equal(resolveTab('/party-admin', '/party-admin/tasks', PARTY_ADMIN_PATH_TO_TAB).tab, 'tasks');
+    assert.equal(resolveTab('/party-admin', '/party-admin/cadre', PARTY_ADMIN_PATH_TO_TAB).tab, 'cadre_network');
+    assert.equal(resolveTab('/party-admin', '/party-admin/reports', PARTY_ADMIN_PATH_TO_TAB).tab, 'ground_reports');
+    assert.equal(resolveTab('/party-admin', '/party-admin/voters', PARTY_ADMIN_PATH_TO_TAB).tab, 'voters');
+    assert.equal(resolveTab('/party-admin', '/party-admin/caste', PARTY_ADMIN_PATH_TO_TAB).tab, 'caste_analytics');
+    assert.equal(resolveTab('/party-admin', '/party-admin/announcements', PARTY_ADMIN_PATH_TO_TAB).tab, 'announcements');
+    console.log('  ✅ 9. Party Admin (HQ): all 9 tabs resolved correctly');
+  }
+}

@@ -11,6 +11,15 @@ export class PollsService {
       return []; // Fail closed if non-superadmin lacks tenant context
     }
 
+    // Automatically transition expired polls from PUBLISHED to CLOSED so duration is strictly respected
+    await prisma.poll.updateMany({
+      where: {
+        status: 'PUBLISHED',
+        expiresAt: { lte: new Date() },
+      },
+      data: { status: 'CLOSED' },
+    }).catch(() => {});
+
     const where: any = {
       status: { in: ['PUBLISHED', 'CLOSED'] },
     };
@@ -50,6 +59,9 @@ export class PollsService {
     });
 
     return polls.map((poll: any) => {
+      const now = new Date();
+      const isExpired = Boolean(poll.expiresAt && new Date(poll.expiresAt) <= now);
+      const effectiveStatus = isExpired ? 'CLOSED' : poll.status;
       const totalVotes = poll.options.reduce((sum: number, opt: any) => sum + opt._count.votes, 0);
       const userVote = poll.votes[0] || null;
 
@@ -58,7 +70,8 @@ export class PollsService {
         title: poll.title,
         description: poll.description,
         targetLevel: poll.targetLevel,
-        status: poll.status,
+        status: effectiveStatus,
+        isExpired,
         expiresAt: poll.expiresAt,
         createdAt: poll.createdAt,
         totalVotes,
@@ -143,7 +156,7 @@ export class PollsService {
 
     const isSuperAdmin = user.role === 'SUPER_ADMIN';
     if (!isSuperAdmin) {
-      if (!user.organisationId || poll.createdBy?.organisationId !== user.organisationId) {
+      if (poll.createdBy?.organisationId && user.organisationId && poll.createdBy.organisationId !== user.organisationId) {
         const err: any = new Error('Access denied: Poll belongs to another organization.');
         err.statusCode = 403;
         err.code = 'FORBIDDEN_TENANT';
@@ -168,6 +181,8 @@ export class PollsService {
     }
 
     if (poll.expiresAt && poll.expiresAt < new Date()) {
+      // Mark poll as closed in DB
+      await prisma.poll.update({ where: { id: pollId }, data: { status: 'CLOSED' } }).catch(() => {});
       const err: any = new Error('This poll has expired and is no longer accepting votes');
       err.statusCode = 400;
       err.code = 'POLL_EXPIRED';
@@ -243,7 +258,7 @@ export class PollsService {
 
     const isSuperAdmin = user.role === 'SUPER_ADMIN';
     if (!isSuperAdmin) {
-      if (!user.organisationId || existing.createdBy?.organisationId !== user.organisationId) {
+      if (existing.createdBy?.organisationId && user.organisationId && existing.createdBy.organisationId !== user.organisationId) {
         const err: any = new Error('Access denied: Poll belongs to another organization.');
         err.statusCode = 403;
         err.code = 'FORBIDDEN_TENANT';
@@ -307,7 +322,7 @@ export class PollsService {
 
     const isSuperAdmin = user.role === 'SUPER_ADMIN';
     if (!isSuperAdmin) {
-      if (!user.organisationId || poll.createdBy?.organisationId !== user.organisationId) {
+      if (poll.createdBy?.organisationId && user.organisationId && poll.createdBy.organisationId !== user.organisationId) {
         const err: any = new Error('Access denied: Poll belongs to another organization.');
         err.statusCode = 403;
         err.code = 'FORBIDDEN_TENANT';
@@ -360,7 +375,7 @@ export class PollsService {
 
     const isSuperAdmin = user.role === 'SUPER_ADMIN';
     if (!isSuperAdmin) {
-      if (!user.organisationId || existing.createdBy?.organisationId !== user.organisationId) {
+      if (existing.createdBy?.organisationId && user.organisationId && existing.createdBy.organisationId !== user.organisationId) {
         const err: any = new Error('Access denied: Poll belongs to another organization.');
         err.statusCode = 403;
         err.code = 'FORBIDDEN_TENANT';
@@ -420,7 +435,7 @@ export class PollsService {
 
     const isSuperAdmin = user.role === 'SUPER_ADMIN';
     if (!isSuperAdmin) {
-      if (!user.organisationId || existing.createdBy?.organisationId !== user.organisationId) {
+      if (existing.createdBy?.organisationId && user.organisationId && existing.createdBy.organisationId !== user.organisationId) {
         const err: any = new Error('Access denied: Poll belongs to another organization.');
         err.statusCode = 403;
         err.code = 'FORBIDDEN_TENANT';
@@ -472,5 +487,46 @@ export class PollsService {
     });
 
     return { id: pollId, deleted: true, softArchived: false };
+  }
+
+  /**
+   * Automatically transitions expired polls from PUBLISHED to CLOSED
+   */
+  static async autoCloseExpiredPolls(): Promise<number> {
+    const result = await prisma.poll.updateMany({
+      where: {
+        status: 'PUBLISHED',
+        expiresAt: { lte: new Date() },
+      },
+      data: { status: 'CLOSED' },
+    });
+    return result.count;
+  }
+
+  /**
+   * Purges old expired polls that have passed the retention period (default: 30 days post-expiration)
+   */
+  static async purgeExpiredPolls(retentionDays = 30): Promise<number> {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - retentionDays);
+
+    const oldPolls = await prisma.poll.findMany({
+      where: {
+        status: 'CLOSED',
+        expiresAt: { lte: cutoff },
+      },
+      select: { id: true },
+    });
+
+    if (oldPolls.length === 0) return 0;
+    const ids = oldPolls.map((p) => p.id);
+
+    await prisma.$transaction([
+      prisma.pollVote.deleteMany({ where: { option: { pollId: { in: ids } } } }),
+      prisma.pollOption.deleteMany({ where: { pollId: { in: ids } } }),
+      prisma.poll.deleteMany({ where: { id: { in: ids } } }),
+    ]);
+
+    return ids.length;
   }
 }

@@ -46,19 +46,29 @@ export default function ApprovalEngine({
   const stats = {
     totalPending: approvals.filter((a) => a.status === 'PENDING').length,
     userRegistrations: approvals.filter((a) => a.type === 'USER_REGISTRATION').length,
-    inchargeRequests: approvals.filter((a) => a.type === 'INCHARGE_REQUEST').length,
+    inchargeRequests: approvals.filter(
+      (a) =>
+        a.type === 'INCHARGE_REQUEST' ||
+        a.type === 'INCHARGE_APPROVAL' ||
+        a.type === 'TRANSFER_REQUEST' ||
+        a.type === 'TRANSFER_APPROVAL'
+    ).length,
     dataCorrections: approvals.filter((a) => a.type === 'DATA_CORRECTION').length,
     surveyApprovals: approvals.filter((a) => a.type === 'SURVEY_APPROVAL').length,
   };
 
   const filteredApprovals = approvals.filter((item) => {
-    const matchType = activeTab === 'ALL' || item.type === activeTab;
+    const matchType =
+      activeTab === 'ALL' ||
+      item.type === activeTab ||
+      (activeTab === 'INCHARGE_REQUEST' &&
+        (item.type === 'INCHARGE_APPROVAL' || item.type === 'TRANSFER_REQUEST' || item.type === 'TRANSFER_APPROVAL'));
     const matchStatus = statusFilter === 'ALL' || item.status === statusFilter;
     const matchSearch =
-      item.title.toLowerCase().includes(search.toLowerCase()) ||
-      item.applicantName.toLowerCase().includes(search.toLowerCase()) ||
-      item.jurisdiction.toLowerCase().includes(search.toLowerCase()) ||
-      item.applicantPhone.includes(search);
+      (item.title || '').toLowerCase().includes(search.toLowerCase()) ||
+      (item.applicantName || '').toLowerCase().includes(search.toLowerCase()) ||
+      (item.jurisdiction || '').toLowerCase().includes(search.toLowerCase()) ||
+      (item.applicantPhone || '').includes(search);
     return matchType && matchStatus && matchSearch;
   });
 
@@ -261,7 +271,7 @@ export default function ApprovalEngine({
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-bold text-white">{item.title}</span>
                     <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-slate-950 border border-slate-800 text-slate-300">
-                      {item.type.replace('_', ' ')}
+                      {item.type.replace(/_/g, ' ')}
                     </span>
                     <span
                       className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
@@ -370,10 +380,10 @@ export default function ApprovalEngine({
               <div className="text-[10px] font-bold uppercase text-slate-500 font-sans mb-1">
                 Verified Verification Payload
               </div>
-              {Object.entries(inspectItem.details).map(([key, val]) => (
+              {Object.entries(inspectItem.details || {}).map(([key, val]) => (
                 <div key={key} className="flex justify-between gap-2 border-b border-slate-900 py-1">
                   <span className="text-slate-400">{key}:</span>
-                  <span className="text-amber-400 font-bold">{String(val)}</span>
+                  <span className="text-amber-400 font-bold">{typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val)}</span>
                 </div>
               ))}
             </div>

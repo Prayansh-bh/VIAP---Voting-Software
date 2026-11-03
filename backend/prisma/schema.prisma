@@ -220,6 +220,8 @@ model PoliticalParty {
   @@index([organisationId])
 }
 
+/// [RELATIONAL INTEGRITY ANCHOR - DB-0001]
+/// Preserved for relational integrity: Anchors PoliticalParty branding foreign keys and cascade policies.
 model PartyBranding {
   id              String         @id @default(uuid()) @db.Uuid
   partyId         String         @db.Uuid
@@ -473,6 +475,8 @@ model OrganizationUnit {
 // 11. USER, 12. ROLE & 13. USER HIERARCHY ASSIGNMENT
 // ----------------------------------------------------------------------------
 
+/// [RELATIONAL INTEGRITY ANCHOR - DB-0001]
+/// Preserved for relational integrity: Anchors User.roleId foreign key relations and organizational RBAC mapping.
 model Role {
   id              String           @id @default(uuid()) @db.Uuid
   organisationId  String?          @db.Uuid
@@ -687,6 +691,7 @@ model Voter {
   @@index([constituencyId, boothId])
   @@index([constituencyId, voteStatus])
   @@index([constituencyId, surveyStatus])
+  @@index([updatedById])
 }
 
 model VoterAssignment {
@@ -783,6 +788,8 @@ model VoteTracking {
   @@index([markedAt])
 }
 
+/// [ACTIVE TELEMETRY MODEL - DB-0001 / MOCK-0001]
+/// Active live voter event stream table queried dynamically by AnalyticsController.getLiveVoteEvents.
 model LiveVoteEvent {
   id              String           @id @default(uuid()) @db.Uuid
   previousStatus  VoteStatus
@@ -985,6 +992,8 @@ model TrainingProgress {
 // 28. CASTE CATEGORY & 29. VOTER CASTE
 // ----------------------------------------------------------------------------
 
+/// [RELATIONAL INTEGRITY ANCHOR - DB-0001]
+/// Preserved for relational integrity: Anchors Voter.casteCategoryId foreign key relations and census demographics.
 model CasteCategory {
   id              String           @id @default(uuid()) @db.Uuid
   code            String           @unique
@@ -998,6 +1007,8 @@ model CasteCategory {
   @@index([code])
 }
 
+/// [RELATIONAL INTEGRITY ANCHOR - DB-0001]
+/// Preserved for relational integrity: Anchors Voter.voterCasteId foreign key relations.
 model VoterCaste {
   id              String           @id @default(uuid()) @db.Uuid
   categoryId      String           @db.Uuid
@@ -1081,6 +1092,8 @@ model PollingReport {
 // 32. PARTY PERFORMANCE & 33. ELECTION PROJECTION
 // ----------------------------------------------------------------------------
 
+/// [RELATIONAL INTEGRITY ANCHOR - DB-0001]
+/// Preserved for relational integrity: Anchors Constituency historical party performance trends and election projections.
 model PartyPerformance {
   id              String           @id @default(uuid()) @db.Uuid
   constituencyId  String           @db.Uuid
@@ -1395,6 +1408,8 @@ model DataImportMapping {
   @@index([importId])
 }
 
+/// [RELATIONAL INTEGRITY ANCHOR - DB-0001]
+/// Preserved for relational integrity: Anchors OrganizationUnit telemetry and fast-rollup caching.
 model AggregateCache {
   id              String           @id @default(uuid()) @db.Uuid
   unitId          String           @unique @db.Uuid
@@ -1452,5 +1467,51 @@ model PollVote {
   @@index([pollId])
   @@index([optionId])
   @@index([userId])
+}
+
+// ----------------------------------------------------------------------------
+// 34. APPROVAL REQUESTS
+// ----------------------------------------------------------------------------
+
+model ApprovalRequest {
+  id                String    @id @default(uuid()) @db.Uuid
+  partyId           String?   @map("party_id") @db.VarChar(255)
+  type              String    @db.VarChar(100)
+  status            String    @default("PENDING") @db.VarChar(50)
+  title             String    @db.VarChar(255)
+  description       String?   @db.Text
+  entityId          String?   @map("entity_id") @db.VarChar(255)
+  entityType        String?   @map("entity_type") @db.VarChar(100)
+  payload           Json?     @default("{}")
+  requestedByName   String?   @map("requested_by_name") @db.VarChar(255)
+  requestedByRole   String?   @map("requested_by_role") @db.VarChar(100)
+  requestedByMobile String?   @map("requested_by_mobile") @db.VarChar(50)
+  actionedByName    String?   @map("actioned_by_name") @db.VarChar(255)
+  actionedAt        DateTime? @map("actioned_at") @db.Timestamptz(6)
+  rejectionReason   String?   @map("rejection_reason") @db.Text
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([partyId, status], name: "idx_approval_party_status")
+  @@index([type], name: "idx_approval_type")
+  @@map("approval_requests")
+}
+
+// ----------------------------------------------------------------------------
+// 35. DEVELOPMENT & WELFARE PROJECTS MONITOR
+// ----------------------------------------------------------------------------
+
+model DevelopmentProject {
+  id             String    @id @default(uuid()) @db.Uuid
+  project        String    @db.VarChar(255)
+  dept           String    @db.VarChar(100)
+  location       String    @db.VarChar(255)
+  mandal         String    @db.VarChar(100)
+  status         String    @default("ONGOING") @db.VarChar(50)
+  source         String    @db.VarChar(255)
+  date           String    @db.VarChar(50)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("development_projects")
 }
 

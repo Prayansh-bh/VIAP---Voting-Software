@@ -4,8 +4,11 @@ import {
   createPollingReport,
   fetchCadreNetwork,
   fetchChildrenAnalytics,
+  fetchConstituencyAnalytics,
   fetchHierarchySummaryByUser,
   fetchLiveTurnoutSummaryByUser,
+  fetchLiveVoteEvents,
+  fetchPollingReports,
   fetchTasksForUnit,
   fetchTrainingProgressForUnit,
   fetchVoters,
@@ -16,6 +19,10 @@ import {
   type LiveTurnoutSummaryPayload,
   type TrainingProgressItem,
   updateTaskStatus,
+  createVoter,
+  updateVoter,
+  updateVoterMigration,
+  updateVoterStatusApi,
 } from '../lib/api';
 import { createRealtimeSocket, RealtimeSummaryInvalidate, RealtimeVoteEvent } from '../lib/realtime';
 import { 
@@ -60,28 +67,36 @@ import {
 import MandalInchargeDashboard from './MandalInchargeDashboard';
 import AIStrategicIntelligenceCenter from './AIStrategicIntelligenceCenter';
 import Pagination from './common/Pagination';
+import ActiveSessionsModal from './common/ActiveSessionsModal';
+import CadrePulseWidget from './common/CadrePulseWidget';
 
 function mapMandalRollup(item: ChildAnalyticsItem) {
   const prefs = item?.snapshot?.politicalPreference ?? {};
-  const tdp = prefs.TDP ?? 0;
-  const ysrcp = prefs.YSRCP ?? 0;
-  const neutral = prefs.NEUTRAL ?? 0;
   const voters = item?.snapshot?.summary?.totalVoters ?? 0;
-  const lead = Math.abs(tdp - ysrcp);
-  const leading = tdp > ysrcp ? ('TDP' as VoterPreference) : ('YSRCP' as VoterPreference);
+  
+  // Dynamically sort all party preferences descending (excluding NEUTRAL)
+  const sortedParties = Object.entries(prefs)
+    .filter(([p]) => p.toUpperCase() !== 'NEUTRAL')
+    .map(([party, count]) => ({ party, count: Number(count) || 0 }))
+    .sort((a, b) => b.count - a.count);
+
+  const topParty = sortedParties[0] || { party: 'Neutral', count: 0 };
+  const secondParty = sortedParties[1] || { party: 'Others', count: 0 };
+  const lead = topParty.count - secondParty.count;
+  const leading = (topParty.count > 0 ? topParty.party : 'Neutral') as VoterPreference;
   const diffPct = voters > 0 ? (lead / voters) * 100 : 0;
   const status = diffPct < 4
     ? ('CLOSE CONTEST' as const)
-    : (tdp > ysrcp ? ('WINNING' as const) : ('TRAILING' as const));
+    : (lead > 0 ? ('WINNING' as const) : ('TRAILING' as const));
 
   return {
     name: item.name,
     voters,
     villages: item?.snapshot?.hierarchyCounts?.VILLAGE ?? 0,
     booths: item?.snapshot?.hierarchyCounts?.BOOTH ?? 0,
-    tdp,
-    ysrcp,
-    neutral,
+    tdp: prefs.TDP ?? 0,
+    ysrcp: prefs.YSRCP ?? 0,
+    neutral: prefs.NEUTRAL ?? 0,
     jsp: prefs.JSP ?? 0,
     bjp: prefs.BJP ?? 0,
     inc: prefs.INC ?? 0,
@@ -196,6 +211,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
     setIsSidebarOpen(false);
   };
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSessionsOpen, setIsSessionsOpen] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -211,6 +227,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
   const [trainingProgressItems, setTrainingProgressItems] = useState<TrainingProgressItem[]>([]);
   const [liveTurnoutSummary, setLiveTurnoutSummary] = useState<LiveTurnoutSummaryPayload | null>(null);
   const [scopedVoters, setScopedVoters] = useState<Voter[]>([]);
+  const [liveEvents, setLiveEvents] = useState<any[]>([]);
   const [isRefreshingLiveTurnout, setIsRefreshingLiveTurnout] = useState(false);
   const [mandalRollups, setMandalRollups] = useState<ReturnType<typeof mapMandalRollup>[]>([]);
   const [villageRollups, setVillageRollups] = useState<Array<{
@@ -229,7 +246,32 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
   const refreshLiveTurnoutSummary = async () => {
     setIsRefreshingLiveTurnout(true);
     try {
-      const payload = await fetchLiveTurnoutSummaryByUser(session.userId);
+      const [payload, standaloneReports] = await Promise.all([
+        fetchLiveTurnoutSummaryByUser(session.userId),
+        fetchPollingReports(session.unitId).catch(() => []),
+      ]);
+      if (payload && Array.isArray(standaloneReports) && standaloneReports.length > 0) {
+        const existingIds = new Set((payload.pollingReports || []).map((r: any) => r.id));
+        const formatted = standaloneReports
+          .filter((sr: any) => !existingIds.has(sr.id))
+          .map((sr: any) => ({
+            id: sr.id,
+            mandal: sr.mandalName || 'Mandal',
+            booth: sr.boothLabel || 'Booth',
+            submittedBy: sr.reporterName || sr.createdBy?.name || 'Agent',
+            time: sr.createdAt ? new Date(sr.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Live',
+            totalVotes: sr.totalVotes || 0,
+            breakdown: {
+              TDP: sr.tdpVotes || 0,
+              YSRCP: sr.ysrcpVotes || 0,
+              JSP: sr.jspVotes || 0,
+              BJP: sr.bjpVotes || 0,
+              INC: sr.incVotes || 0,
+              Others: sr.othersVotes || 0,
+            },
+          }));
+        payload.pollingReports = [...(payload.pollingReports || []), ...formatted];
+      }
       setLiveTurnoutSummary(payload);
     } finally {
       setIsRefreshingLiveTurnout(false);
@@ -245,13 +287,18 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
       fetchCadreNetwork(session.unitId).catch(() => null),
       fetchTrainingProgressForUnit(session.unitId).catch(() => null),
       fetchVotersForUnit(session.unitId).catch(() => null),
+      fetchLiveVoteEvents(session.unitId).catch(() => []),
+      fetchConstituencyAnalytics(session.unitId).catch(() => null),
     ])
-      .then(([payload, tasks, cadre, training, voters]) => {
+      .then(([payload, tasks, cadre, training, voters, events]) => {
         if (!active) {
           return;
         }
 
         setBackendSummary(payload);
+        if (Array.isArray(events)) {
+          setLiveEvents(events);
+        }
 
         if (tasks) {
           setTasksList(tasks.map((task) => ({
@@ -980,52 +1027,87 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
   const paginatedMigratedVoters = migratedVotersList;
 
-  const handleUpdateMigratedVoter = (e: React.FormEvent) => {
+  const handleUpdateMigratedVoter = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingMigratedVoter) return;
-    setMigratedVotersList(prev => prev.map(v => v.id === editingMigratedVoter.id ? editingMigratedVoter : v));
-    setEditingMigratedVoter(null);
+    try {
+      await updateVoterMigration(editingMigratedVoter.id, {
+        currentLocation: editingMigratedVoter.currentLocation,
+        contactNumber: editingMigratedVoter.contactNumber,
+        notes: editingMigratedVoter.notes,
+        travelStatus: editingMigratedVoter.travelStatus,
+      }).catch(async () => {
+        await updateVoter(editingMigratedVoter.id, {
+          voterLocationStatus: 'Migrated',
+          currentLocation: editingMigratedVoter.currentLocation,
+          mobileNumber: editingMigratedVoter.contactNumber,
+          notes: editingMigratedVoter.notes,
+        });
+      });
+      setMigratedVotersList(prev => prev.map(v => v.id === editingMigratedVoter.id ? editingMigratedVoter : v));
+    } catch {
+      setMigratedVotersList(prev => prev.map(v => v.id === editingMigratedVoter.id ? editingMigratedVoter : v));
+    } finally {
+      setEditingMigratedVoter(null);
+    }
   };
 
-  const handleAddMigratedVoter = (e: React.FormEvent) => {
+  const handleAddMigratedVoter = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMigratedVoter.name || !newMigratedVoter.epic) return;
 
-    const newRec: MigratedVoter = {
-      id: 'M-' + Date.now(),
-      name: newMigratedVoter.name,
-      epic: newMigratedVoter.epic.toUpperCase(),
-      mandal: newMigratedVoter.mandal,
-      village: newMigratedVoter.village,
-      booth: newMigratedVoter.booth,
-      currentLocation: newMigratedVoter.currentLocation || 'Unknown',
-      contactNumber: newMigratedVoter.contactNumber || 'N/A',
-      travelStatus: newMigratedVoter.travelStatus,
-      assistanceRequired: newMigratedVoter.assistanceRequired,
-      assignedVolunteer: newMigratedVoter.assignedVolunteer || 'Unassigned',
-      notes: newMigratedVoter.notes || ''
-    };
+    try {
+      const created = await createVoter({
+        name: newMigratedVoter.name.trim(),
+        epicNumber: newMigratedVoter.epic.trim().toUpperCase(),
+        voterLocationStatus: 'Migrated',
+        currentLocation: newMigratedVoter.currentLocation.trim() || 'Unknown',
+        mobileNumber: newMigratedVoter.contactNumber.replace(/\D/g, '').slice(-10),
+        notes: newMigratedVoter.notes,
+      } as any).catch(() => null);
 
-    setMigratedVotersList(prev => [...prev, newRec]);
-    setNewMigratedVoter({
-      name: '', epic: '', mandal: 'Singarayakonda', village: 'Kalikivaya', booth: 'Booth 224',
-      currentLocation: '', contactNumber: '', travelStatus: 'PENDING_CONFIRMATION',
-      assistanceRequired: 'NONE', assignedVolunteer: '', notes: ''
-    });
+      const newRec: MigratedVoter = {
+        id: created?.id || newMigratedVoter.epic.toUpperCase(),
+        name: newMigratedVoter.name,
+        epic: newMigratedVoter.epic.toUpperCase(),
+        mandal: newMigratedVoter.mandal,
+        village: newMigratedVoter.village,
+        booth: newMigratedVoter.booth,
+        currentLocation: newMigratedVoter.currentLocation || 'Unknown',
+        contactNumber: newMigratedVoter.contactNumber || 'N/A',
+        travelStatus: newMigratedVoter.travelStatus,
+        assistanceRequired: newMigratedVoter.assistanceRequired,
+        assignedVolunteer: newMigratedVoter.assignedVolunteer || 'Unassigned',
+        notes: newMigratedVoter.notes || ''
+      };
+
+      setMigratedVotersList(prev => [newRec, ...prev]);
+      setMigratedTotal(prev => prev + 1);
+      setNewMigratedVoter({
+        name: '', epic: '', mandal: 'Singarayakonda', village: 'Kalikivaya', booth: 'Booth 224',
+        currentLocation: '', contactNumber: '', travelStatus: 'PENDING_CONFIRMATION',
+        assistanceRequired: 'NONE', assignedVolunteer: '', notes: ''
+      });
+    } catch {
+      // Graceful fallback
+    }
   };
 
-  // Handle drilldown to Mandal
+  // Handle drilldown to Mandal (Dynamically bind assigned lead from real cadre network)
   if (drilledMandal) {
+    const assignedLead = cadreItems.find((item) => item.role === 'MANDAL_INCHARGE' && item.unitName?.toLowerCase() === drilledMandal.toLowerCase())
+      ?? cadreItems.find((item) => item.role === 'MANDAL_INCHARGE');
+
     return (
       <MandalInchargeDashboard 
         session={{
-          userName: "Chundi Ramesh Naidu",
-          mobileNumber: "9848022334",
+          userName: assignedLead?.name || `${drilledMandal} Incharge`,
+          mobileNumber: (assignedLead as any)?.phone || (assignedLead as any)?.mobileNumber || "9848010001",
           role: "MANDAL_INCHARGE",
           unitId: session.unitId,
-          assignedConstituency: "Kondapi Assembly Constituency",
+          assignedConstituency: session.assignedConstituency || "Kondapi Assembly Constituency",
           assignedMandal: drilledMandal,
-          userId: "KDP-CON-01",
+          userId: assignedLead?.id || `MANDAL-${drilledMandal.toUpperCase().slice(0, 3)}`,
           accountStatus: "Active"
         }}
         onLogout={() => setDrilledMandal(null)} // Click return triggers close drilldown!
@@ -1033,21 +1115,26 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
     );
   }
 
-
-
-  const handleGenerateAnalysis = () => {
-    setIsGeneratingAnalysis(true);
-    setTimeout(() => {
-      setIsGeneratingAnalysis(false);
-      setAnalysisResult(true);
-    }, 2000);
-  };
-
-  const handleUpdateVoterStatus = (e: React.FormEvent) => {
+  const handleUpdateVoterStatus = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auditingVoter) return;
-    setFlaggedVoters(prev => prev.map(v => v.sNo === auditingVoter.sNo ? auditingVoter : v));
-    setAuditingVoter(null);
+    try {
+      const dbStatus = auditingVoter.status === 'RESOLVED' ? 'ACTIVE' :
+                       auditingVoter.status === 'VERIFIED ISSUE' ? 'FAKE' :
+                       'UNDER_REVIEW';
+
+      await updateVoterStatusApi(auditingVoter.epic, dbStatus, auditingVoter.reason).catch(async () => {
+        await updateVoter(auditingVoter.epic, {
+          voterStatus: dbStatus as any,
+          notes: auditingVoter.reason,
+        });
+      });
+      setFlaggedVoters(prev => prev.map(v => v.sNo === auditingVoter.sNo ? auditingVoter : v));
+    } catch {
+      setFlaggedVoters(prev => prev.map(v => v.sNo === auditingVoter.sNo ? auditingVoter : v));
+    } finally {
+      setAuditingVoter(null);
+    }
   };
 
   return (
@@ -1131,6 +1218,14 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
         {/* Bottom Lock / Exit Controls */}
         <div className="p-4 border-t border-slate-900 space-y-2">
+          <button
+            type="button"
+            onClick={() => setIsSessionsOpen(true)}
+            className="w-full flex items-center justify-center gap-2 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-all uppercase tracking-wider cursor-pointer border border-slate-800"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            Active Sessions
+          </button>
           <button
             onClick={onLogout}
             className="w-full flex items-center justify-center gap-2 py-2 bg-slate-900 hover:bg-red-950 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-all uppercase tracking-wider cursor-pointer"
@@ -1406,6 +1501,9 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   </button>
                 </div>
               </div>
+
+              {/* Cadre Opinion Polls Widget */}
+              <CadrePulseWidget title="Constituency Cadre Opinion Polls" />
 
             </div>
           )}
@@ -2143,7 +2241,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           <button
                             onClick={() => {
                               setTasksList(prev => prev.map(t => t.id === selectedTask.id ? { ...t, status: 'COMPLETED' } : t));
-                              void updateTaskStatus(selectedTask.id, 'Completed').catch(() => {
+                              void updateTaskStatus(selectedTask.id, 'COMPLETED').catch(() => {
                               });
                               setSelectedTask(null);
                             }}
@@ -4001,6 +4099,10 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
         </div>
       </main>
 
+      <ActiveSessionsModal
+        isOpen={isSessionsOpen}
+        onClose={() => setIsSessionsOpen(false)}
+      />
     </div>
   );
 }

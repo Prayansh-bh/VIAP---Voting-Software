@@ -11,16 +11,17 @@ import {
   LoaderCircle,
   AlertTriangle,
   Lock,
-  Zap,
   Building2,
   Users2,
   Vote,
   Radio,
   CheckCircle2,
+  UserPlus,
 } from 'lucide-react';
 import { useCms } from '../context/CmsContext';
 import { requestOtp, verifyOtp } from '../lib/api';
 import { UserSession } from '../types';
+import CadreRegistrationModal from '../components/common/CadreRegistrationModal';
 
 interface LoginPageProps {
   onLoginSuccess: (session: UserSession, token: string) => void;
@@ -41,6 +42,7 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
   const [requestId, setRequestId] = useState<string | null>(null);
   const [verifiedMobile, setVerifiedMobile] = useState('');
   const [otpCode, setOtpCode] = useState('');
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
 
   const isVerifying = Boolean(requestId);
 
@@ -72,7 +74,7 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
       const response = await requestOtp(targetNum, undefined, channel);
 
       setRequestId(response.requestId);
-      setCooldown(response.cooldownSeconds || 30);
+      setCooldown(0);
       setVerifiedMobile(targetNum);
       setOtpCode('');
     } catch (err: any) {
@@ -420,6 +422,18 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
                 </form>
               )}
 
+              {/* Cadre Registration Link */}
+              <div className="pt-2 text-center">
+                <button
+                  type="button"
+                  onClick={() => setShowRegisterModal(true)}
+                  className="text-xs font-semibold text-amber-400 hover:text-amber-300 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>New volunteer or cadre? Apply here</span>
+                </button>
+              </div>
+
               {/* Security Footer Note */}
               <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
                 <span className="flex items-center gap-1">
@@ -432,6 +446,14 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
           </div>
         </div>
       </main>
+
+      {/* Cadre Self-Registration Modal */}
+      <CadreRegistrationModal
+        isOpen={showRegisterModal}
+        onClose={() => setShowRegisterModal(false)}
+        activePartyCode={config.activePartyCode}
+        primaryColor={primaryColor}
+      />
 
       {/* Page Footer */}
       <footer className="w-full px-6 py-4 border-t border-slate-800/80 bg-slate-950/80 text-center text-xs text-slate-400">

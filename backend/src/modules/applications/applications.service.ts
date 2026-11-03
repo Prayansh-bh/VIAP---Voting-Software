@@ -693,15 +693,26 @@ export class ApplicationsService {
     }
 
     const appsList: any[] = configs.map((c) => {
-      const activeParty = activeParties.find((p) => p.code === c.activePartyCode);
-      const prioritizedParties = activeParty
-        ? [
-            { name: activeParty.name, code: activeParty.code, primaryColor: activeParty.primaryColor },
-            ...activeParties
-              .filter((p) => p.code !== activeParty.code)
-              .map((p) => ({ name: p.name, code: p.code, primaryColor: p.primaryColor })),
-          ]
-        : activeParties.map((p) => ({ name: p.name, code: p.code, primaryColor: p.primaryColor }));
+      const tenantParties = activeParties.filter(
+        (p) => !p.organisationId || (c.organisationId && p.organisationId === c.organisationId)
+      );
+      const activeParty = tenantParties.find((p) => p.code === c.activePartyCode) ||
+        tenantParties.find((p) => c.organisationId && p.organisationId === c.organisationId);
+
+      const primaryPartyItem = activeParty
+        ? { name: activeParty.name, code: activeParty.code, primaryColor: activeParty.primaryColor || c.primaryColor }
+        : {
+            name: c.organisationName || (c as any).appName || c.activePartyCode || 'Political Party',
+            code: c.activePartyCode || 'APP',
+            primaryColor: c.primaryColor || '#a31de2',
+          };
+
+      const prioritizedParties = [
+        primaryPartyItem,
+        ...tenantParties
+          .filter((p) => p.code !== primaryPartyItem.code)
+          .map((p) => ({ name: p.name, code: p.code, primaryColor: p.primaryColor })),
+      ];
 
       const effectiveScope = c.appScope || 'SINGLE_MLA';
       const constituenciesCount = c.organisationId ? (constCountByOrg.get(c.organisationId) || 0) : 0;
@@ -730,7 +741,7 @@ export class ApplicationsService {
         updatedAt: c.updatedAt,
         constituenciesCount,
         votersCount,
-        partiesCount: activeParties.length,
+        partiesCount: prioritizedParties.length,
         parties: prioritizedParties,
       };
     });
@@ -824,7 +835,7 @@ export class ApplicationsService {
 
           permanentOrgPurge = true;
 
-          // 3. Final applicable reference removed: Proceed with safe, dependency-ordered tenant purge
+          // 3. Final applicable reference removed: Proceed with high-performance, indexed tenant purge
 
           // 3a. Clean up unshared political parties owned by this organization
           const tPartyStart = performance.now();
@@ -845,236 +856,167 @@ export class ApplicationsService {
           });
 
           const partyIds = partiesToDelete.map((p) => p.id);
-
-          if (partyIds.length > 0) {
-            await tx.voter.updateMany({
-              where: { politicalPartyId: { in: partyIds } },
-              data: { politicalPartyId: null },
-            });
-
-            // PostgreSQL foreign keys cascade PartyBranding and PartyPerformance automatically on party deletion
-            await tx.politicalParty.deleteMany({
-              where: { id: { in: partyIds } },
-            });
-          }
           partyCleanupMs = Math.round((performance.now() - tPartyStart) * 100) / 100;
 
-          // 3b. Hierarchy tree lookup in a single batch query (replaces 9 sequential WAN round trips)
+          // 3b. Discover State IDs and Unit codes directly without loading 9 levels into Node memory
           const tHierStart = performance.now();
           const states = await tx.state.findMany({
             where: { organisationId: orgId },
-            select: {
-              id: true,
-              code: true,
-              zones: {
-                select: {
-                  id: true,
-                  code: true,
-                  parliaments: {
-                    select: {
-                      id: true,
-                      code: true,
-                      constituencies: {
-                        select: {
-                          id: true,
-                          code: true,
-                          mandals: {
-                            select: {
-                              id: true,
-                              code: true,
-                              villages: {
-                                select: {
-                                  id: true,
-                                  code: true,
-                                  booths: {
-                                    select: {
-                                      id: true,
-                                      code: true,
-                                      voterGroups: {
-                                        select: {
-                                          id: true,
-                                          code: true,
-                                        },
-                                      },
-                                    },
-                                  },
-                                },
-                              },
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
+            select: { id: true, code: true },
           });
+          const stateIds = states.map((s) => s.id);
+          const stateCodes = states.map((s) => s.code).filter((c): c is string => Boolean(c));
 
-          const stateIds: string[] = [];
-          const zoneIds: string[] = [];
-          const parliamentIds: string[] = [];
-          const constituencyIds: string[] = [];
-          const mandalIds: string[] = [];
-          const villageIds: string[] = [];
-          const boothIds: string[] = [];
-          const voterGroupIds: string[] = [];
-          const allUnitCodes: string[] = [];
-
-          for (const s of states) {
-            stateIds.push(s.id);
-            if (s.code) allUnitCodes.push(s.code);
-            for (const z of s.zones) {
-              zoneIds.push(z.id);
-              if (z.code) allUnitCodes.push(z.code);
-              for (const p of z.parliaments) {
-                parliamentIds.push(p.id);
-                if (p.code) allUnitCodes.push(p.code);
-                for (const c of p.constituencies) {
-                  constituencyIds.push(c.id);
-                  if (c.code) allUnitCodes.push(c.code);
-                  for (const m of c.mandals) {
-                    mandalIds.push(m.id);
-                    if (m.code) allUnitCodes.push(m.code);
-                    for (const v of m.villages) {
-                      villageIds.push(v.id);
-                      if (v.code) allUnitCodes.push(v.code);
-                      for (const b of v.booths) {
-                        boothIds.push(b.id);
-                        if (b.code) allUnitCodes.push(b.code);
-                        for (const vg of b.voterGroups) {
-                          voterGroupIds.push(vg.id);
-                          if (vg.code) allUnitCodes.push(vg.code);
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          const orgUnits = allUnitCodes.length > 0
+          const orgUnits = stateCodes.length > 0
             ? await tx.organizationUnit.findMany({
-                where: { code: { in: allUnitCodes } },
+                where: { code: { in: stateCodes } },
                 select: { id: true },
               })
             : [];
           const orgUnitIds = orgUnits.map((u) => u.id);
           hierarchyDiscoveryMs = Math.round((performance.now() - tHierStart) * 100) / 100;
 
-          // 3c. Delete Voters matching hierarchy
+          // 3c. Delete Voters using high-performance chunked indexed deletion (avoids lock escalation & WAL buffer saturation)
           const tChildStart = performance.now();
-          if (stateIds.length > 0 || constituencyIds.length > 0 || boothIds.length > 0) {
+          if (stateIds.length > 0) {
+            let batchDeleted = 0;
+            do {
+              batchDeleted = await tx.$executeRaw`
+                WITH to_delete AS (
+                  SELECT id FROM "Voter"
+                  WHERE "stateId" IN (SELECT id FROM "State" WHERE "organisationId" = ${orgId}::uuid)
+                     OR "constituencyId" IN (
+                       SELECT c.id FROM "Constituency" c
+                       JOIN "Parliament" p ON c."parliamentId" = p.id
+                       JOIN "Zone" z ON p."zoneId" = z.id
+                       JOIN "State" s ON z."stateId" = s.id
+                       WHERE s."organisationId" = ${orgId}::uuid
+                     )
+                  LIMIT 25000
+                )
+                DELETE FROM "Voter" WHERE id IN (SELECT id FROM to_delete);
+              `;
+            } while (batchDeleted > 0);
+          }
+
+          if (orgUnitIds.length > 0) {
             await tx.voter.deleteMany({
-              where: {
-                OR: [
-                  ...(stateIds.length > 0 ? [{ stateId: { in: stateIds } }] : []),
-                  ...(zoneIds.length > 0 ? [{ zoneId: { in: zoneIds } }] : []),
-                  ...(parliamentIds.length > 0 ? [{ parliamentId: { in: parliamentIds } }] : []),
-                  ...(constituencyIds.length > 0 ? [{ constituencyId: { in: constituencyIds } }] : []),
-                  ...(mandalIds.length > 0 ? [{ mandalId: { in: mandalIds } }] : []),
-                  ...(villageIds.length > 0 ? [{ villageId: { in: villageIds } }] : []),
-                  ...(boothIds.length > 0 ? [{ boothId: { in: boothIds } }] : []),
-                  ...(voterGroupIds.length > 0 ? [{ voterGroupId: { in: voterGroupIds } }] : []),
-                  ...(orgUnitIds.length > 0 ? [{ unitId: { in: orgUnitIds } }] : []),
-                ],
-              },
+              where: { unitId: { in: orgUnitIds } },
             });
           }
 
-          // 3d. Bounded parallel deletion of operational child records referencing hierarchy nodes
-          const childDeletes: Promise<any>[] = [];
-
-          if (boothIds.length > 0 || orgUnitIds.length > 0) {
-            childDeletes.push(
-              tx.cadreAssignment.deleteMany({
-                where: {
-                  OR: [
-                    ...(boothIds.length > 0 ? [{ boothId: { in: boothIds } }] : []),
-                    ...(orgUnitIds.length > 0 ? [{ unitId: { in: orgUnitIds } }] : []),
-                  ],
-                },
-              }),
-              tx.pollingReport.deleteMany({
-                where: {
-                  OR: [
-                    ...(boothIds.length > 0 ? [{ boothId: { in: boothIds } }] : []),
-                    ...(orgUnitIds.length > 0 ? [{ unitId: { in: orgUnitIds } }] : []),
-                  ],
-                },
-              }),
-            );
+          // Unshared political parties deletion (voters already purged)
+          if (partyIds.length > 0) {
+            await tx.voter.deleteMany({
+              where: { politicalPartyId: { in: partyIds } },
+            });
+            await tx.politicalParty.deleteMany({
+              where: { id: { in: partyIds } },
+            });
           }
 
-          if (constituencyIds.length > 0 || boothIds.length > 0 || orgUnitIds.length > 0) {
-            childDeletes.push(
-              tx.task.deleteMany({
-                where: {
-                  OR: [
-                    ...(constituencyIds.length > 0 ? [{ constituencyId: { in: constituencyIds } }] : []),
-                    ...(mandalIds.length > 0 ? [{ mandalId: { in: mandalIds } }] : []),
-                    ...(villageIds.length > 0 ? [{ villageId: { in: villageIds } }] : []),
-                    ...(boothIds.length > 0 ? [{ boothId: { in: boothIds } }] : []),
-                    ...(orgUnitIds.length > 0 ? [{ unitId: { in: orgUnitIds } }] : []),
-                  ],
-                },
-              }),
-              tx.groundReport.deleteMany({
-                where: {
-                  OR: [
-                    ...(constituencyIds.length > 0 ? [{ constituencyId: { in: constituencyIds } }] : []),
-                    ...(mandalIds.length > 0 ? [{ mandalId: { in: mandalIds } }] : []),
-                    ...(villageIds.length > 0 ? [{ villageId: { in: villageIds } }] : []),
-                    ...(boothIds.length > 0 ? [{ boothId: { in: boothIds } }] : []),
-                    ...(orgUnitIds.length > 0 ? [{ unitId: { in: orgUnitIds } }] : []),
-                  ],
-                },
-              }),
-              tx.liveVoteEvent.deleteMany({
-                where: {
-                  OR: [
-                    ...(orgUnitIds.length > 0 ? [{ unitId: { in: orgUnitIds } }] : []),
-                  ],
-                },
-              }),
-              tx.aIInsight.deleteMany({
-                where: {
-                  OR: [
-                    ...(constituencyIds.length > 0 ? [{ constituencyId: { in: constituencyIds } }] : []),
-                  ],
-                },
-              }),
-              tx.newsArticle.deleteMany({
-                where: {
-                  OR: [
-                    ...(constituencyIds.length > 0 ? [{ constituencyId: { in: constituencyIds } }] : []),
-                  ],
-                },
-              }),
-              tx.socialTrend.deleteMany({
-                where: {
-                  OR: [
-                    ...(constituencyIds.length > 0 ? [{ constituencyId: { in: constituencyIds } }] : []),
-                  ],
-                },
-              }),
-              tx.dataImport.deleteMany({
-                where: {
-                  OR: [
-                    ...(constituencyIds.length > 0 ? [{ targetConstituencyId: { in: constituencyIds } }] : []),
-                  ],
-                },
-              }),
-            );
-          }
+          // 3d. Delete operational child records referencing hierarchy nodes
+          await Promise.all([
+            tx.$executeRaw`
+              DELETE FROM "CadreAssignment"
+              WHERE "boothId" IN (
+                SELECT b.id FROM "Booth" b
+                JOIN "Village" v ON b."villageId" = v.id
+                JOIN "Mandal" m ON v."mandalId" = m.id
+                JOIN "Constituency" c ON m."constituencyId" = c.id
+                JOIN "Parliament" p ON c."parliamentId" = p.id
+                JOIN "Zone" z ON p."zoneId" = z.id
+                JOIN "State" s ON z."stateId" = s.id
+                WHERE s."organisationId" = ${orgId}::uuid
+              );
+            `,
+            tx.$executeRaw`
+              DELETE FROM "PollingReport"
+              WHERE "boothId" IN (
+                SELECT b.id FROM "Booth" b
+                JOIN "Village" v ON b."villageId" = v.id
+                JOIN "Mandal" m ON v."mandalId" = m.id
+                JOIN "Constituency" c ON m."constituencyId" = c.id
+                JOIN "Parliament" p ON c."parliamentId" = p.id
+                JOIN "Zone" z ON p."zoneId" = z.id
+                JOIN "State" s ON z."stateId" = s.id
+                WHERE s."organisationId" = ${orgId}::uuid
+              );
+            `,
+            tx.$executeRaw`
+              DELETE FROM "Task"
+              WHERE "constituencyId" IN (
+                SELECT c.id FROM "Constituency" c
+                JOIN "Parliament" p ON c."parliamentId" = p.id
+                JOIN "Zone" z ON p."zoneId" = z.id
+                JOIN "State" s ON z."stateId" = s.id
+                WHERE s."organisationId" = ${orgId}::uuid
+              );
+            `,
+            tx.$executeRaw`
+              DELETE FROM "GroundReport"
+              WHERE "constituencyId" IN (
+                SELECT c.id FROM "Constituency" c
+                JOIN "Parliament" p ON c."parliamentId" = p.id
+                JOIN "Zone" z ON p."zoneId" = z.id
+                JOIN "State" s ON z."stateId" = s.id
+                WHERE s."organisationId" = ${orgId}::uuid
+              );
+            `,
+            tx.$executeRaw`
+              DELETE FROM "AIInsight"
+              WHERE "constituencyId" IN (
+                SELECT c.id FROM "Constituency" c
+                JOIN "Parliament" p ON c."parliamentId" = p.id
+                JOIN "Zone" z ON p."zoneId" = z.id
+                JOIN "State" s ON z."stateId" = s.id
+                WHERE s."organisationId" = ${orgId}::uuid
+              );
+            `,
+            tx.$executeRaw`
+              DELETE FROM "NewsArticle"
+              WHERE "constituencyId" IN (
+                SELECT c.id FROM "Constituency" c
+                JOIN "Parliament" p ON c."parliamentId" = p.id
+                JOIN "Zone" z ON p."zoneId" = z.id
+                JOIN "State" s ON z."stateId" = s.id
+                WHERE s."organisationId" = ${orgId}::uuid
+              );
+            `,
+            tx.$executeRaw`
+              DELETE FROM "SocialTrend"
+              WHERE "constituencyId" IN (
+                SELECT c.id FROM "Constituency" c
+                JOIN "Parliament" p ON c."parliamentId" = p.id
+                JOIN "Zone" z ON p."zoneId" = z.id
+                JOIN "State" s ON z."stateId" = s.id
+                WHERE s."organisationId" = ${orgId}::uuid
+              );
+            `,
+            tx.$executeRaw`
+              DELETE FROM "DataImport"
+              WHERE "targetConstituencyId" IN (
+                SELECT c.id FROM "Constituency" c
+                JOIN "Parliament" p ON c."parliamentId" = p.id
+                JOIN "Zone" z ON p."zoneId" = z.id
+                JOIN "State" s ON z."stateId" = s.id
+                WHERE s."organisationId" = ${orgId}::uuid
+              );
+            `,
+          ]);
 
-          if (childDeletes.length > 0) {
-            await Promise.all(childDeletes);
+          if (orgUnitIds.length > 0) {
+            await Promise.all([
+              tx.cadreAssignment.deleteMany({ where: { unitId: { in: orgUnitIds } } }),
+              tx.pollingReport.deleteMany({ where: { unitId: { in: orgUnitIds } } }),
+              tx.task.deleteMany({ where: { unitId: { in: orgUnitIds } } }),
+              tx.groundReport.deleteMany({ where: { unitId: { in: orgUnitIds } } }),
+              tx.liveVoteEvent.deleteMany({ where: { unitId: { in: orgUnitIds } } }),
+            ]);
           }
           childEntitiesDeleteMs = Math.round((performance.now() - tChildStart) * 100) / 100;
 
-          // 3e. Hierarchy node deletion
+          // 3e. Hierarchy node deletion: Deleting State cascades Zone -> Parliament -> Constituency -> Mandal -> Village -> Booth -> VoterGroup & UserHierarchyAssignment
           const tNodesStart = performance.now();
           if (orgUnitIds.length > 0) {
             await tx.organizationUnit.updateMany({ where: { id: { in: orgUnitIds } }, data: { parentId: null } });
@@ -1082,9 +1024,7 @@ export class ApplicationsService {
           }
 
           if (stateIds.length > 0) {
-            // In PostgreSQL, deleting State natively cascades Zone -> Parliament -> Constituency -> Mandal -> Village -> Booth -> VoterGroup
-            // as well as all UserHierarchyAssignment records in a single database-side engine cascade.
-            await tx.state.deleteMany({ where: { id: { in: stateIds } } });
+            await tx.state.deleteMany({ where: { organisationId: orgId } });
           }
           hierarchyNodesDeleteMs = Math.round((performance.now() - tNodesStart) * 100) / 100;
 
@@ -1103,35 +1043,29 @@ export class ApplicationsService {
             data: { organisationId: null, unitId: null },
           });
 
-          const tenantUsers = await tx.user.findMany({
+          const tenantUserCount = await tx.user.count({
             where: {
               organisationId: orgId,
               role: { not: RoleType.SUPER_ADMIN },
             },
-            select: { id: true, mobileNumber: true },
           });
+          purgedUserCount = tenantUserCount;
 
-          const tenantUserIds = tenantUsers.map((u) => u.id);
-          const tenantMobiles = tenantUsers.map((u) => u.mobileNumber).filter((m): m is string => Boolean(m));
-          purgedUserCount = tenantUserIds.length;
-
-          if (tenantUserIds.length > 0) {
+          if (tenantUserCount > 0) {
             // Delete OTP records so mobile numbers are immediately unlocked for registration
-            await tx.oTPVerification.deleteMany({
-              where: {
-                OR: [
-                  { userId: { in: tenantUserIds } },
-                  ...(tenantMobiles.length > 0 ? [{ mobileNumber: { in: tenantMobiles } }] : []),
-                ],
-              },
-            });
+            await tx.$executeRaw`
+              DELETE FROM "OTPVerification"
+              WHERE "userId" IN (SELECT id FROM "User" WHERE "organisationId" = ${orgId}::uuid)
+                 OR "mobileNumber" IN (SELECT "mobileNumber" FROM "User" WHERE "organisationId" = ${orgId}::uuid AND "mobileNumber" IS NOT NULL);
+            `;
 
             // Permanently purge tenant user records:
             // PostgreSQL foreign keys natively cascade: LoginSession, UserDevice, Notification, Cadre,
             // TrainingProgress, PollVote, TaskAssignment, UserHierarchyAssignment, and AuditLog!
-            await tx.user.deleteMany({
-              where: { id: { in: tenantUserIds } },
-            });
+            await tx.$executeRaw`
+              DELETE FROM "User"
+              WHERE "organisationId" = ${orgId}::uuid AND role != 'SUPER_ADMIN'::"RoleType";
+            `;
           }
           tenantUsersCleanupMs = Math.round((performance.now() - tUsersStart) * 100) / 100;
 
@@ -1147,7 +1081,7 @@ export class ApplicationsService {
           orgDeleteMs = Math.round((performance.now() - tOrgStart) * 100) / 100;
         }
       },
-      { timeout: 30000, maxWait: 10000 },
+      { timeout: 120000, maxWait: 20000 },
     );
 
     const transactionTotalMs = Math.round((performance.now() - t0) * 100) / 100;
@@ -1370,15 +1304,24 @@ export class ApplicationsService {
           }
         }
 
-        // 5. Sync politicalParties if provided
-        if (Array.isArray(payload.politicalParties) && payload.politicalParties.length > 0 && config.organisationId) {
+        // 5. Sync politicalParties if provided (Active Party Sync with Safe Deactivation)
+        if (Array.isArray(payload.politicalParties) && payload.politicalParties.length > 0) {
+          const orgIdToUse = config.organisationId || party?.organisationId || undefined;
+          const incomingCodes = new Set<string>();
+
           for (let i = 0; i < payload.politicalParties.length; i++) {
             const p = payload.politicalParties[i];
             const pCode = p.code?.trim().toUpperCase();
             if (!pCode) continue;
+            incomingCodes.add(pCode);
 
-            const existingP = await tx.politicalParty.findUnique({
-              where: { code: pCode },
+            const existingP = await tx.politicalParty.findFirst({
+              where: {
+                OR: [
+                  { code: pCode },
+                  ...(orgIdToUse ? [{ organisationId: orgIdToUse, shortName: p.shortName || pCode }] : []),
+                ],
+              },
             });
 
             if (existingP) {
@@ -1392,15 +1335,15 @@ export class ApplicationsService {
                   ...(p.accentColor !== undefined ? { accentColor: p.accentColor } : {}),
                   ...(p.symbolName !== undefined ? { symbolName: p.symbolName } : {}),
                   ...(p.logoUrl !== undefined ? { logoUrl: p.logoUrl } : {}),
-                  ...(p.isActive !== undefined ? { isActive: p.isActive } : {}),
-                  ...(p.sortOrder !== undefined ? { sortOrder: p.sortOrder } : {}),
-                  ...(!existingP.organisationId ? { organisationId: config.organisationId } : {}),
+                  isActive: true,
+                  sortOrder: p.sortOrder !== undefined && p.sortOrder !== null ? p.sortOrder : i + 1,
+                  ...(orgIdToUse && !existingP.organisationId ? { organisationId: orgIdToUse } : {}),
                 },
               });
             } else {
               await tx.politicalParty.create({
                 data: {
-                  organisationId: config.organisationId,
+                  organisationId: orgIdToUse,
                   name: p.name,
                   code: pCode,
                   shortName: p.shortName || pCode,
@@ -1409,11 +1352,24 @@ export class ApplicationsService {
                   accentColor: p.accentColor || null,
                   symbolName: p.symbolName || null,
                   logoUrl: p.logoUrl || null,
-                  isActive: p.isActive !== false,
+                  isActive: true,
                   sortOrder: p.sortOrder ?? i + 1,
                 },
               });
             }
+          }
+
+          // Mark parties for this organisation not included in the payload as inactive
+          if (orgIdToUse && incomingCodes.size > 0) {
+            await tx.politicalParty.updateMany({
+              where: {
+                organisationId: orgIdToUse,
+                code: { notIn: Array.from(incomingCodes) as string[] },
+              },
+              data: {
+                isActive: false,
+              },
+            });
           }
         }
 
@@ -1424,6 +1380,7 @@ export class ApplicationsService {
 
         if (incomingIncharges.length > 0 && config.organisationId) {
           const TIER_TO_ROLE: Record<string, RoleType> = {
+            PARTY_ADMIN: RoleType.HIGH_COMMAND,
             STATE: RoleType.STATE_ADMIN,
             ZONE: RoleType.ZONE_INCHARGE,
             PARLIAMENT: RoleType.PARLIAMENT_INCHARGE,
@@ -1443,7 +1400,12 @@ export class ApplicationsService {
             if (cleanMobile.length < 10) continue;
 
             const tierKey = (inc.tierLevel || '').toUpperCase();
-            const role = inc.role ? (inc.role as RoleType) : (TIER_TO_ROLE[tierKey] || RoleType.CONSTITUENCY_INCHARGE);
+            let role: RoleType = (inc.role && (inc.role as string) !== 'PARTY_ADMIN' && Object.values(RoleType).includes(inc.role as RoleType))
+              ? (inc.role as RoleType)
+              : (TIER_TO_ROLE[tierKey] || RoleType.CONSTITUENCY_INCHARGE);
+            if ((role as any) === 'PARTY_ADMIN' || tierKey === 'PARTY_ADMIN') {
+              role = RoleType.HIGH_COMMAND;
+            }
             const incName = (inc.name || '').trim();
 
             // Find existing active hierarchy assignment for this tier/role in this organization
@@ -1583,7 +1545,19 @@ export class ApplicationsService {
           }
         }
 
-        return updatedConfig;
+        const savedParties = await tx.politicalParty.findMany({
+          where: {
+            isActive: true,
+            ...(config.organisationId ? { organisationId: config.organisationId } : {}),
+          },
+          orderBy: { sortOrder: 'asc' },
+        });
+
+        return {
+          ...updatedConfig,
+          parties: savedParties,
+          politicalParties: savedParties,
+        };
       },
       { timeout: 15000 },
     );
@@ -1658,6 +1632,7 @@ export class ApplicationsService {
       : ['STATE', 'ZONE', 'PARLIAMENT', 'CONSTITUENCY', 'MANDAL', 'VILLAGE', 'BOOTH', 'VOTER_GROUP'];
 
     const hierarchyLabels = (config.hierarchyLabels as Record<string, string>) || {
+      PARTY_ADMIN: 'Party Administrator',
       STATE: 'State',
       ZONE: 'Zone',
       PARLIAMENT: 'Parliament',
@@ -3713,8 +3688,10 @@ export class ApplicationsService {
       }
     }
 
+    const meta = (item.metadata as Record<string, any>) || {};
     return {
       ...item,
+      failureReason: meta.failureReason || null,
       stateName: item.targetConstituency?.parliament?.zone?.state?.name || 'Andhra Pradesh',
       zoneName: item.targetConstituency?.parliament?.zone?.name || 'Central Zone',
       parliamentName: item.targetConstituency?.parliament?.name || 'Main Parliament',
@@ -3909,7 +3886,7 @@ export class ApplicationsService {
    * Assign a user to a specific jurisdiction
    */
   static async assignIncharge(appId: string, body: any, actor?: AuthenticatedUserPayload, scope?: UserHierarchyScope) {
-    await this.resolveApplication(appId);
+    const config = await this.resolveApplication(appId);
 
     // 1. Vertical rank check on requested role
     if (actor && !assertRoleHierarchy(actor.role, body.role as RoleType)) {
@@ -3921,9 +3898,25 @@ export class ApplicationsService {
 
     // 2. Unit / geographical scope check
     const unitLevel = body.unitLevel.toUpperCase();
-    const unitId = body.unitId;
+    let unitId = body.unitId;
 
-    if (scope && !scope.isGlobalScope) {
+    if (!unitId || unitId === 'default' || unitId === 'auto' || unitId === config?.id) {
+      if (unitLevel === 'STATE') {
+        const s = await prisma.state.findFirst({ where: { organisationId: config.organisationId } });
+        if (s) unitId = s.id;
+      } else if (unitLevel === 'ZONE') {
+        const z = await prisma.zone.findFirst({ where: { state: { organisationId: config.organisationId } } });
+        if (z) unitId = z.id;
+      } else if (unitLevel === 'PARLIAMENT') {
+        const p = await prisma.parliament.findFirst({ where: { zone: { state: { organisationId: config.organisationId } } } });
+        if (p) unitId = p.id;
+      } else if (unitLevel === 'CONSTITUENCY' || unitLevel === 'DISTRICT') {
+        const c = await prisma.constituency.findFirst({ where: { parliament: { zone: { state: { organisationId: config.organisationId } } } } });
+        if (c) unitId = c.id;
+      }
+    }
+
+    if (scope && !scope.isGlobalScope && unitId && unitId !== 'default') {
       let isUnitAccessible = false;
       switch (unitLevel) {
         case 'STATE':
@@ -3979,6 +3972,16 @@ export class ApplicationsService {
           err.code = 'VERTICAL_PRIVILEGE_VIOLATION';
           throw err;
         }
+        await prisma.user.update({
+          where: { id: existingUser.id },
+          data: {
+            role: body.role as RoleType,
+            name: body.name || existingUser.name,
+            accountStatus: 'ACTIVE',
+            isVerified: true,
+            ...(config?.organisationId ? { organisationId: config.organisationId } : {}),
+          },
+        });
       } else {
         const userCode = `INC-${body.mobileNumber.slice(-4)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
         existingUser = await prisma.user.create({
@@ -3988,6 +3991,9 @@ export class ApplicationsService {
             email: body.email || null,
             userCode,
             role: body.role as RoleType,
+            organisationId: config?.organisationId || null,
+            accountStatus: 'ACTIVE',
+            isVerified: true,
           },
         });
       }
@@ -4020,6 +4026,7 @@ export class ApplicationsService {
         assignmentData.parliamentId = unitId;
         break;
       case 'CONSTITUENCY':
+      case 'DISTRICT':
         assignmentData.constituencyId = unitId;
         break;
       case 'MANDAL':
@@ -4538,7 +4545,7 @@ export class ApplicationsService {
   /**
    * KPI Rollup summary for the application
    */
-  static async getSummary(appId: string, userScope?: UserHierarchyScope, user?: AuthenticatedUserPayload) {
+  static async getSummary(appId: string, userScope?: UserHierarchyScope, user?: AuthenticatedUserPayload, targetConstituencyId?: string) {
     const config = await this.resolveApplication(appId, user);
     if (user && user.role !== RoleType.SUPER_ADMIN && user.organisationId && config.organisationId && user.organisationId !== config.organisationId) {
       const err: any = new Error(`Access denied: Application belongs to another organization.`);
@@ -4557,9 +4564,9 @@ export class ApplicationsService {
     }
 
     // Resolve tenant-scoped constituencies:
-    let tenantConstituencyIds: string[] = [];
+    let allConstituencies: Array<{ id: string; name: string; code: string; constituencyNumber?: number | null }> = [];
     if (config.organisationId) {
-      const orgConstituencies = await prisma.constituency.findMany({
+      allConstituencies = await prisma.constituency.findMany({
         where: {
           parliament: {
             zone: {
@@ -4569,26 +4576,59 @@ export class ApplicationsService {
             },
           },
         },
-        select: { id: true },
+        select: { id: true, name: true, code: true, constituencyNumber: true },
+        orderBy: [{ constituencyNumber: 'asc' }, { name: 'asc' }],
       });
-      tenantConstituencyIds = orgConstituencies.map((c) => c.id);
+    }
 
-      if (tenantConstituencyIds.length === 0) {
-        return {
-          applicationId: config.id,
-          appName: config.organisationName,
-          stateName: config.stateName || 'Andhra Pradesh',
-          totalVoters: 0,
-          verifiedCount: 0,
-          verificationRate: 0,
-          totalBooths: 0,
-          totalGroups: 0,
-          totalIncharges: 0,
-          totalTasks: 0,
-          totalMandals: 0,
-          totalConstituencies: 0,
-        };
+    if (allConstituencies.length === 0) {
+      if (config.parliamentName) {
+        allConstituencies = await prisma.constituency.findMany({
+          where: {
+            parliament: {
+              name: { contains: config.parliamentName, mode: 'insensitive' },
+            },
+          },
+          select: { id: true, name: true, code: true, constituencyNumber: true },
+          orderBy: [{ constituencyNumber: 'asc' }, { name: 'asc' }],
+        });
+      } else {
+        allConstituencies = await prisma.constituency.findMany({
+          where: {
+            OR: [
+              { name: { contains: config.organisationName, mode: 'insensitive' } },
+              { name: { contains: config.headerTitle || '', mode: 'insensitive' } },
+            ],
+          },
+          select: { id: true, name: true, code: true, constituencyNumber: true },
+          orderBy: { name: 'asc' },
+          take: 10,
+        });
       }
+    }
+
+    let tenantConstituencyIds: string[] = allConstituencies.map((c) => c.id);
+    const activeCId = targetConstituencyId && (tenantConstituencyIds.length === 0 || tenantConstituencyIds.includes(targetConstituencyId))
+      ? targetConstituencyId
+      : tenantConstituencyIds[0] || null;
+
+    if (config.organisationId && tenantConstituencyIds.length === 0) {
+      return {
+        applicationId: config.id,
+        appName: config.organisationName,
+        stateName: config.stateName || 'Andhra Pradesh',
+        totalVoters: 0,
+        verifiedCount: 0,
+        verificationRate: 0,
+        totalBooths: 0,
+        totalGroups: 0,
+        totalIncharges: 0,
+        totalTasks: 0,
+        totalMandals: 0,
+        totalConstituencies: 0,
+        constituencyId: null,
+        constituencies: [],
+      };
     }
 
     const effectiveScope = config.appScope || 'SINGLE_MLA';
@@ -4600,7 +4640,15 @@ export class ApplicationsService {
     let userFilter: any = { isActive: true };
     let taskFilter: any = undefined;
 
-    if (tenantConstituencyIds.length > 0) {
+    if (activeCId) {
+      constituencyFilter = { id: activeCId };
+      mandalFilter = { constituencyId: activeCId };
+      boothFilter = { village: { mandal: { constituencyId: activeCId } } };
+      voterGroupFilter = { booth: { village: { mandal: { constituencyId: activeCId } } } };
+      userFilter = { isActive: true, constituencyId: activeCId };
+      taskFilter = { constituencyId: activeCId };
+      scopeWhere.constituencyId = activeCId;
+    } else if (tenantConstituencyIds.length > 0) {
       constituencyFilter = { id: { in: tenantConstituencyIds } };
       mandalFilter = { constituencyId: { in: tenantConstituencyIds } };
       boothFilter = { village: { mandal: { constituencyId: { in: tenantConstituencyIds } } } };
@@ -4666,8 +4714,9 @@ export class ApplicationsService {
       totalIncharges,
       totalTasks,
       totalMandals,
-      totalConstituencies,
-      constituencyId: tenantConstituencyIds[0] || null,
+      totalConstituencies: allConstituencies.length > 0 ? allConstituencies.length : totalConstituencies,
+      constituencyId: activeCId,
+      constituencies: allConstituencies,
     };
   }
 

@@ -24,7 +24,10 @@ export const updateTaskSchema = z.object({
   instructions: z.string().optional(),
   priority: z.nativeEnum(TaskPriority).optional(),
   dueDate: z.string().datetime().optional(),
-  status: z.nativeEnum(TaskStatus).optional(),
+  status: z.preprocess(
+    (val) => (typeof val === 'string' ? val.toUpperCase().replace(/\s+/g, '_') : val),
+    z.nativeEnum(TaskStatus)
+  ).optional(),
 });
 
 export const assignTaskSchema = z.object({
@@ -32,6 +35,9 @@ export const assignTaskSchema = z.object({
 });
 
 export const updateTaskStatusSchema = z.object({
-  status: z.nativeEnum(TaskStatus),
+  status: z.preprocess(
+    (val) => (typeof val === 'string' ? val.toUpperCase().replace(/\s+/g, '_') : val),
+    z.nativeEnum(TaskStatus)
+  ),
   comments: z.string().optional(),
 });

@@ -96,6 +96,7 @@ export interface ImportSummary {
   boothsCount?: number;
   voterGroupsCount?: number;
   errors: any[];
+  reconciliationReport?: any;
 }
 
 export interface DataImportRecord {
@@ -298,6 +299,39 @@ export async function fetchImportHistory(appId: string): Promise<any[]> {
 
 export async function fetchImportErrors(jobId: string): Promise<any> {
   return fetchDataImportErrors(jobId);
+}
+
+export function createImportProgressStream(
+  appId: string,
+  importId: string,
+  onProgress: (data: { status: string; progress: number; processed: number; total: number }) => void,
+  onError?: (err: any) => void
+): () => void {
+  const url = `/api/applications/${encodeURIComponent(appId)}/data/imports/${encodeURIComponent(importId)}/stream`;
+  let es: EventSource | null = null;
+  try {
+    es = new EventSource(url);
+    es.onmessage = (event) => {
+      try {
+        const parsed = JSON.parse(event.data);
+        onProgress(parsed);
+        if (parsed.status === 'COMPLETED' || parsed.status === 'FAILED') {
+          es?.close();
+        }
+      } catch {
+        // ignore parse error
+      }
+    };
+    es.onerror = (err) => {
+      es?.close();
+      if (onError) onError(err);
+    };
+  } catch (err) {
+    if (onError) onError(err);
+  }
+  return () => {
+    es?.close();
+  };
 }
 
 export async function fetchApplicationIncharges(

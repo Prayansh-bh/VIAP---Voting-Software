@@ -106,8 +106,11 @@ export type CadreNetworkItem = any;
 export type LiveTurnoutSummaryPayload = any;
 
 export async function fetchHierarchyAnalytics(level: string, id: string): Promise<HierarchyAnalyticsResponse> {
-  const normalizedLevel = level.toLowerCase().replace(/_/g, '-');
-  return apiFetch<HierarchyAnalyticsResponse>(`/api/analytics/${normalizedLevel}/${id}`);
+  let normalizedLevel = level.toLowerCase().replace(/_/g, '-');
+  if (normalizedLevel === 'voter-group') {
+    normalizedLevel = 'voter-incharge';
+  }
+  return apiFetch<HierarchyAnalyticsResponse>(`/api/analytics/${normalizedLevel}/${encodeURIComponent(id)}`);
 }
 
 export async function fetchStateAnalytics(): Promise<HierarchyAnalyticsResponse> {
@@ -221,12 +224,28 @@ export async function fetchHierarchySummaryByUser(userId: string): Promise<Hiera
   return fetchHierarchySummary(userId);
 }
 
-export async function fetchLiveVoteEvents(_unitId: string): Promise<LiveVoteEventItem[]> {
-  return [];
+export async function fetchLiveVoteEvents(unitId?: string): Promise<LiveVoteEventItem[]> {
+  try {
+    const qs = unitId ? `?unitId=${encodeURIComponent(unitId)}` : '';
+    const res = await apiFetch<LiveVoteEventItem[]>(`/api/analytics/live-events${qs}`);
+    return Array.isArray(res) ? res : [];
+  } catch (err) {
+    console.warn('[Analytics API] Failed to fetch live vote events:', err);
+    return [];
+  }
 }
 
-export async function fetchLiveVoteEventsByUser(_userId: string, _limit?: number): Promise<LiveVoteEventItem[]> {
-  return [];
+export async function fetchLiveVoteEventsByUser(_userId?: string, limit?: number): Promise<LiveVoteEventItem[]> {
+  try {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', String(limit));
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const res = await apiFetch<LiveVoteEventItem[]>(`/api/analytics/live-events${qs}`);
+    return Array.isArray(res) ? res : [];
+  } catch (err) {
+    console.warn('[Analytics API] Failed to fetch live vote events by user:', err);
+    return [];
+  }
 }
 
 export async function fetchLiveTurnoutSummaryByUser(_userId: string): Promise<any> {

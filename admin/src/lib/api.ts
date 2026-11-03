@@ -224,7 +224,7 @@ export async function fetchApplications(): Promise<AppInstance[]> {
         id: c.id,
         organisationId: c.organisationId,
         name: c.appName || c.organisationName || 'Party Connect',
-        party: c.parties?.[0]?.name || c.organisationName || c.appName || 'Party Alliance',
+        party: c.parties?.find((p: any) => p.code === c.activePartyCode)?.name || c.parties?.[0]?.name || c.organisationName || c.appName || 'Political Party',
         partyCode: c.activePartyCode || c.parties?.[0]?.code || 'APP',
         leaderName: c.candidateName || 'Party Leadership',
         jurisdiction: (typeof c.constituenciesCount === 'number' && c.constituenciesCount === 0)
@@ -242,6 +242,7 @@ export async function fetchApplications(): Promise<AppInstance[]> {
         isDefault: c.isDefault || false,
         createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-IN') : 'Active',
         activeHierarchyLevels: c.activeHierarchyLevels || ['VOTER_GROUP', 'BOOTH', 'VILLAGE', 'MANDAL', 'CONSTITUENCY'],
+        politicalParties: Array.isArray(c.parties) && c.parties.length > 0 ? c.parties : (c.politicalParties || []),
       }));
     }
   } catch (err) {
@@ -252,9 +253,10 @@ export async function fetchApplications(): Promise<AppInstance[]> {
 }
 
 // ── Live KPI Summary Rollup from PostgreSQL ──
-export async function fetchApplicationSummary(appId: string = 'default'): Promise<ApplicationSummary | null> {
+export async function fetchApplicationSummary(appId: string = 'default', constituencyId?: string): Promise<ApplicationSummary | null> {
   try {
-    const res = await request<ApplicationSummary>(`/applications/${appId}/summary`);
+    const qs = constituencyId ? `?constituencyId=${encodeURIComponent(constituencyId)}` : '';
+    const res = await request<ApplicationSummary>(`/applications/${appId}/summary${qs}`);
     return res;
   } catch (err) {
     console.warn('Backend /summary fetch note:', err);
@@ -382,6 +384,7 @@ export async function updateApplication(id: string, formData: Partial<AppInstanc
     isDefault: res?.configKey === 'default' || formData.isDefault || false,
     createdAt: res?.createdAt ? new Date(res.createdAt).toLocaleDateString('en-IN') : 'Active',
     activeHierarchyLevels: res?.activeHierarchyLevels || formData.activeHierarchyLevels,
+    politicalParties: Array.isArray(res?.parties) && res.parties.length > 0 ? res.parties : (res?.politicalParties || formData.politicalParties || []),
   };
 }
 
@@ -416,17 +419,43 @@ export async function fetchIncharges(appId?: string): Promise<InchargeRecord[]> 
   return [];
 }
 
+export async function assignExecutiveIncharge(appId: string, payload: {
+  name: string;
+  mobileNumber: string;
+  role: string;
+  unitLevel: string;
+  unitId?: string;
+  unitName?: string;
+}): Promise<any> {
+  return request(`/applications/${appId}/incharges`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function transferIncharge(appId: string, id: string, targetJurisdiction: string, targetLevel: string): Promise<any> {
   return request(`/applications/${appId}/incharges/${id}/transfer`, {
     method: 'POST',
-    body: JSON.stringify({ targetJurisdiction, targetLevel }),
+    body: JSON.stringify({
+      targetUnitId: targetJurisdiction,
+      targetUnitLevel: targetLevel,
+      targetJurisdiction,
+      targetLevel,
+    }),
   });
 }
 
 export async function replaceIncharge(appId: string, id: string, replacementName: string, replacementMobile: string, handoverNote?: string): Promise<any> {
   return request(`/applications/${appId}/incharges/${id}/replace`, {
     method: 'POST',
-    body: JSON.stringify({ replacementName, replacementMobile, handoverNote }),
+    body: JSON.stringify({
+      name: replacementName.trim(),
+      mobileNumber: replacementMobile.replace(/\D/g, '').slice(-10),
+      reason: handoverNote,
+      replacementName,
+      replacementMobile,
+      handoverNote,
+    }),
   });
 }
 
@@ -444,6 +473,60 @@ export async function resetInchargeCredentials(appId: string, id: string): Promi
 }
 
 // ── Approvals Engine ──
+function normalizeApprovalRecord(raw: any): ApprovalRecord {
+  const payload = raw.payload && typeof raw.payload === 'object' ? raw.payload : {};
+  const applicantName =
+    raw.applicantName ||
+    raw.requestedByName ||
+    payload.applicantName ||
+    payload.name ||
+    payload.fullName ||
+    'Unknown Applicant';
+  const applicantPhone =
+    raw.applicantPhone ||
+    raw.requestedByMobile ||
+    payload.applicantPhone ||
+    payload.mobileNumber ||
+    payload.phone ||
+    '';
+  const jurisdiction =
+    raw.jurisdiction ||
+    payload.jurisdiction ||
+    payload.unitName ||
+    payload.constituency ||
+    payload.mandal ||
+    payload.village ||
+    payload.booth ||
+    raw.entityType ||
+    'Platform Wide';
+  const requestedRole =
+    raw.requestedRole ||
+    raw.requestedByRole ||
+    payload.requestedRole ||
+    payload.role ||
+    undefined;
+  const submittedAt = raw.createdAt
+    ? (typeof raw.createdAt === 'string' ? raw.createdAt : new Date(raw.createdAt).toISOString())
+    : (raw.submittedAt || new Date().toISOString());
+
+  return {
+    id: raw.id,
+    type: raw.type,
+    title: raw.title || `${(raw.type || '').replace(/_/g, ' ')} Request`,
+    applicantName,
+    applicantPhone,
+    jurisdiction,
+    requestedRole,
+    status: raw.status || 'PENDING',
+    submittedAt,
+    details: payload,
+    reviewerNote:
+      raw.rejectionReason || raw.actionedByName
+        ? `Reviewer: ${raw.actionedByName || ''} ${raw.rejectionReason ? `(${raw.rejectionReason})` : ''}`.trim()
+        : undefined,
+  };
+}
+
 export async function fetchApprovals(params?: { type?: string; status?: string; search?: string }): Promise<ApprovalRecord[]> {
   try {
     const q = new URLSearchParams();
@@ -452,8 +535,11 @@ export async function fetchApprovals(params?: { type?: string; status?: string; 
     if (params?.search) q.set('search', params.search);
 
     const res: any = await request(`/approvals?${q.toString()}`);
-    if (Array.isArray(res)) return res;
-    if (Array.isArray(res?.items)) return res.items;
+    let list: any[] = [];
+    if (Array.isArray(res)) list = res;
+    else if (Array.isArray(res?.items)) list = res.items;
+
+    return list.map(normalizeApprovalRecord);
   } catch (err) {
     console.warn('Backend /approvals failed:', err);
   }
@@ -476,12 +562,13 @@ export async function rejectRequest(id: string, reason: string): Promise<any> {
 }
 
 // ── Data Ingestion & Live Voters ──
-export async function fetchVotersList(params?: { appId?: string; limit?: number; page?: number; search?: string }): Promise<{ items: any[]; total: number }> {
+export async function fetchVotersList(params?: { appId?: string; constituencyId?: string; limit?: number; page?: number; search?: string }): Promise<{ items: any[]; total: number }> {
   try {
     const q = new URLSearchParams();
     if (params?.limit) q.set('limit', String(params.limit));
     if (params?.page) q.set('page', String(params.page));
     if (params?.search) q.set('search', params.search);
+    if (params?.constituencyId) q.set('constituencyId', params.constituencyId);
 
     const endpoint = params?.appId 
       ? `/applications/${params.appId}/voters?${q.toString()}` 
@@ -804,6 +891,70 @@ export async function submitManualInchargeRoster(
     }),
   });
 }
+
+// ── Granular CMS Sub-Resource Endpoints ──
+export async function fetchCmsBranding(): Promise<any> {
+  return request('/cms/branding');
+}
+
+export async function updateCmsBranding(payload: any): Promise<any> {
+  return request('/cms/branding', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchCmsFeatures(): Promise<any> {
+  return request('/cms/features');
+}
+
+export async function updateCmsFeatures(payload: any): Promise<any> {
+  return request('/cms/features', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchCmsDashboardConfig(): Promise<any> {
+  return request('/cms/dashboard-config');
+}
+
+export async function updateCmsDashboardConfig(payload: any): Promise<any> {
+  return request('/cms/dashboard-config', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchCmsAnalyticsConfig(): Promise<any> {
+  return request('/cms/analytics-config');
+}
+
+export async function updateCmsAnalyticsConfig(payload: any): Promise<any> {
+  return request('/cms/analytics-config', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchCmsTaskTemplates(): Promise<any> {
+  return request('/cms/task-templates');
+}
+
+export async function fetchCmsHierarchyTree(): Promise<any> {
+  return request('/cms/hierarchy-tree');
+}
+
+export async function switchActiveApplication(configKey: string): Promise<any> {
+  return request(`/cms/applications/switch/${configKey}`, {
+    method: 'POST',
+  });
+}
+
+export async function downloadImportErrorReport(jobId: string): Promise<any> {
+  return request(`/applications/data/error-report/${jobId}`);
+}
+
 
 
 

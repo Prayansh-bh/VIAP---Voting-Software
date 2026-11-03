@@ -35,21 +35,31 @@ export async function fetchTrainingVideos(_unitId?: string): Promise<TrainingVid
   return apiFetch<TrainingVideo[]>('/api/training/videos');
 }
 
-export async function fetchTrainingProgress(_userId?: string): Promise<TrainingProgressItem[]> {
-  return [];
+export async function fetchTrainingProgress(userId?: string): Promise<TrainingProgressItem[]> {
+  const query = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+  return apiFetch<TrainingProgressItem[]>(`/api/training/progress${query}`);
 }
 
-export async function fetchTrainingProgressForUnit(_unitId: string): Promise<TrainingProgressItem[]> {
-  return [];
+export async function fetchTrainingProgressForUnit(unitId: string): Promise<TrainingProgressItem[]> {
+  return apiFetch<TrainingProgressItem[]>(`/api/training/unit/${encodeURIComponent(unitId)}/progress`);
 }
 
 export async function ensureTrainingAssigned(userId: string, videoId: string): Promise<any> {
-  return { id: `prog-${videoId}-${userId}` };
+  return apiFetch('/api/training/ensure-assigned', {
+    method: 'POST',
+    body: JSON.stringify({ userId, videoId }),
+  });
 }
 
 export async function updateTrainingProgress(videoId: string, status: string, quizScore?: number): Promise<any> {
   return apiFetch(`/api/training/${videoId}/progress`, {
     method: 'PATCH',
     body: JSON.stringify({ status, quizScore }),
+  });
+}
+
+export async function deleteTrainingVideo(videoId: string): Promise<{ id: string; deleted: boolean }> {
+  return apiFetch<{ id: string; deleted: boolean }>(`/api/training/videos/${encodeURIComponent(videoId)}`, {
+    method: 'DELETE',
   });
 }

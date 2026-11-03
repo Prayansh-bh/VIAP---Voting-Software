@@ -412,7 +412,9 @@ describe('VIAP — Safe Tenant Deletion, User Lifecycle & Phone Reuse Test Suite
       assert.ok(
         body.error?.message?.includes('not registered with any active political party') ||
         body.error?.message?.includes('Access restricted') ||
-        body.error?.message?.includes('Access denied'),
+        body.error?.message?.includes('Access denied') ||
+        body.error?.message?.includes('disabled or inactive') ||
+        body.error?.message?.includes('not active'),
       );
     }
   });

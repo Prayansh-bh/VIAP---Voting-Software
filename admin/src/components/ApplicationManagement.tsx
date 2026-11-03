@@ -45,6 +45,7 @@ const ALL_HIERARCHY_LEVELS: HierarchyTierConfig[] = [
   { id: 'PARLIAMENT', label: 'Parliament Incharge (MP)', scope: 'Lok Sabha Seat', count: 1600000, description: 'MP candidate headquarters & parliamentary cadre', badge: 'Apex Parliament' },
   { id: 'ZONE', label: 'Zone Coordinator', scope: 'Multi-Parliament', count: 4500000, description: 'Zonal party observers & regional campaign leads', badge: 'Regional Zone' },
   { id: 'STATE', label: 'State Leadership (Apex)', scope: 'Statewide Hub', count: 35000000, description: 'State party president, core committee & war room', badge: 'Apex Command' },
+  { id: 'PARTY_ADMIN', label: 'Party Administrator (HQ)', scope: 'Party-Wide Operations', count: 50000000, description: 'Central HQ management, video training, directives & party telemetry', badge: 'Apex Command' },
 ];
 
 export default function ApplicationManagement({
