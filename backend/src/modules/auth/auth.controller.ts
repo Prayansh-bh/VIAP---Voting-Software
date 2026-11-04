@@ -16,6 +16,7 @@ import {
   ChangePasswordDto,
   RequestMobileChangeOtpDto,
   VerifyMobileChangeOtpDto,
+  PasscodeLoginDto,
 } from './auth.schema.js';
 
 export class AuthController {
@@ -92,6 +93,41 @@ export class AuthController {
    * Authenticates user directly using recognized authorized device token.
    * Eliminates repeat OTP prompts on authorized devices (Zomato/Uber pattern).
    */
+  /**
+   * Incharge & Cadre Passcode Login (Dual Authentication).
+   * Authenticates active incharge or cadre users using mobile number + 6-digit allocated passcode.
+   */
+  static async passcodeLogin(req: FastifyRequest, reply: FastifyReply) {
+    const body = req.body as PasscodeLoginDto;
+    try {
+      const result = await AuthService.authenticatePasscodeLogin(body, {
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+
+      reply.setCookie('access_token', result.token, {
+        path: '/',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 86400,
+      });
+
+      reply.setCookie('refresh_token', result.refreshToken, {
+        path: '/api/auth',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 86400,
+      });
+
+      return reply.status(200).send(successResponse(result, 'Passcode authentication successful.'));
+    } catch (err: any) {
+      const statusCode = err.statusCode || 401;
+      return reply.status(statusCode).send(errorResponse(err.message, err.code || 'INVALID_CREDENTIALS'));
+    }
+  }
+
   static async deviceSession(req: FastifyRequest, reply: FastifyReply) {
     const body = req.body as DeviceSessionDto;
     try {

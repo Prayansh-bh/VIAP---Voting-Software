@@ -14,6 +14,7 @@ import {
   revokeDeviceSchema,
   demoLoginSchema,
   adminLoginSchema,
+  passcodeLoginSchema,
   updateProfileSchema,
   changePasswordSchema,
   requestMobileChangeOtpSchema,
@@ -65,6 +66,21 @@ export async function authRoutes(fastify: FastifyInstance) {
       preValidation: [validateBody(deviceSessionSchema)],
     },
     AuthController.deviceSession,
+  );
+
+  // Dual Incharge Passcode Authentication (Direct mobile + 6-digit allocated passcode)
+  fastify.post(
+    '/passcode-login',
+    {
+      config: {
+        rateLimit: {
+          max: process.env.NODE_ENV === 'test' ? 100 : 30,
+          timeWindow: '1 minute',
+        },
+      },
+      preValidation: [validateBody(passcodeLoginSchema)],
+    },
+    AuthController.passcodeLogin,
   );
 
   // Rate limited OTP generation (WhatsApp / SMS via MSG91)

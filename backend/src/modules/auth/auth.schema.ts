@@ -109,4 +109,13 @@ export const adminLoginSchema = z
   });
 export type AdminLoginDto = z.infer<typeof adminLoginSchema>;
 
+export const passcodeLoginSchema = z.object({
+  mobileNumber: z.string().min(10, 'Mobile number must be at least 10 digits').max(15),
+  passcode: z.string().min(1, 'Security passcode is required'),
+  deviceId: z.string().optional(),
+  deviceName: z.string().max(500).optional(),
+});
+export type PasscodeLoginDto = z.infer<typeof passcodeLoginSchema>;
+
+
 

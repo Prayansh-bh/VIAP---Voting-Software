@@ -506,6 +506,32 @@ export class ImportQueueService {
     let currentMeta: Record<string, any> = {};
 
     try {
+      // Watchdog: Auto-fail stalled PROCESSING jobs (> 10 mins) from server crash or OOM
+      try {
+        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+        await prisma.dataImport.updateMany({
+          where: {
+            status: 'PROCESSING',
+            updatedAt: { lt: tenMinutesAgo },
+          },
+          data: {
+            status: 'FAILED',
+            completedAt: new Date(),
+          },
+        });
+        await prisma.importJob.updateMany({
+          where: {
+            status: ImportJobStatus.PROCESSING,
+            updatedAt: { lt: tenMinutesAgo },
+          },
+          data: {
+            status: ImportJobStatus.FAILED,
+            completedAt: new Date(),
+            errors: [{ code: 'IMPORT_TIMED_OUT', message: 'Worker process restarted or memory limit exceeded. Please upload as CSV.' }] as unknown as Prisma.InputJsonValue,
+          },
+        });
+      } catch (watchdogErr) {}
+
       // 1. Atomically claim oldest QUEUED job belonging to this node (or unassigned)
       let candidate: any = null;
       try {

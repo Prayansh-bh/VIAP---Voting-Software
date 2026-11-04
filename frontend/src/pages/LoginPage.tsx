@@ -1,5 +1,3 @@
-'use client';
-
 import React, { useState, useEffect } from 'react';
 import {
   ArrowLeft,
@@ -13,15 +11,14 @@ import {
   Lock,
   Building2,
   Users2,
-  Vote,
   Radio,
   CheckCircle2,
-  UserPlus,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useCms } from '../context/CmsContext';
-import { requestOtp, verifyOtp } from '../lib/api';
+import { requestOtp, verifyOtp, loginWithPasscode } from '../lib/api';
 import { UserSession } from '../types';
-import CadreRegistrationModal from '../components/common/CadreRegistrationModal';
 
 interface LoginPageProps {
   onLoginSuccess: (session: UserSession, token: string) => void;
@@ -31,8 +28,13 @@ interface LoginPageProps {
 export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPageProps) {
   const { config, activeParty } = useCms();
 
+  // Authentication mode
+  const [authMode, setAuthMode] = useState<'PASSCODE' | 'OTP'>('PASSCODE');
+
   // Form states
   const [mobileInput, setMobileInput] = useState('');
+  const [passcodeInput, setPasscodeInput] = useState('');
+  const [showPasscode, setShowPasscode] = useState(false);
   const [channel, setChannel] = useState<'SMS' | 'WHATSAPP'>('WHATSAPP');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -42,7 +44,6 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
   const [requestId, setRequestId] = useState<string | null>(null);
   const [verifiedMobile, setVerifiedMobile] = useState('');
   const [otpCode, setOtpCode] = useState('');
-  const [showRegisterModal, setShowRegisterModal] = useState(false);
 
   const isVerifying = Boolean(requestId);
 
@@ -54,6 +55,37 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
     }, 1000);
     return () => clearInterval(timer);
   }, [cooldown]);
+
+  // Passcode direct login handler
+  const handlePasscodeLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanNum = mobileInput.replace(/\D/g, '').slice(-10);
+    const cleanPass = passcodeInput.trim();
+
+    if (cleanNum.length < 10) {
+      setError('Please enter your 10-digit registered mobile number.');
+      return;
+    }
+    if (!cleanPass) {
+      setError('Please enter your 6-digit allocated security passcode.');
+      return;
+    }
+
+    setError('');
+    setIsSubmitting(true);
+
+    try {
+      const result = await loginWithPasscode(cleanNum, cleanPass);
+      onLoginSuccess(result.session, result.token);
+    } catch (err: any) {
+      setError(
+        err?.message ||
+          'Authentication failed. Please verify your registered mobile number and security passcode.'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   // Request OTP handler
   const handleRequestOtp = async (e?: React.FormEvent, customMobile?: string) => {
@@ -70,17 +102,18 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
     setIsSubmitting(true);
 
     try {
-      // Role is omitted so backend dynamically resolves authorized account and jurisdiction
       const response = await requestOtp(targetNum, undefined, channel);
-
+      if (!response?.requestId) {
+        throw new Error('Could not establish verification session. Please retry or use Security Passcode.');
+      }
       setRequestId(response.requestId);
-      setCooldown(0);
+      setCooldown(response.cooldownSeconds || 30);
       setVerifiedMobile(targetNum);
       setOtpCode('');
     } catch (err: any) {
       setError(
         err?.message ||
-          `Mobile number +91 ${targetNum} is not registered with any active political party. Please register your party or contact your administrator.`
+          `Mobile number +91 ${targetNum} is not registered in the database. Please contact your party administrator.`
       );
     } finally {
       setIsSubmitting(false);
@@ -234,7 +267,7 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
           {/* RIGHT COLUMN: PROFESSIONAL AUTHENTICATION STATION */}
           {/* ========================================================= */}
           <div className="w-full lg:col-span-5">
-            <div className="w-full max-w-md mx-auto bg-slate-900/90 backdrop-blur-xl border border-slate-800 rounded-3xl shadow-2xl p-6 sm:p-8 space-y-6 relative overflow-hidden">
+            <div className="w-full max-w-md mx-auto bg-slate-900/90 backdrop-blur-xl border border-slate-800 rounded-3xl shadow-2xl p-6 sm:p-8 space-y-5 relative overflow-hidden">
               {/* Subtle top indicator bar */}
               <div
                 className="absolute top-0 left-0 right-0 h-1"
@@ -244,20 +277,57 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
               />
 
               {/* Station Header */}
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700/60 text-[10px] font-black uppercase tracking-wider text-amber-400">
                   <KeyRound className="w-3.5 h-3.5" />
                   <span>Command Station Authentication</span>
                 </div>
                 <h2 className="text-2xl font-black text-white tracking-tight">
-                  {isVerifying ? 'Enter Security Passcode' : 'Sign In to Station'}
+                  {isVerifying ? 'Enter Verification Code' : 'Sign In to Station'}
                 </h2>
                 <p className="text-xs text-slate-400 font-medium leading-relaxed">
                   {isVerifying
-                    ? `Enter the 6-digit OTP code sent to your ${channel === 'WHATSAPP' ? 'WhatsApp' : 'mobile phone'}.`
+                    ? `Enter the 6-digit OTP code sent to your WhatsApp or your allocated 6-digit passcode.`
                     : 'Enter your 10-digit registered mobile number. Your role and jurisdiction will be verified automatically.'}
                 </p>
               </div>
+
+              {/* Authentication Mode Selector (Passcode vs WhatsApp OTP) */}
+              {!isVerifying && (
+                <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-950/80 rounded-2xl border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('PASSCODE');
+                      setError('');
+                    }}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      authMode === 'PASSCODE'
+                        ? 'bg-amber-400 text-slate-950 shadow-md shadow-amber-400/20'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>Security Passcode</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('OTP');
+                      setError('');
+                    }}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      authMode === 'OTP'
+                        ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-950" />
+                    <span>WhatsApp OTP</span>
+                  </button>
+                </div>
+              )}
 
               {/* Error Notification Alert */}
               {error && (
@@ -268,11 +338,11 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
               )}
 
               {/* ===================================================== */}
-              {/* STEP 1: PHONE NUMBER & CHANNEL SELECTION */}
+              {/* MODE A: DIRECT SECURITY PASSCODE LOGIN (FASTEST) */}
               {/* ===================================================== */}
-              {!isVerifying && (
-                <form onSubmit={handleRequestOtp} className="space-y-5">
-                  <div className="space-y-2">
+              {!isVerifying && authMode === 'PASSCODE' && (
+                <form onSubmit={handlePasscodeLogin} className="space-y-4">
+                  <div className="space-y-1.5">
                     <label className="block text-xs font-bold text-slate-300">
                       Mobile Number (Registered Login ID) *
                     </label>
@@ -284,8 +354,79 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
                         type="tel"
                         value={mobileInput}
                         onChange={(e) => setMobileInput(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                        placeholder="e.g. 9340423885 or registered mobile"
+                        placeholder="e.g. 9340423887"
                         className="w-full pl-13 pr-4 py-3 bg-slate-950/90 border border-slate-700/80 rounded-2xl text-sm font-mono text-white font-bold placeholder:text-slate-600 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 transition-all tracking-wider"
+                        required
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-300">
+                        6-Digit Security Passcode *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowPasscode(!showPasscode)}
+                        className="text-[11px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer"
+                      >
+                        {showPasscode ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        <span>{showPasscode ? 'Hide' : 'Show'}</span>
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showPasscode ? 'text' : 'password'}
+                        value={passcodeInput}
+                        onChange={(e) => setPasscodeInput(e.target.value.slice(0, 20))}
+                        placeholder="Default allocated: 123456"
+                        className="w-full px-4 py-3 bg-slate-950/90 border border-slate-700/80 rounded-2xl text-sm font-mono text-white font-bold placeholder:text-slate-600 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 transition-all tracking-wider"
+                        required
+                      />
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-medium block">
+                      Default allocated passcode for party cadre is <strong>123456</strong>
+                    </span>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmitting || mobileInput.length < 10 || !passcodeInput.trim()}
+                    className="w-full py-3.5 px-4 rounded-2xl text-xs sm:text-sm font-black uppercase tracking-wider text-slate-950 bg-amber-400 hover:bg-amber-300 active:scale-[0.98] transition-all shadow-lg shadow-amber-400/20 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {isSubmitting ? (
+                      <LoaderCircle className="w-4 h-4 animate-spin text-slate-950" />
+                    ) : (
+                      <>
+                        <span>Authenticate into Station</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+                </form>
+              )}
+
+              {/* ===================================================== */}
+              {/* MODE B: WHATSAPP OTP REQUEST */}
+              {/* ===================================================== */}
+              {!isVerifying && authMode === 'OTP' && (
+                <form onSubmit={handleRequestOtp} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-300">
+                      Mobile Number (Registered Login ID) *
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 font-mono">
+                        +91
+                      </span>
+                      <input
+                        type="tel"
+                        value={mobileInput}
+                        onChange={(e) => setMobileInput(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                        placeholder="e.g. 9340423887"
+                        className="w-full pl-13 pr-4 py-3 bg-slate-950/90 border border-slate-700/80 rounded-2xl text-sm font-mono text-white font-bold placeholder:text-slate-600 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20 transition-all tracking-wider"
                         required
                         autoFocus
                       />
@@ -295,8 +436,8 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
                     </span>
                   </div>
 
-                  {/* Delivery Channel Radio / Buttons */}
-                  <div className="space-y-2">
+                  {/* Channel selection */}
+                  <div className="space-y-1.5">
                     <label className="block text-xs font-bold text-slate-300">
                       OTP Dispatch Protocol
                     </label>
@@ -329,17 +470,16 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
                     </div>
                   </div>
 
-                  {/* Primary Submit CTA */}
                   <button
                     type="submit"
                     disabled={isSubmitting || mobileInput.length < 10}
-                    className="w-full py-3.5 px-4 rounded-2xl text-xs sm:text-sm font-black uppercase tracking-wider text-slate-950 bg-amber-400 hover:bg-amber-300 active:scale-[0.98] transition-all shadow-lg shadow-amber-400/20 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full py-3.5 px-4 rounded-2xl text-xs sm:text-sm font-black uppercase tracking-wider text-slate-950 bg-emerald-400 hover:bg-emerald-300 active:scale-[0.98] transition-all shadow-lg shadow-emerald-400/20 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {isSubmitting ? (
                       <LoaderCircle className="w-4 h-4 animate-spin text-slate-950" />
                     ) : (
                       <>
-                        <span>Request Security Passcode</span>
+                        <span>Request Verification Code</span>
                         <ArrowRight className="w-4 h-4" />
                       </>
                     )}
@@ -348,10 +488,10 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
               )}
 
               {/* ===================================================== */}
-              {/* STEP 2: OTP VERIFICATION FORM */}
+              {/* STEP 2: OTP / PASSCODE VERIFICATION FORM */}
               {/* ===================================================== */}
               {isVerifying && (
-                <form onSubmit={handleVerifyOtp} className="space-y-5">
+                <form onSubmit={handleVerifyOtp} className="space-y-4">
                   <div className="p-3.5 rounded-2xl bg-emerald-950/50 border border-emerald-500/30 text-emerald-200 text-xs space-y-1">
                     <div className="flex items-center gap-2 font-bold">
                       <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -366,7 +506,7 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <label className="block text-xs font-bold text-slate-300">
-                        Enter 6-Digit Passcode
+                        Enter 6-Digit Passcode / OTP
                       </label>
                       <button
                         type="button"
@@ -389,6 +529,9 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
                       required
                       autoFocus
                     />
+                    <span className="text-[10px] text-slate-400 font-medium block text-center">
+                      Tip: You can also enter your allocated 6-digit passcode (<strong>123456</strong>) directly.
+                    </span>
                   </div>
 
                   <div className="flex gap-2.5 pt-1">
@@ -422,16 +565,9 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
                 </form>
               )}
 
-              {/* Cadre Registration Link */}
-              <div className="pt-2 text-center">
-                <button
-                  type="button"
-                  onClick={() => setShowRegisterModal(true)}
-                  className="text-xs font-semibold text-amber-400 hover:text-amber-300 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>New volunteer or cadre? Apply here</span>
-                </button>
+              {/* Authoritative Access Notice (No public self-registration) */}
+              <div className="pt-2 text-center text-[11px] text-slate-400 font-medium">
+                🔒 Official Command Terminal • For credentials, contact your Party Admin
               </div>
 
               {/* Security Footer Note */}
@@ -446,14 +582,6 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
           </div>
         </div>
       </main>
-
-      {/* Cadre Self-Registration Modal */}
-      <CadreRegistrationModal
-        isOpen={showRegisterModal}
-        onClose={() => setShowRegisterModal(false)}
-        activePartyCode={config.activePartyCode}
-        primaryColor={primaryColor}
-      />
 
       {/* Page Footer */}
       <footer className="w-full px-6 py-4 border-t border-slate-800/80 bg-slate-950/80 text-center text-xs text-slate-400">

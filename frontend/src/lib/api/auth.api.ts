@@ -242,6 +242,54 @@ export async function authenticateDeviceSession(
   };
 }
 
+/**
+ * Dual Incharge Passcode Authentication.
+ * Direct login using 10-digit registered mobile number + 6-digit allocated passcode.
+ */
+export async function loginWithPasscode(
+  mobileNumber: string,
+  passcode: string,
+  deviceName?: string
+): Promise<{ session: any; token: string; deviceId?: string; deviceToken?: string }> {
+  const deviceId = getOrCreateDeviceId();
+  const data = await apiFetch<any>('/api/auth/passcode-login', {
+    method: 'POST',
+    body: JSON.stringify({
+      mobileNumber: mobileNumber.trim(),
+      passcode: passcode.trim(),
+      deviceId,
+      deviceName: (deviceName || (typeof navigator !== 'undefined' ? navigator.userAgent : 'Authorized Incharge Device')).slice(0, 100),
+    }),
+  });
+
+  if (data?.deviceToken) {
+    setDeviceToken(data.deviceToken);
+  }
+
+  const user = data?.user || {};
+  const assignment = user.hierarchyAssignment;
+  const authoritativeUnitId = resolveAuthoritativeUnitId(user);
+
+  return {
+    token: data.token,
+    deviceId: data.deviceId,
+    deviceToken: data.deviceToken,
+    session: {
+      userName: user.name || user.userCode || 'In-Charge',
+      mobileNumber: user.mobileNumber || '',
+      role: user.role || 'CONSTITUENCY_INCHARGE',
+      unitId: authoritativeUnitId,
+      assignedConstituency: assignment?.constituency?.name || '',
+      assignedMandal: assignment?.mandal?.name || user.unitName,
+      assignedVillage: assignment?.village?.name,
+      assignedBooth: assignment?.booth?.boothNumber || assignment?.booth?.name,
+      assignedVoterGroup: assignment?.voterGroup?.name,
+      userId: user.id,
+      accountStatus: user.accountStatus === 'ACTIVE' ? 'Active' : 'Pending',
+    },
+  };
+}
+
 export async function fetchCurrentUser(): Promise<any> {
   return apiFetch('/api/auth/me');
 }
