@@ -554,6 +554,9 @@ export class AuthController {
     const wa = SmsProviderFactory.getProvider('WHATSAPP') as any;
     const status = wa.getStatus ? wa.getStatus() : { isConnected: false };
     const qr = wa.getQrCode ? wa.getQrCode() : null;
+    if (!status?.isConnected && !qr && typeof wa.initialize === 'function') {
+      wa.initialize().catch(() => {});
+    }
 
     let sanitizedUser: string = 'Connected Device';
     if (status.user && typeof status.user === 'string') {
@@ -849,7 +852,11 @@ export class AuthController {
 
     const { SmsProviderFactory } = await import('../../lib/sms/factory.js');
     const wa = SmsProviderFactory.getProvider('WHATSAPP') as any;
+    const status = wa.getStatus ? wa.getStatus() : { isConnected: false };
     const qr = wa.getQrCode ? wa.getQrCode() : null;
+    if (!status?.isConnected && !qr && typeof wa.initialize === 'function') {
+      wa.initialize().catch(() => {});
+    }
 
     if (!qr) {
       return reply.status(404).send(errorResponse('QR code not available or WhatsApp already connected.', 'NOT_FOUND'));

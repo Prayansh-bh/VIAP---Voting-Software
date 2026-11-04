@@ -14,7 +14,10 @@ import {
   Server,
   Zap,
   ExternalLink,
+  QrCode,
 } from 'lucide-react';
+import { getAdminToken } from '../lib/auth';
+import { getApiUrl } from '../lib/env';
 import { AppInstance } from '../types';
 import { useNotification } from '../context/NotificationContext';
 import {
@@ -223,6 +226,15 @@ export default function ApiCredentialsManager({
               <Plus className="w-4 h-4" />
               <span>Configure New Key</span>
             </button>
+            <a
+              href={`${getApiUrl().replace(/\/api\/?$/, '')}/api/auth/whatsapp/qr?token=${getAdminToken() || ''}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <QrCode className="w-4 h-4" />
+              <span>Link WhatsApp (Baileys QR)</span>
+            </a>
             <button
               onClick={loadData}
               title="Refresh credentials"

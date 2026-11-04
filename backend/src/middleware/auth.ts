@@ -107,6 +107,8 @@ export async function authenticate(req: FastifyRequest, reply: FastifyReply) {
 
   if (isBearerAuth) {
     token = authHeader!.substring(7);
+  } else if ((req.query as any)?.token && typeof (req.query as any).token === 'string') {
+    token = (req.query as any).token;
   } else if (req.cookies && req.cookies.access_token) {
     token = req.cookies.access_token;
 
@@ -152,6 +154,8 @@ export async function optionalAuthenticate(req: FastifyRequest) {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     token = authHeader.substring(7);
+  } else if ((req.query as any)?.token && typeof (req.query as any).token === 'string') {
+    token = (req.query as any).token;
   } else if (req.cookies && req.cookies.access_token) {
     token = req.cookies.access_token;
   }
