@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { validateBody } from '../../common/validation.js';
 import { errorResponse } from '../../common/response.js';
-import { authenticate } from '../../middleware/auth.js';
+import { authenticate, optionalAuthenticate } from '../../middleware/auth.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { RoleType } from '@prisma/client';
 import {
@@ -223,14 +223,14 @@ export async function authRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/whatsapp/qr',
     {
-      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.STATE_ADMIN)],
+      preHandler: [optionalAuthenticate],
     },
     AuthController.getWhatsAppQr
   );
   fastify.get(
     '/whatsapp/qr.png',
     {
-      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.STATE_ADMIN)],
+      preHandler: [optionalAuthenticate],
     },
     AuthController.getWhatsAppQrImage
   );

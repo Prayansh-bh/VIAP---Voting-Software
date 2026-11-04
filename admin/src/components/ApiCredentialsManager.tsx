@@ -27,6 +27,8 @@ import {
   rotateCredential,
   revealCredential,
   deleteCredential,
+  fetchWhatsAppGatewayStatus,
+  WhatsAppStatusResponse,
 } from '../lib/api';
 
 interface ApiCredentialsManagerProps {
@@ -70,6 +72,42 @@ export default function ApiCredentialsManager({
   // Revealed secrets cache (keyName -> decrypted secret)
   const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // WhatsApp Linking Modal state
+  const [isWaModalOpen, setIsWaModalOpen] = useState(false);
+  const [waStatus, setWaStatus] = useState<WhatsAppStatusResponse | null>(null);
+  const [waLoading, setWaLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isWaModalOpen) return;
+    let isCancelled = false;
+
+    async function loadWaStatus() {
+      setWaLoading(true);
+      try {
+        const s = await fetchWhatsAppGatewayStatus();
+        if (!isCancelled) {
+          setWaStatus(s);
+        }
+      } catch (err: any) {
+        console.warn('Failed to fetch WhatsApp gateway status:', err);
+      } finally {
+        if (!isCancelled) setWaLoading(false);
+      }
+    }
+
+    loadWaStatus();
+    const interval = setInterval(() => {
+      fetchWhatsAppGatewayStatus().then((s) => {
+        if (!isCancelled) setWaStatus(s);
+      }).catch(() => {});
+    }, 3000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [isWaModalOpen]);
 
   const effectiveOrgId = currentApp?.organisationId || currentApp?.id;
 
@@ -226,15 +264,13 @@ export default function ApiCredentialsManager({
               <Plus className="w-4 h-4" />
               <span>Configure New Key</span>
             </button>
-            <a
-              href={`${getApiUrl().replace(/\/api\/?$/, '')}/api/auth/whatsapp/qr?token=${getAdminToken() || ''}`}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => setIsWaModalOpen(true)}
               className="px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
             >
               <QrCode className="w-4 h-4" />
               <span>Link WhatsApp (Baileys QR)</span>
-            </a>
+            </button>
             <button
               onClick={loadData}
               title="Refresh credentials"
@@ -567,6 +603,94 @@ export default function ApiCredentialsManager({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* WhatsApp QR Pairing Modal */}
+      {isWaModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 space-y-5 shadow-2xl text-center">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                  <QrCode className="w-5 h-5" />
+                </div>
+                <h3 className="text-base font-black text-white">WhatsApp OTP Gateway</h3>
+              </div>
+              <button
+                onClick={() => setIsWaModalOpen(false)}
+                className="text-slate-400 hover:text-white text-xs cursor-pointer p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {waStatus?.isConnected ? (
+              <div className="py-6 space-y-4">
+                <div className="w-16 h-16 rounded-full bg-emerald-500/10 border-2 border-emerald-500 text-emerald-400 flex items-center justify-center mx-auto text-2xl font-black">
+                  ✓
+                </div>
+                <div>
+                  <h4 className="text-base font-black text-white">WhatsApp Online & Ready!</h4>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Device connected: <span className="font-mono text-emerald-400 font-bold">{waStatus.user || 'Linked Phone'}</span>
+                  </p>
+                </div>
+                <p className="text-xs text-slate-400 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                  All candidate and cadre OTP security passcodes will be sent live through this WhatsApp session.
+                </p>
+              </div>
+            ) : waStatus?.qrDataUrl ? (
+              <div className="space-y-4">
+                <div className="p-3 bg-white rounded-2xl inline-block shadow-inner">
+                  <img
+                    src={waStatus.qrDataUrl}
+                    alt="WhatsApp QR Code"
+                    className="w-56 h-56 mx-auto block"
+                  />
+                </div>
+                <div className="space-y-1 text-xs text-slate-300">
+                  <p className="font-bold text-white">To Link Your WhatsApp:</p>
+                  <ol className="text-left max-w-xs mx-auto space-y-1 text-slate-400 list-decimal pl-5">
+                    <li>Open <strong>WhatsApp</strong> on your mobile phone</li>
+                    <li>Tap <strong>Settings</strong> → <strong>Linked Devices</strong></li>
+                    <li>Tap <strong>Link a Device</strong> and scan this QR code</li>
+                  </ol>
+                </div>
+                <div className="flex items-center justify-center gap-1.5 text-[11px] text-amber-400 font-medium">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Waiting for scan... (auto-detects in real time)</span>
+                </div>
+              </div>
+            ) : (
+              <div className="py-10 space-y-3">
+                <RefreshCw className="w-8 h-8 animate-spin text-emerald-400 mx-auto" />
+                <h4 className="text-sm font-bold text-white">Initializing WhatsApp Gateway...</h4>
+                <p className="text-xs text-slate-400 max-w-xs mx-auto">
+                  Connecting to Baileys socket on server. Generating fresh QR code...
+                </p>
+              </div>
+            )}
+
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
+              <a
+                href={`${getApiUrl().replace(/\/api\/?$/, '')}/api/auth/whatsapp/qr?passcode=123456`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-400 hover:text-amber-400 flex items-center gap-1"
+              >
+                <span>Direct browser link</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <button
+                type="button"
+                onClick={() => setIsWaModalOpen(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

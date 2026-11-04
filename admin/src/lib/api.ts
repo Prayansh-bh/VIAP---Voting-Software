@@ -193,6 +193,20 @@ export async function verifyRegistrationOtp(
   });
 }
 
+export interface WhatsAppStatusResponse {
+  provider: string;
+  isConnected: boolean;
+  hasQr: boolean;
+  qrDataUrl?: string | null;
+  user?: string | null;
+  isOwner?: boolean;
+}
+
+export async function fetchWhatsAppGatewayStatus(): Promise<WhatsAppStatusResponse> {
+  const res: any = await request('/auth/whatsapp/status');
+  return res?.data || res;
+}
+
 // ── Mobile Number Change OTP Verification ──
 export async function requestMobileChangeOtp(
   newMobileNumber: string,
