@@ -10,7 +10,8 @@ import { populateHierarchyScope, requireRoles } from '../../middleware/rbac.js';
 import { logAudit } from '../../middleware/audit.js';
 import bcrypt from 'bcryptjs';
 import fs from 'fs';
-import { saveAsset, getAssetPath } from '../../lib/storage.js';
+import path from 'path';
+import { saveAsset, getAssetPath, getUploadDirectory } from '../../lib/storage.js';
 import {
   DEFAULT_ANALYTICS_CONFIG,
   DEFAULT_DASHBOARD_CONFIG,
@@ -447,16 +448,43 @@ export async function cmsRoutes(fastify: FastifyInstance) {
 
   fastify.get('/assets/:filename', async (req: FastifyRequest<{ Params: { filename: string } }>, reply: FastifyReply) => {
     const filename = req.params.filename;
+
+    // 1. Check local filesystem cache
     const asset = getAssetPath(filename);
-    if (!asset) {
-      return reply.status(404).send(errorResponse('Asset not found.', 'ASSET_NOT_FOUND'));
+    if (asset && fs.existsSync(asset.fullPath)) {
+      reply.header('Content-Type', asset.mimeType);
+      reply.header('X-Content-Type-Options', 'nosniff');
+      reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+      const stream = fs.createReadStream(asset.fullPath);
+      return reply.send(stream);
     }
 
-    reply.header('Content-Type', asset.mimeType);
-    reply.header('X-Content-Type-Options', 'nosniff');
-    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
-    const stream = fs.createReadStream(asset.fullPath);
-    return reply.send(stream);
+    // 2. Fallback to Neon PostgreSQL for 100% persistent asset storage across container restarts
+    try {
+      const records = await prisma.$queryRaw<Array<{ mimeType: string; dataBase64: string }>>`
+        SELECT "mimeType", "dataBase64" FROM "CMSAsset" WHERE "filename" = ${filename} LIMIT 1
+      `;
+      if (records && records.length > 0 && records[0].dataBase64) {
+        const mimeType = records[0].mimeType || 'image/png';
+        const buffer = Buffer.from(records[0].dataBase64, 'base64');
+
+        // Populate local cache for fast subsequent streaming
+        try {
+          const uploadDir = getUploadDirectory();
+          const targetPath = path.join(uploadDir, path.basename(filename));
+          fs.writeFileSync(targetPath, buffer);
+        } catch {}
+
+        reply.header('Content-Type', mimeType);
+        reply.header('X-Content-Type-Options', 'nosniff');
+        reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+        return reply.send(buffer);
+      }
+    } catch (dbErr: any) {
+      console.warn('[CMS] Database asset retrieval notice:', dbErr?.message);
+    }
+
+    return reply.status(404).send(errorResponse('Asset not found.', 'ASSET_NOT_FOUND'));
   });
 
   // --------------------------------------------------------------------------

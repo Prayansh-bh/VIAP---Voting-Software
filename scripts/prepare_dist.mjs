@@ -43,6 +43,8 @@ if (fs.existsSync(rootDist)) {
 }
 copyFolderSync(frontendDist, rootDist);
 fs.writeFileSync(path.join(rootDist, '_redirects'), redirectsContent);
+fs.copyFileSync(path.join(rootDir, 'vercel.json'), path.join(rootDist, 'vercel.json'));
+fs.copyFileSync(path.join(rootDir, 'vercel.json'), path.join(frontendDist, 'vercel.json'));
 
 // 4. Verify outputs
 const rootIndex = path.join(rootDist, 'index.html');

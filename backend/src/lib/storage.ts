@@ -1,3 +1,4 @@
+import { prisma } from './prisma.js';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -101,7 +102,23 @@ export async function saveAsset(
   const safeFilename = `${orgPrefix}${crypto.randomUUID()}${extension}`;
   const filePath = path.join(uploadDir, safeFilename);
 
-  await fs.promises.writeFile(filePath, buffer);
+  // 1. Write to local filesystem cache
+  try {
+    await fs.promises.writeFile(filePath, buffer);
+  } catch (err: any) {
+    console.warn('[STORAGE] Local disk cache write notice:', err?.message);
+  }
+
+  // 2. Persist to Neon PostgreSQL database for 100% container persistence across Railway restarts
+  try {
+    await prisma.$executeRaw`
+      INSERT INTO "CMSAsset" ("id", "filename", "mimeType", "dataBase64", "size", "createdAt")
+      VALUES (gen_random_uuid(), ${safeFilename}, ${mimeType}, ${buffer.toString('base64')}, ${buffer.length}, NOW())
+      ON CONFLICT ("filename") DO UPDATE SET "mimeType" = ${mimeType}, "dataBase64" = ${buffer.toString('base64')}, "size" = ${buffer.length}
+    `;
+  } catch (dbErr: any) {
+    console.error('[STORAGE] Database asset persistence warning:', dbErr?.message);
+  }
 
   return {
     assetUrl: `/api/cms/assets/${safeFilename}`,

@@ -1326,6 +1326,17 @@ model CMSConfiguration {
   @@index([organisationId])
 }
 
+model CMSAsset {
+  id         String   @id @default(uuid()) @db.Uuid
+  filename   String   @unique
+  mimeType   String
+  dataBase64 String   @db.Text
+  size       Int
+  createdAt  DateTime @default(now())
+
+  @@index([filename])
+}
+
 model ImportJob {
   id              String           @id @default(uuid()) @db.Uuid
   status          ImportJobStatus  @default(PENDING)

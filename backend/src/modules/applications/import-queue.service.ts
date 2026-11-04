@@ -182,9 +182,8 @@ export class ImportQueueService {
         const filePath = meta.tempFilePath as string | undefined;
 
         // If another worker node is actively processing this job with fresh heartbeat, DO NOT touch it!
-        if (job.updatedAt && job.updatedAt > staleThreshold && meta.workerNodeId !== WORKER_NODE_ID) {
-          continue;
-        }
+        // Validate if file exists; if wiped by container restart, fail immediately
+
 
         if (!filePath || !fs.existsSync(filePath)) {
           // File was in ephemeral /tmp and was wiped by container restart
@@ -352,6 +351,16 @@ export class ImportQueueService {
     } catch (err: any) {
       await fs.promises.unlink(tempFilePath).catch(() => {});
       return reply.status(500).send(errorResponse(`Streaming upload failed: ${err.message}`, 'UPLOAD_STREAM_ERROR'));
+    }
+
+    if (!isCsv && bytesWritten > 10 * 1024 * 1024) {
+      await fs.promises.unlink(tempFilePath).catch(() => {});
+      return reply.status(400).send(
+        errorResponse(
+          'Excel spreadsheet (.xlsx) exceeds 10MB threshold. Large electorates (50,000+ voters) must be uploaded in .CSV format (UTF-8) to enable line-by-line streaming without server memory limits.',
+          'EXCEL_FILE_TOO_LARGE'
+        )
+      );
     }
 
     const sha256 = hash.digest('hex');
@@ -541,7 +550,6 @@ export class ImportQueueService {
           WHERE id = (
             SELECT id FROM "DataImport"
             WHERE "status" = 'QUEUED'
-              AND ("metadata"->>'workerNodeId' = ${WORKER_NODE_ID} OR "metadata"->>'workerNodeId' IS NULL)
             ORDER BY "createdAt" ASC
             LIMIT 1
             FOR UPDATE SKIP LOCKED
@@ -554,10 +562,7 @@ export class ImportQueueService {
       } catch (rawErr) {
         // Fallback to updateMany claim if raw query is not supported in current environment
         const queuedCandidate = await prisma.dataImport.findFirst({
-          where: {
-            status: 'QUEUED',
-            metadata: { path: ['workerNodeId'], equals: WORKER_NODE_ID },
-          },
+          where: { status: 'QUEUED' },
           orderBy: { createdAt: 'asc' },
         });
         if (queuedCandidate) {

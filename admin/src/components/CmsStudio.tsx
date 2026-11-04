@@ -43,7 +43,7 @@ import {
 } from 'lucide-react';
 import { useCms } from '../context/CmsContext';
 import { useNotification } from '../context/NotificationContext';
-import { AppScope, CmsParty, ConstituencyItem, TierInchargeInput } from '../lib/cms';
+import { AppScope, CmsParty, ConstituencyItem, TierInchargeInput, resolveAssetUrl } from '../lib/cms';
 import { requestRegistrationOtp, verifyRegistrationOtp, updateApplication, fetchCmsBranding, fetchCmsFeatures, fetchCmsDashboardConfig, fetchCmsAnalyticsConfig, fetchCmsTaskTemplates, fetchCmsHierarchyTree, updateCmsBranding, updateCmsFeatures, updateCmsDashboardConfig, updateCmsAnalyticsConfig } from '../lib/api';
 import { AppInstance } from '../types';
 
@@ -1099,9 +1099,6 @@ export default function CmsStudio({
       };
 
       const mergedToStore = { ...mergedConfig };
-      if (mergedToStore.logoUrl && mergedToStore.logoUrl.startsWith('data:')) {
-        mergedToStore.logoUrl = '';
-      }
       localStorage.setItem('kdp_cms_config', JSON.stringify(mergedToStore));
       localStorage.setItem('kdp_custom_parties', JSON.stringify(partyList));
 
@@ -1324,7 +1321,7 @@ export default function CmsStudio({
               <div className="w-20 h-20 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-center overflow-hidden shrink-0 shadow-2xs relative group">
                 {logoUrl ? (
                   <>
-                    <img src={logoUrl} alt="Logo Preview" className="w-full h-full object-contain p-1" />
+                    <img src={resolveAssetUrl(logoUrl)} alt="Logo Preview" className="w-full h-full object-contain p-1" />
                     <button
                       onClick={() => setLogoUrl('')}
                       className="absolute inset-0 bg-slate-950/80 text-white opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs font-bold cursor-pointer"
@@ -2462,7 +2459,7 @@ export default function CmsStudio({
                 {/* Logo / Monogram */}
                 <div className="mx-auto w-14 h-14 rounded-full border-2 border-slate-800 bg-slate-900 flex items-center justify-center overflow-hidden shadow-xs">
                   {logoUrl ? (
-                    <img src={logoUrl} alt="Logo" className="w-full h-full object-contain p-0.5" />
+                    <img src={resolveAssetUrl(logoUrl)} alt="Logo" className="w-full h-full object-contain p-0.5" />
                   ) : (
                     <span
                       className="font-black text-lg"

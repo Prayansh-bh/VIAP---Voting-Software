@@ -7,7 +7,7 @@ export const resolveAssetUrl = (url?: string | null): string => {
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
     return url;
   }
-  const base = getApiBase();
+  const base = getApiBase() || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? 'https://viap-voting-software-production.up.railway.app' : '');
   const cleanUrl = url.startsWith('/') ? url : `/${url}`;
   return base ? `${base}${cleanUrl}` : cleanUrl;
 };

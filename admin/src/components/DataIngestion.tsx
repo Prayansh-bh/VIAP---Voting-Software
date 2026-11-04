@@ -770,10 +770,15 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
       return;
     }
 
-    setSelectedFile(file);
     if (!isCsv && file.size > 10 * 1024 * 1024) {
-      notify.info('Large electorate spreadsheet detected (>10MB). If processing takes time, exporting your file to .CSV format is recommended for fastest line-by-line streaming without memory limits.', 'Large File Notice');
+      setUploadStatus('error');
+      setStatusMessage('Excel file exceeds 10MB limit. Large electorates (up to 2.5 Lakh voters) must be uploaded in .CSV format (UTF-8) to avoid server memory crashes.');
+      setUploadErrors([{ rowNumber: 0, field: 'file', value: file.name, errorMessage: 'In Excel, choose "Save As" -> select "CSV UTF-8 (Comma delimited) (*.csv)", then upload the saved .csv file.' }]);
+      notify.error('Excel file exceeds 10MB limit. Please save as .CSV and upload.', 'Use CSV Format');
+      return;
     }
+
+    setSelectedFile(file);
     setUploadStatus('parsing');
     setStatusMessage(isCsv ? 'Reading CSV sample headers...' : 'Reading spreadsheet and analyzing column headers...');
     setUploadErrors([]);
@@ -1213,6 +1218,23 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
             </div>
             <div className="text-[10px] text-amber-400/90 bg-amber-500/10 p-2.5 rounded-xl border border-amber-500/20">
               <strong>Notice ($0 Hosting):</strong> Processing executes via in-process background worker. If the server container restarts or goes to sleep, temporary files in /tmp are removed and the file will need to be re-uploaded.
+            </div>
+            <div className="flex items-center justify-end pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedFile(null);
+                  setUploadStatus('idle');
+                  setStatusMessage('');
+                  setUploadPercentage(0);
+                  setUploadErrors([]);
+                  setActiveJobId(null);
+                  setProcessingStats(null);
+                }}
+                className="text-[11px] px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl border border-slate-700 cursor-pointer transition shadow-xs"
+              >
+                Reset / Upload New File (.CSV)
+              </button>
             </div>
           </div>
         )}
