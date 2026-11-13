@@ -10,10 +10,8 @@ import { Routes, Route, useNavigate, useLocation, useParams, Navigate } from 're
 import Header from './components/Header';
 import Footer from './components/Footer';
 import RoleQuickSwitcher from './components/RoleQuickSwitcher';
-import MobileAppHeader from './components/MobileAppHeader';
-import MobileBottomNav from './components/MobileBottomNav';
-import ChangeMobileModal from './components/ChangeMobileModal';
 import AdminPanelHandoff from './components/AdminPanelHandoff';
+import LandingPage from './components/landing/LandingPage';
 import NotFoundPage from './pages/NotFoundPage';
 import { RoleType, UserSession } from './types';
 
@@ -79,9 +77,10 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
   const location = useLocation();
   const { config, reloadConfig } = useCms();
 
-  const [isMobileTierSheetOpen, setIsMobileTierSheetOpen] = useState(false);
-  const [isMobileProfileSheetOpen, setIsMobileProfileSheetOpen] = useState(false);
-  const [isChangeMobileModalOpen, setIsChangeMobileModalOpen] = useState(false);
+  const [isPartyCreated, setIsPartyCreated] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('kdp_party_created') === 'true';
+  });
 
   const [activeSession, setActiveSession] = useState<UserSession | null>(() => {
     if (typeof window === 'undefined') return null;
@@ -228,11 +227,8 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
   }, [config.activeHierarchyLevels]);
 
   const currentPath = location.pathname;
-  const isLoginRoute =
-    currentPath === '/' ||
-    currentPath === '/landing' ||
-    currentPath === '/login' ||
-    currentPath === '/auth/login';
+  const isLandingRoute = currentPath === '/' || currentPath === '/landing';
+  const isLoginRoute = currentPath === '/login' || currentPath === '/auth/login';
   const isCmsRoute =
     currentPath === '/cms' ||
     currentPath === '/admin' ||
@@ -241,7 +237,16 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     currentPath === '/assign-incharges' ||
     currentPath === '/approvals';
 
-  const isDashboardActive = Boolean(activeSession) && !isCmsRoute && !isLoginRoute;
+  const isDashboardActive = Boolean(activeSession) && !isCmsRoute && !isLandingRoute && !isLoginRoute;
+
+  const handleResetParty = () => {
+    localStorage.removeItem('kdp_party_created');
+    localStorage.removeItem('kdp_active_session');
+    clearAuthToken();
+    setIsPartyCreated(false);
+    setActiveSession(null);
+    navigate('/');
+  };
 
   useEffect(() => {
     if (isDashboardActive) {
@@ -301,7 +306,7 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
       console.warn('Default config reload error:', e);
     }
 
-    navigate('/');
+    navigate('/login');
   };
 
   // Safe role switcher: prevents privilege escalation and handles subordinate unit re-hydration
@@ -406,49 +411,39 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     }
   };
 
-  const showTopSwitcher = Boolean(activeSession) && !isLoginRoute && currentPath !== '/cms';
+  const showTopSwitcher = Boolean(activeSession) && !isLandingRoute && !isLoginRoute && currentPath !== '/cms';
 
   return (
-    <div className={`${isDashboardActive ? 'h-screen h-[100dvh] overflow-hidden bg-[#06070B] text-slate-100' : 'min-h-screen bg-gray-50 text-gray-900'} flex flex-col justify-between selection:bg-cyan-500 selection:text-white`}>
+    <div className={`${isDashboardActive ? 'h-screen h-[100dvh] overflow-hidden' : 'min-h-screen'} bg-gray-50 text-gray-900 flex flex-col justify-between selection:bg-yellow-200`}>
       {showTopSwitcher && (
-        <>
-          <div className="hidden md:block">
-            <RoleQuickSwitcher
-              currentRole={activeSession?.role}
-              currentPath={currentPath}
-              session={activeSession}
-              onLogout={handleLogout}
-              onSwitchRole={handleSwitchRole}
-              onMobileChanged={(newMobile, user) => {
-                if (activeSession) {
-                  const updatedSession = {
-                    ...activeSession,
-                    mobileNumber: newMobile,
-                    ...(user?.userName ? { userName: user.userName } : {}),
-                  };
-                  setActiveSession(updatedSession);
-                  localStorage.setItem('kdp_active_session', JSON.stringify(updatedSession));
-                }
-              }}
-            />
-          </div>
-          <MobileAppHeader
-            session={activeSession}
-            currentRole={activeSession?.role}
-            onOpenTierSheet={() => setIsMobileTierSheetOpen(true)}
-            onOpenProfileSheet={() => setIsMobileProfileSheetOpen(true)}
-          />
-        </>
+        <RoleQuickSwitcher
+          currentRole={activeSession?.role}
+          currentPath={currentPath}
+          session={activeSession}
+          onLogout={handleLogout}
+          onSwitchRole={handleSwitchRole}
+          onMobileChanged={(newMobile, user) => {
+            if (activeSession) {
+              const updatedSession = {
+                ...activeSession,
+                mobileNumber: newMobile,
+                ...(user?.userName ? { userName: user.userName } : {}),
+              };
+              setActiveSession(updatedSession);
+              localStorage.setItem('kdp_active_session', JSON.stringify(updatedSession));
+            }
+          }}
+        />
       )}
 
-      <div className={`${isDashboardActive ? 'h-full flex-1 overflow-hidden' : 'flex-1'} ${showTopSwitcher ? 'pt-14 pb-16 md:pb-0' : ''} flex flex-col min-h-0`}>
-        {!activeSession && !isLoginRoute && currentPath !== '/cms' && <Header />}
+      <div className={`${isDashboardActive ? 'h-full flex-1 overflow-hidden' : 'flex-1'} ${showTopSwitcher ? 'pt-14' : ''} flex flex-col min-h-0`}>
+        {!activeSession && !isLandingRoute && !isLoginRoute && currentPath !== '/cms' && <Header />}
 
-        <div className={`flex-1 min-h-0 ${isDashboardActive ? 'p-0 overflow-hidden h-full' : isLoginRoute ? 'p-0' : 'pb-4 md:pb-6'}`}>
+        <div className={`flex-1 min-h-0 ${isDashboardActive ? 'p-0 overflow-hidden h-full' : (isLandingRoute || isLoginRoute) ? 'p-0' : 'pb-4 md:pb-6'}`}>
           <Suspense
             fallback={
               <div className="h-full min-h-[50vh] w-full flex flex-col items-center justify-center gap-3">
-                <div className="w-8 h-8 rounded-full border-3 border-cyan-400 border-t-transparent animate-spin shadow-lg shadow-cyan-500/20" />
+                <div className="w-8 h-8 rounded-full border-3 border-amber-400 border-t-transparent animate-spin" />
                 <span className="text-xs font-bold text-slate-500 tracking-wider uppercase">
                   Loading Command Station...
                 </span>
@@ -456,20 +451,36 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
             }
           >
             <Routes>
-              {/* Direct Sign-In Entry Route */}
+              {/* Landing Route */}
               <Route
                 path="/"
+                element={
+                  <LandingPage
+                    isPartyCreated={isPartyCreated}
+                    onResetParty={handleResetParty}
+                    onEnterApp={() => navigate('/login')}
+                    onOpenLogin={() => navigate('/login')}
+                    onGetStarted={() => navigate('/login')}
+                  />
+                }
+              />
+              <Route path="/landing" element={<Navigate to="/" replace />} />
+
+              {/* Login Route */}
+              <Route
+                path="/login"
                 element={
                   activeSession ? (
                     <Navigate to={ROUTE_BY_ROLE[activeSession.role] || '/state'} replace />
                   ) : (
-                    <LoginPage onLoginSuccess={handleLoginSuccess} />
+                    <LoginPage
+                      onLoginSuccess={handleLoginSuccess}
+                      onBackToLanding={() => navigate('/')}
+                    />
                   )
                 }
               />
-              <Route path="/landing" element={<Navigate to="/" replace />} />
-              <Route path="/login" element={<Navigate to="/" replace />} />
-              <Route path="/auth/login" element={<Navigate to="/" replace />} />
+              <Route path="/auth/login" element={<Navigate to="/login" replace />} />
 
               {/* Platform Admin & CMS Handoff */}
               <Route
@@ -596,7 +607,7 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
                 element={
                   <NotFoundPage
                     onGoHome={() => navigate('/')}
-                    onGoLogin={() => navigate('/')}
+                    onGoLogin={() => navigate('/login')}
                   />
                 }
               />
@@ -605,41 +616,7 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
         </div>
       </div>
 
-      {isDashboardActive && currentPath !== '/constituency' && (
-        <MobileBottomNav
-          currentRole={activeSession?.role}
-          currentPath={currentPath}
-          session={activeSession}
-          onLogout={handleLogout}
-          onSwitchRole={handleSwitchRole}
-          onChangeMobileClick={() => setIsChangeMobileModalOpen(true)}
-          isTierSheetOpen={isMobileTierSheetOpen}
-          setIsTierSheetOpen={setIsMobileTierSheetOpen}
-          isProfileSheetOpen={isMobileProfileSheetOpen}
-          setIsProfileSheetOpen={setIsMobileProfileSheetOpen}
-        />
-      )}
-
-      {isChangeMobileModalOpen && activeSession && (
-        <ChangeMobileModal
-          isOpen={true}
-          onClose={() => setIsChangeMobileModalOpen(false)}
-          currentMobile={activeSession.mobileNumber}
-          onMobileChanged={(newMobile, user) => {
-            if (activeSession) {
-              const updatedSession = {
-                ...activeSession,
-                mobileNumber: newMobile,
-                ...(user?.userName ? { userName: user.userName } : {}),
-              };
-              setActiveSession(updatedSession);
-              localStorage.setItem('kdp_active_session', JSON.stringify(updatedSession));
-            }
-          }}
-        />
-      )}
-
-      {!isDashboardActive && !isLoginRoute && currentPath !== '/cms' && <Footer />}
+      {!isDashboardActive && !isLandingRoute && !isLoginRoute && currentPath !== '/cms' && <Footer />}
     </div>
   );
 }

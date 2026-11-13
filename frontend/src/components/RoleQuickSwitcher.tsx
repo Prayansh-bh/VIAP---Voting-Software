@@ -48,11 +48,11 @@ interface SwitcherItem {
 
 const SWITCHER_ITEMS: SwitcherItem[] = [
   // System & Management
-  { role: 'ROLES', category: 'system', label: 'CMS & Platform Admin (Port 3001)', shortLabel: 'Admin Panel', subtitle: 'Dedicated CMS Console', path: getAdminUrl(), icon: Settings, color: '#06b6d4', isExternal: true },
+  { role: 'ROLES', category: 'system', label: 'CMS & Platform Admin (Port 3001)', shortLabel: 'Admin Panel', subtitle: 'Dedicated CMS Console', path: getAdminUrl(), icon: Settings, color: '#f59e0b', isExternal: true },
 
   // Apex Command
-  { role: 'PARTY_ADMIN', levelKey: 'PARTY_ADMIN', category: 'apex', label: 'Party Administrator (HQ)', shortLabel: 'Party Admin', subtitle: 'Manage Videos & Directives', path: '/party-admin', icon: Shield, color: '#06b6d4' },
-  { role: 'STATE_ADMIN', levelKey: 'STATE', category: 'apex', label: 'State Incharge (Apex)', shortLabel: 'State', subtitle: 'Statewide War Room', path: '/state', icon: Building, color: '#6366f1' },
+  { role: 'PARTY_ADMIN', levelKey: 'PARTY_ADMIN', category: 'apex', label: 'Party Administrator (HQ)', shortLabel: 'Party Admin', subtitle: 'Manage Videos & Directives', path: '/party-admin', icon: Shield, color: '#f59e0b' },
+  { role: 'STATE_ADMIN', levelKey: 'STATE', category: 'apex', label: 'State Incharge (Apex)', shortLabel: 'State', subtitle: 'Statewide War Room', path: '/state', icon: Building, color: '#f59e0b' },
   { role: 'ZONE_INCHARGE', levelKey: 'ZONE', category: 'apex', label: 'Zone Coordinator', shortLabel: 'Zone', subtitle: 'Multi-Parliament Command', path: '/zone', icon: Building, color: '#8b5cf6' },
   { role: 'PARLIAMENT_INCHARGE', levelKey: 'PARLIAMENT', category: 'apex', label: 'Parliament Incharge (MP)', shortLabel: 'Parliament', subtitle: 'Parliamentary Constituency', path: '/parliament', icon: Crown, color: '#3b82f6' },
   { role: 'CONSTITUENCY_INCHARGE', levelKey: 'DISTRICT', category: 'apex', label: 'District Incharge', shortLabel: 'District', subtitle: 'District Level DCC Command', path: '/constituency', icon: Building, color: '#a855f7' },
@@ -213,8 +213,8 @@ export default function RoleQuickSwitcher({
            ======================================================== */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-white font-black shadow-md shadow-cyan-500/20 shrink-0">
-              <Shield className="w-4 h-4 text-white fill-white" />
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black shadow-md shadow-amber-500/20 shrink-0">
+              <Shield className="w-4 h-4 text-slate-950 fill-slate-950" />
             </div>
             <div className="hidden sm:block">
               <div className="flex items-center gap-2">
@@ -241,18 +241,18 @@ export default function RoleQuickSwitcher({
           <button
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
             className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl border transition-all cursor-pointer shadow-xs min-w-0 ${isDropdownOpen
-                ? 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white border-cyan-400 font-bold shadow-md shadow-cyan-500/20'
+                ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold shadow-md shadow-amber-400/20'
                 : 'bg-slate-900/90 hover:bg-slate-800 text-slate-200 border-slate-700/80 hover:border-slate-600'
               }`}
             title="Click to switch between command stations & modules"
           >
-            <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${isDropdownOpen ? 'bg-white/20 text-white' : 'bg-slate-800 text-cyan-400'}`}>
+            <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${isDropdownOpen ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-800 text-amber-400'}`}>
               <ActiveIcon className="w-3.5 h-3.5" />
             </div>
             <span className="text-xs font-bold truncate max-w-[90px] xs:max-w-[130px] sm:max-w-[200px]">
               {activeItem.label}
             </span>
-            <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-white' : 'text-slate-400'}`} />
+            <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-slate-950' : 'text-slate-400'}`} />
           </button>
 
           {/* Quick Direct Jump Pills (Gracefully hidden on small screens, NO scrollbar) */}
@@ -287,9 +287,9 @@ export default function RoleQuickSwitcher({
              ======================================================== */}
           {isDropdownOpen && (
             <div className="fixed inset-x-2 top-14 mt-1.5 sm:absolute sm:inset-x-auto sm:top-full sm:mt-2 sm:left-1/2 sm:-translate-x-1/2 w-auto sm:w-96 max-h-[85vh] sm:max-h-[80vh] overflow-y-auto bg-slate-900/98 backdrop-blur-2xl border border-slate-700/80 rounded-2xl shadow-2xl z-50 p-3 space-y-3 animate-fade-in no-scrollbar">
-              <div className="flex items-center justify-between pb-2 border-b border-white/[0.08] px-1">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800 px-1">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1.5">
-                  <Sparkles className="w-3 h-3 text-cyan-400" />
+                  <Sparkles className="w-3 h-3 text-amber-400" />
                   Select Command Station
                 </span>
                 <span className="text-[10px] text-slate-500 font-mono">
@@ -299,7 +299,7 @@ export default function RoleQuickSwitcher({
 
               {/* Tier 1: Apex Leadership */}
               <div className="space-y-1">
-                <p className="text-[9px] font-extrabold uppercase tracking-widest text-cyan-400/80 px-2">
+                <p className="text-[9px] font-extrabold uppercase tracking-widest text-amber-400/80 px-2">
                   Apex & Regional Command
                 </p>
                 {visibleItems
@@ -312,7 +312,7 @@ export default function RoleQuickSwitcher({
                         key={item.label}
                         onClick={() => handleSelect(item)}
                         className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${isCurrent
-                            ? 'bg-cyan-500/15 text-white border border-cyan-400/40 font-bold'
+                            ? 'bg-amber-400/15 text-white border border-amber-400/40 font-bold'
                             : 'hover:bg-slate-800/80 text-slate-300 hover:text-white border border-transparent'
                           }`}
                       >
@@ -325,7 +325,7 @@ export default function RoleQuickSwitcher({
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-bold truncate flex items-center justify-between">
                             <span>{item.label}</span>
-                            {isCurrent && <Check className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
+                            {isCurrent && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
                           </div>
                           <div className="text-[10px] text-slate-400 truncate">{item.subtitle}</div>
                         </div>
@@ -349,7 +349,7 @@ export default function RoleQuickSwitcher({
                         key={item.label}
                         onClick={() => handleSelect(item)}
                         className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${isCurrent
-                            ? 'bg-cyan-500/15 text-white border border-cyan-400/40 font-bold'
+                            ? 'bg-amber-400/15 text-white border border-amber-400/40 font-bold'
                             : 'hover:bg-slate-800/80 text-slate-300 hover:text-white border border-transparent'
                           }`}
                       >
@@ -362,7 +362,7 @@ export default function RoleQuickSwitcher({
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-bold truncate flex items-center justify-between">
                             <span>{item.label}</span>
-                            {isCurrent && <Check className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
+                            {isCurrent && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
                           </div>
                           <div className="text-[10px] text-slate-400 truncate">{item.subtitle}</div>
                         </div>
@@ -386,7 +386,7 @@ export default function RoleQuickSwitcher({
                         key={item.label}
                         onClick={() => handleSelect(item)}
                         className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition cursor-pointer ${isCurrent
-                            ? 'bg-cyan-500/15 text-white border border-cyan-400/40 font-bold'
+                            ? 'bg-amber-400/15 text-white border border-amber-400/40 font-bold'
                             : 'hover:bg-slate-800/80 text-slate-300 hover:text-white border border-transparent'
                           }`}
                       >
@@ -399,7 +399,7 @@ export default function RoleQuickSwitcher({
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-bold truncate flex items-center justify-between">
                             <span>{item.label}</span>
-                            {isCurrent && <Check className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
+                            {isCurrent && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
                           </div>
                           <div className="text-[10px] text-slate-400 truncate">{item.subtitle}</div>
                         </div>
@@ -415,7 +415,7 @@ export default function RoleQuickSwitcher({
                     {session?.userName || 'Connected Operator'}
                   </span>
                   {session?.mobileNumber && (
-                    <span className="font-mono text-cyan-400 font-bold text-[10px]">
+                    <span className="font-mono text-amber-400 font-bold text-[10px]">
                       +91 {session.mobileNumber}
                     </span>
                   )}
@@ -430,7 +430,7 @@ export default function RoleQuickSwitcher({
                       }}
                       className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition cursor-pointer"
                     >
-                      <Smartphone className="w-3.5 h-3.5 text-cyan-400" />
+                      <Smartphone className="w-3.5 h-3.5 text-amber-400" />
                       <span>Change Phone</span>
                     </button>
                   )}
@@ -458,21 +458,21 @@ export default function RoleQuickSwitcher({
            ======================================================== */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-400">
-            <Radio className="w-3 h-3 text-cyan-400" />
+            <Radio className="w-3 h-3 text-amber-400" />
             <span>Hierarchy:</span>
-            <span className="font-mono text-cyan-400 font-bold">{enabledLevels.length} Tiers</span>
+            <span className="font-mono text-amber-400 font-bold">{enabledLevels.length} Tiers</span>
           </div>
 
           {session?.mobileNumber && (
             <button
               onClick={() => setIsMobileModalOpen(true)}
-              className="flex items-center gap-1 sm:gap-1.5 p-2 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-900 hover:bg-cyan-500/15 text-slate-300 hover:text-cyan-300 border border-slate-800 hover:border-cyan-500/30 text-xs font-semibold transition-all cursor-pointer shadow-xs active:scale-95 touch-manipulation"
+              className="flex items-center gap-1 sm:gap-1.5 p-2 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-900 hover:bg-amber-500/15 text-slate-300 hover:text-amber-300 border border-slate-800 hover:border-amber-500/30 text-xs font-semibold transition-all cursor-pointer shadow-xs active:scale-95 touch-manipulation"
               title="Change Registered Mobile Number"
               aria-label="Change Mobile Number"
             >
-              <Smartphone className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <Smartphone className="w-3.5 h-3.5 text-amber-400 shrink-0" />
               <span className="font-mono text-[11px] hidden sm:inline">+91 {session.mobileNumber}</span>
-              <span className="text-[10px] text-cyan-400 font-bold ml-0.5 px-1.5 py-0.5 rounded bg-cyan-400/10 border border-cyan-400/20 hidden sm:inline">Change</span>
+              <span className="text-[10px] text-amber-400 font-bold ml-0.5 px-1.5 py-0.5 rounded bg-amber-400/10 border border-amber-400/20 hidden sm:inline">Change</span>
             </button>
           )}
 

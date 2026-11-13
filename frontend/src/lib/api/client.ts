@@ -23,7 +23,6 @@ export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}
   const fallbackUrl = endpoint.startsWith('http') ? endpoint : normalizedEndpoint;
 
   const headers = new Headers(init.headers);
-  headers.set('ngrok-skip-browser-warning', 'true');
   const token = getAuthToken();
 
   if (token) {
@@ -67,26 +66,17 @@ export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}
       headers,
       credentials: 'include',
     });
-  } catch (primaryErr: any) {
-    if (!primaryUrl.startsWith('http://') && !primaryUrl.startsWith('https://')) {
-      try {
-        res = await fetch(fallbackUrl, {
-          ...init,
-          headers,
-          credentials: 'include',
-        });
-      } catch (secondErr: any) {
-        throw new Error(secondErr?.message || 'Failed to communicate with API server. Please check your backend connection.');
-      }
-    } else {
-      throw new Error(primaryErr?.message || 'Could not connect to API server. Please check your network connection.');
+  } catch (_err) {
+    // If primary URL failed (e.g. cross-port block on mobile/network), try relative fallback via Vite proxy
+    try {
+      res = await fetch(fallbackUrl, {
+        ...init,
+        headers,
+        credentials: 'include',
+      });
+    } catch (secondErr: any) {
+      throw new Error(secondErr?.message || 'Failed to communicate with API server. Please check your backend connection.');
     }
-  }
-
-  const contentType = res.headers.get('content-type') || '';
-  if (!contentType.includes('application/json')) {
-    const rawText = await res.text();
-    throw new Error(`Unexpected server response (HTTP ${res.status}). Server may be restarting.`);
   }
 
   if (!res.ok) {
@@ -141,7 +131,6 @@ export async function apiFetchWithMeta<T = any>(
   const fallbackUrl = endpoint.startsWith('http') ? endpoint : normalizedEndpoint;
 
   const headers = new Headers(init.headers);
-  headers.set('ngrok-skip-browser-warning', 'true');
   const token = getAuthToken();
 
   if (token) {
@@ -184,26 +173,16 @@ export async function apiFetchWithMeta<T = any>(
       headers,
       credentials: 'include',
     });
-  } catch (primaryErr: any) {
-    if (!primaryUrl.startsWith('http://') && !primaryUrl.startsWith('https://')) {
-      try {
-        res = await fetch(fallbackUrl, {
-          ...init,
-          headers,
-          credentials: 'include',
-        });
-      } catch (secondErr: any) {
-        throw new Error(secondErr?.message || 'Failed to communicate with API server. Please check your backend connection.');
-      }
-    } else {
-      throw new Error(primaryErr?.message || 'Could not connect to API server. Please check your network connection.');
+  } catch (_err) {
+    try {
+      res = await fetch(fallbackUrl, {
+        ...init,
+        headers,
+        credentials: 'include',
+      });
+    } catch (secondErr: any) {
+      throw new Error(secondErr?.message || 'Failed to communicate with API server. Please check your backend connection.');
     }
-  }
-
-  const contentType = res.headers.get('content-type') || '';
-  if (!contentType.includes('application/json')) {
-    const rawText = await res.text();
-    throw new Error(`Unexpected server response (HTTP ${res.status}). Server may be restarting.`);
   }
 
   if (!res.ok) {

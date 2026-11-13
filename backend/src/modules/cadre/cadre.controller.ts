@@ -190,37 +190,24 @@ export class CadreController {
       }
     }
 
-    let fileBuffer: Buffer | null = null;
-    let partyCode: string | undefined;
-    let defaultPasscode: string | undefined;
-
+    let part: any;
     try {
-      const parts = req.parts();
-      for await (const part of parts) {
-        if (part.type === 'file') {
-          const buf = await part.toBuffer();
-          if (!fileBuffer) {
-            fileBuffer = buf;
-          }
-        } else {
-          const val = typeof part.value === 'string' ? part.value.trim() : '';
-          if (part.fieldname === 'partyCode' && val) {
-            partyCode = val;
-          } else if (part.fieldname === 'defaultPasscode' && val) {
-            defaultPasscode = val;
-          }
-        }
-      }
+      part = await req.file();
     } catch (err: any) {
       return reply.status(400).send(errorResponse(err.message || 'Failed to read multipart stream', 'BAD_REQUEST'));
     }
 
-    if (!fileBuffer || fileBuffer.length === 0) {
+    if (!part) {
       return reply.status(400).send(errorResponse('No spreadsheet file uploaded', 'NO_FILE_UPLOADED'));
     }
 
+    const fields = part.fields as Record<string, any>;
+    const partyCode = fields?.partyCode?.value as string | undefined;
+    const defaultPasscode = fields?.defaultPasscode?.value as string | undefined;
+
     try {
-      const entries = InchargeProvisioningService.parseRosterSpreadsheet(fileBuffer);
+      const buffer = await part.toBuffer();
+      const entries = InchargeProvisioningService.parseRosterSpreadsheet(buffer);
       const result = await InchargeProvisioningService.provisionRosterWithRealNumbers({
         constituencyId,
         organisationId: req.user?.organisationId ?? undefined,

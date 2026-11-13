@@ -98,18 +98,7 @@ export function buildApp(): FastifyInstance {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'X-Requested-With',
-      'Accept',
-      'Origin',
-      'ngrok-skip-browser-warning',
-      'x-organisation-id',
-      'x-tenant-code',
-      'x-device-id',
-      'x-app-version',
-    ],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
     exposedHeaders: ['Set-Cookie'],
   });
 

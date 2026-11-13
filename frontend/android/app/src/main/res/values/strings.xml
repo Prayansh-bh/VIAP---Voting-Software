@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">VIAP Mobile</string>
-    <string name="title_activity_main">VIAP Mobile</string>
-    <string name="package_name">com.viap.voting</string>
-    <string name="custom_url_scheme">com.viap.voting</string>
-</resources>
