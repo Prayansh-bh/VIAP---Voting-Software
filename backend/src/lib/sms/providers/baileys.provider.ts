@@ -90,10 +90,97 @@ export class BaileysWhatsAppProvider implements SmsProvider {
   }
 
   /**
+   * Restores Baileys multi-file auth credentials from PostgreSQL database if local disk is empty.
+   * This provides free persistence on serverless / ephemeral container hosts (like Render) without paid disks.
+   */
+  private async restoreAuthStateFromDb(): Promise<void> {
+    try {
+      if (!fs.existsSync(this.authDir)) {
+        fs.mkdirSync(this.authDir, { recursive: true });
+      }
+
+      const localCreds = path.join(this.authDir, 'creds.json');
+      if (fs.existsSync(localCreds) && fs.statSync(localCreds).size > 10) {
+        return;
+      }
+
+      const assets = await prisma.cMSAsset.findMany({
+        where: {
+          filename: {
+            startsWith: 'baileys_auth/',
+          },
+        },
+      });
+
+      if (assets.length > 0) {
+        for (const asset of assets) {
+          const relFilename = asset.filename.replace(/^baileys_auth\//, '');
+          const targetPath = path.join(this.authDir, relFilename);
+          fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+          fs.writeFileSync(targetPath, Buffer.from(asset.dataBase64, 'base64'));
+        }
+        console.log(`[WHATSAPP BAILEYS] Restored ${assets.length} auth credential keys from PostgreSQL database.`);
+      }
+    } catch (err: any) {
+      console.warn('[WHATSAPP BAILEYS] Notice: Could not restore auth state from DB:', err?.message);
+    }
+  }
+
+  /**
+   * Persists all files in the auth directory to PostgreSQL database.
+   */
+  private async persistAuthStateToDb(): Promise<void> {
+    try {
+      if (!fs.existsSync(this.authDir)) return;
+
+      const files = fs.readdirSync(this.authDir);
+      for (const file of files) {
+        const filePath = path.join(this.authDir, file);
+        if (fs.statSync(filePath).isFile()) {
+          const content = fs.readFileSync(filePath);
+          const filenameKey = `baileys_auth/${file}`;
+          await prisma.cMSAsset.upsert({
+            where: { filename: filenameKey },
+            create: {
+              filename: filenameKey,
+              mimeType: 'application/json',
+              dataBase64: content.toString('base64'),
+              size: content.length,
+            },
+            update: {
+              dataBase64: content.toString('base64'),
+              size: content.length,
+            },
+          });
+        }
+      }
+    } catch (err: any) {
+      console.warn('[WHATSAPP BAILEYS] Notice: Failed to sync auth state to DB:', err?.message);
+    }
+  }
+
+  /**
+   * Removes all stored Baileys auth keys from PostgreSQL on device logout.
+   */
+  private async clearAuthStateFromDb(): Promise<void> {
+    try {
+      await prisma.cMSAsset.deleteMany({
+        where: {
+          filename: {
+            startsWith: 'baileys_auth/',
+          },
+        },
+      });
+    } catch (err: any) {
+      console.warn('[WHATSAPP BAILEYS] Notice: Failed to clear auth state from DB:', err?.message);
+    }
+  }
+
+  /**
    * Initializes or re-establishes the Baileys WhatsApp Web socket.
    */
   async initialize(): Promise<WASocket> {
-    if (this.sock && this.isConnected) {
+    if (this.sock && (this.isConnected || this.currentQr || this.isInitializing)) {
       return this.sock;
     }
 
@@ -113,6 +200,9 @@ export class BaileysWhatsAppProvider implements SmsProvider {
 
       this.isInitializing = true;
       try {
+        // Restore credentials from PostgreSQL database if running on ephemeral disk
+        await this.restoreAuthStateFromDb();
+
         // Clean up previous socket instance before re-creating
         if (this.sock) {
           try {
@@ -145,12 +235,13 @@ export class BaileysWhatsAppProvider implements SmsProvider {
 
         this.sock = sock;
 
-        // Serialize credential updates to prevent concurrent write corruption
+        // Serialize credential updates to prevent concurrent write corruption and persist to DB
         sock.ev.on('creds.update', () => {
           this.saveCredsQueue = this.saveCredsQueue
             .then(async () => {
               try {
                 await saveCreds();
+                await this.persistAuthStateToDb();
               } catch (err: any) {
                 console.error('[WHATSAPP BAILEYS] Failed to persist credentials:', err?.message);
               }
@@ -175,6 +266,7 @@ export class BaileysWhatsAppProvider implements SmsProvider {
               clearTimeout(this.reconnectTimer);
               this.reconnectTimer = null;
             }
+            this.persistAuthStateToDb().catch(() => {});
             const userJid = sock.user?.id || 'Connected Phone';
             console.log(`\n======================================================================`);
             console.log(` ✅ [WHATSAPP BAILEYS ACTIVE]`);
@@ -187,6 +279,7 @@ export class BaileysWhatsAppProvider implements SmsProvider {
             this.isConnected = false;
             this.currentQr = null;
             this.isInitializing = false;
+            this.sock = null;
 
             const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
@@ -207,7 +300,7 @@ export class BaileysWhatsAppProvider implements SmsProvider {
               } catch (cleanupErr) {
                 console.error('[WHATSAPP BAILEYS] Failed to remove credentials directory:', cleanupErr);
               }
-
+              this.clearAuthStateFromDb().catch(() => {});
               this.scheduleReconnect(3000);
             }
           }

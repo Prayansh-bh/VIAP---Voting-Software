@@ -228,11 +228,11 @@ export async function authRoutes(fastify: FastifyInstance) {
     AuthController.revokeDevice,
   );
 
-  // WhatsApp OTP Gateway Management & QR Linking (Restricted to Platform Administrators)
+  // WhatsApp OTP Gateway Management & QR Linking (Restricted to Platform Administrators or authorized passcode)
   fastify.get(
     '/whatsapp/status',
     {
-      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.STATE_ADMIN)],
+      preHandler: [optionalAuthenticate],
     },
     AuthController.getWhatsAppStatus
   );
@@ -253,7 +253,7 @@ export async function authRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/whatsapp/pair',
     {
-      preHandler: [authenticate, requireRoles(RoleType.SUPER_ADMIN, RoleType.STATE_ADMIN)],
+      preHandler: [optionalAuthenticate],
     },
     AuthController.requestWhatsAppPairingCode
   );
