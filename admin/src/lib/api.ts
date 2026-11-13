@@ -7,6 +7,9 @@ const getApiBase = () => {
     const cleaned = envUrl.replace(/\/+$/, '');
     return cleaned.endsWith('/api') ? cleaned : `${cleaned}/api`;
   }
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return 'https://viap-backend.onrender.com/api';
+  }
   return 'http://localhost:4000/api';
 };
 

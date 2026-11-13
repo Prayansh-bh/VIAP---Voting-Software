@@ -9,8 +9,12 @@ export const getApiBase = (): string => {
       return envUrl.replace(/\/+$/, '');
     }
   }
-  // If in browser, use relative URL (empty string) so Vite proxy handles requests from any device/laptop/phone
+  // In production (e.g. Vercel deployment), point directly to production Render backend
   if (typeof window !== 'undefined') {
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return 'https://viap-backend.onrender.com';
+    }
+    // Local dev: use relative URL so Vite proxy handles requests
     return '';
   }
   return 'http://localhost:4000';

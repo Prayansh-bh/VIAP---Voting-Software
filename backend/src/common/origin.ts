@@ -27,17 +27,23 @@ export function isOriginAllowed(origin: string | undefined): boolean {
     return true;
   }
 
+  // Automatically trust all Vercel deployments and Render hostnames
+  if (
+    /^https:\/\/[a-zA-Z0-9_.-]+\.vercel\.app$/.test(origin) ||
+    /^https:\/\/[a-zA-Z0-9_.-]+\.onrender\.com$/.test(origin)
+  ) {
+    return true;
+  }
+
   const trusted = getTrustedOrigins();
   if (trusted.includes(origin)) {
     return true;
   }
 
-  if (env.NODE_ENV !== 'production') {
-    // Development/test localhost allowance
-    const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-    if (isLocal) {
-      return true;
-    }
+  // Always allow local development ports
+  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  if (isLocal) {
+    return true;
   }
 
   return false;

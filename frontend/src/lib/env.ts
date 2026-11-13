@@ -7,6 +7,9 @@ export const getAdminUrl = (): string => {
     return (import.meta.env.VITE_ADMIN_URL as string).replace(/\/+$/, '');
   }
   if (typeof window !== 'undefined') {
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return 'https://admin-delta-five-56.vercel.app';
+    }
     return `${window.location.protocol}//${window.location.hostname}:3001`;
   }
   return 'http://localhost:3001';
@@ -20,6 +23,9 @@ export const getApiUrl = (): string => {
     }
   }
   if (typeof window !== 'undefined') {
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return 'https://viap-backend.onrender.com';
+    }
     return '';
   }
   return 'http://localhost:4000';

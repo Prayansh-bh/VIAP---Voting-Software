@@ -98,7 +98,20 @@ export function buildApp(): FastifyInstance {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept',
+      'Origin',
+      'x-organisation-id',
+      'x-tenant-code',
+      'x-admin-token',
+      'x-app-id',
+      'x-custom-parties',
+      'Cache-Control',
+      'Pragma',
+    ],
     exposedHeaders: ['Set-Cookie'],
   });
 
