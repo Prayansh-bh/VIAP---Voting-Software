@@ -22,6 +22,11 @@ export function isOriginAllowed(origin: string | undefined): boolean {
     return true; // cURL, mobile apps, server-to-server health checks
   }
 
+  // Allow Capacitor and Ionic mobile application origins
+  if (origin.startsWith('capacitor://') || origin.startsWith('ionic://') || origin === 'http://localhost' || origin === 'https://localhost') {
+    return true;
+  }
+
   // Allow all origins when CORS_ORIGIN is '*' or empty
   if (!env.CORS_ORIGIN || env.CORS_ORIGIN === '*') {
     return true;

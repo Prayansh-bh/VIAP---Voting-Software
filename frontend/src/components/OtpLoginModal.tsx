@@ -102,12 +102,12 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
         {/* Header */}
         <div className="bg-slate-50 border-b border-slate-100 px-5 py-4 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-300 text-amber-700 flex items-center justify-center font-bold shadow-xs">
-              <KeyRound className="w-5 h-5 text-amber-600" />
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 flex items-center justify-center font-bold shadow-xs">
+              <KeyRound className="w-5 h-5 text-cyan-400" />
             </div>
             <div>
               <h3 className="text-sm font-black text-slate-900 leading-tight">Command Station Login</h3>
-              <p className="text-[11px] text-amber-700 font-bold mt-0.5">
+              <p className="text-[11px] text-cyan-400 font-bold mt-0.5">
                 {role ? role.name : 'Direct Mobile OTP Login'}
               </p>
             </div>
@@ -167,7 +167,7 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
                       value={mobileInput}
                       onChange={(e) => setMobileInput(e.target.value.replace(/\D/g, '').slice(0, 10))}
                       placeholder="e.g. 9340423885 or registered mobile"
-                      className="w-full pl-12 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 font-bold focus:bg-white focus:border-amber-400 focus:outline-none transition-all font-mono tracking-wider"
+                      className="w-full pl-12 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 font-bold focus:bg-white focus:border-cyan-400 focus:outline-none transition-all font-mono tracking-wider"
                       required
                       autoFocus
                     />
@@ -198,7 +198,7 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
                       onClick={() => setChannel('SMS')}
                       className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                         channel === 'SMS'
-                          ? 'bg-amber-50 border-amber-500 text-amber-900 shadow-2xs'
+                          ? 'bg-cyan-500/10 border-cyan-500 text-cyan-300 shadow-2xs'
                           : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                       }`}
                     >
@@ -211,7 +211,7 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
                 <button
                   type="submit"
                   disabled={isSubmitting || mobileInput.length < 10}
-                  className="w-full py-2.5 bg-amber-400 hover:bg-amber-300 disabled:bg-slate-200 disabled:text-slate-400 text-slate-950 font-black rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed active:scale-98"
+                  className="w-full py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 disabled:opacity-40 text-white font-black rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed active:scale-98"
                 >
                   {isSubmitting ? (
                     <LoaderCircle className="w-4 h-4 animate-spin text-slate-950" />
@@ -254,7 +254,7 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
                     type="button"
                     disabled={cooldown > 0 || isSubmitting}
                     onClick={() => handleRequestOtp(undefined, mobileNumber)}
-                    className="text-[11px] font-bold text-amber-700 hover:text-amber-800 disabled:text-slate-400 flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+                    className="text-[11px] font-bold text-cyan-400 hover:text-cyan-300 disabled:text-slate-400 flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
                   >
                     <RefreshCw className={`w-3 h-3 ${isSubmitting ? 'animate-spin' : ''}`} />
                     {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend Code'}
@@ -265,7 +265,7 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
                   value={otpCode}
                   onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
                   placeholder="------"
-                  className="w-full text-center tracking-[0.4em] font-mono py-3 bg-slate-50 border border-slate-200 rounded-xl text-2xl text-slate-900 font-black focus:bg-white focus:border-amber-400 focus:outline-none transition-all shadow-inner"
+                  className="w-full text-center tracking-[0.4em] font-mono py-3 bg-slate-50 border border-slate-200 rounded-xl text-2xl text-slate-900 font-black focus:bg-white focus:border-cyan-400 focus:outline-none transition-all shadow-inner"
                   required
                   autoFocus
                 />
@@ -286,7 +286,7 @@ export default function OtpLoginModal({ role, onClose, onSuccess }: OtpLoginModa
                 <button
                   type="submit"
                   disabled={isSubmitting || otpCode.length < 6}
-                  className="flex-1 py-2.5 bg-amber-400 hover:bg-amber-300 disabled:bg-slate-200 disabled:text-slate-400 text-slate-950 font-black rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed active:scale-98"
+                  className="flex-1 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 disabled:opacity-40 text-white font-black rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed active:scale-98"
                 >
                   {isSubmitting ? <LoaderCircle className="w-4 h-4 animate-spin" /> : null}
                   Verify & Sign In

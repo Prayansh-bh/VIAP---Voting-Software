@@ -154,7 +154,7 @@ export default function ChangeMobileModal({
         {/* Header */}
         <div className="p-5 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400">
+            <div className="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
               <Smartphone className="w-4 h-4" />
             </div>
             <div>
@@ -213,7 +213,7 @@ export default function ChangeMobileModal({
                     maxLength={10}
                     value={newMobile}
                     onChange={(e) => setNewMobile(e.target.value.replace(/\D/g, ''))}
-                    className="w-full pl-12 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs font-mono focus:border-amber-400 outline-none transition"
+                    className="w-full pl-12 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs font-mono focus:border-cyan-400 outline-none transition"
                     placeholder="Enter new 10-digit mobile"
                   />
                 </div>
@@ -232,7 +232,7 @@ export default function ChangeMobileModal({
                     onClick={() => setChannel('SMS')}
                     className={`py-2 px-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
                       channel === 'SMS'
-                        ? 'bg-amber-400 text-slate-950 border-amber-400'
+                        ? 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white border-cyan-400'
                         : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
                     }`}
                   >
@@ -256,7 +256,7 @@ export default function ChangeMobileModal({
                 <button
                   type="submit"
                   disabled={loading || newMobile.length !== 10}
-                  className="w-full py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs shadow-lg shadow-amber-400/20 transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black text-xs shadow-lg shadow-cyan-500/25 transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
                 >
                   {loading ? (
                     <>
@@ -280,7 +280,7 @@ export default function ChangeMobileModal({
                   <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                     Verifying New Number
                   </div>
-                  <div className="text-xs font-mono font-bold text-amber-400 mt-0.5">
+                  <div className="text-xs font-mono font-bold text-cyan-400 mt-0.5">
                     +91 {newMobile}
                   </div>
                 </div>
@@ -313,7 +313,7 @@ export default function ChangeMobileModal({
                     autoFocus
                     value={otpCode}
                     onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
-                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm font-mono tracking-widest text-center focus:border-amber-400 outline-none transition"
+                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm font-mono tracking-widest text-center focus:border-cyan-400 outline-none transition"
                     placeholder="• • • • • •"
                   />
                 </div>
@@ -330,7 +330,7 @@ export default function ChangeMobileModal({
                     type="button"
                     onClick={() => handleRequestOtp()}
                     disabled={loading || cooldownSeconds > 0}
-                    className="text-amber-400 hover:text-amber-300 font-bold text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    className="text-cyan-400 hover:text-cyan-300 font-bold text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-50"
                   >
                     <RefreshCw className="w-3 h-3" />
                     <span>Resend OTP</span>

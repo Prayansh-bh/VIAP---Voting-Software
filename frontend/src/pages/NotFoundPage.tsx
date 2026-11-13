@@ -26,12 +26,12 @@ export default function NotFoundPage({ onGoHome, onGoLogin }: NotFoundPageProps)
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-950 to-black text-white flex flex-col items-center justify-center p-6 select-none">
       <div className="max-w-md w-full text-center space-y-6">
-        <div className="w-20 h-20 mx-auto rounded-3xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shadow-2xl shadow-amber-500/20">
-          <Compass className="w-10 h-10 text-amber-400 animate-pulse" />
+        <div className="w-20 h-20 mx-auto rounded-3xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center shadow-2xl shadow-cyan-500/25">
+          <Compass className="w-10 h-10 text-cyan-400 animate-pulse" />
         </div>
 
         <div className="space-y-2">
-          <div className="inline-block px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase bg-amber-500/10 text-amber-300 border border-amber-500/20">
+          <div className="inline-block px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">
             HTTP 404 &bull; Route Unreachable
           </div>
           <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
@@ -46,7 +46,7 @@ export default function NotFoundPage({ onGoHome, onGoLogin }: NotFoundPageProps)
           <button
             type="button"
             onClick={handleHome}
-            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/25 transition-all cursor-pointer"
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black text-sm shadow-lg shadow-cyan-500/25 transition-all cursor-pointer"
           >
             <Home className="w-4 h-4" />
             <span>Return to Landing</span>

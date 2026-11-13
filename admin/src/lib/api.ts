@@ -879,16 +879,30 @@ export async function uploadInchargeRosterSpreadsheet(
 ): Promise<any> {
   const token = getAdminToken();
   const formData = new FormData();
-  formData.append('file', file);
   if (partyCode) formData.append('partyCode', partyCode);
   if (defaultPasscode) formData.append('defaultPasscode', defaultPasscode);
+  formData.append('file', file);
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 180_000);
 
   const url = `${API_BASE}/cadre/roster-upload/${encodeURIComponent(constituencyId)}`;
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: formData,
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error('Roster upload timed out while waiting for the server. Please verify database connectivity and retry.');
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {

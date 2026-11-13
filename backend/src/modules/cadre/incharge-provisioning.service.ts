@@ -1274,12 +1274,17 @@ export class InchargeProvisioningService {
       }
 
       let psIdx = 0;
-      for (const [key, psData] of psMap) {
+      for (const [_key, psData] of psMap) {
         psIdx++;
+        const slotCode = `VIL-${String(psIdx).padStart(3, '0')}`;
         const vAssigns = psData.pollingStationId
           ? (psAssignMap.get(psData.pollingStationId) || [])
           : existingAssignments.filter(
-              (a) => a.roleType === RoleType.VILLAGE_INCHARGE && a.mandalId === psData.mandalId
+              (a) =>
+                a.roleType === RoleType.VILLAGE_INCHARGE &&
+                a.mandalId === psData.mandalId &&
+                (a.user?.userCode?.toUpperCase() === slotCode ||
+                  a.user?.userCode?.toUpperCase().endsWith(`-${slotCode}`))
             );
         const vStatus: 'ASSIGNED' | 'MISSING' | 'CONFLICT' =
           vAssigns.length === 1 ? 'ASSIGNED' : vAssigns.length > 1 ? 'CONFLICT' : 'MISSING';
@@ -1288,7 +1293,6 @@ export class InchargeProvisioningService {
         else if (vStatus === 'CONFLICT') villageConflict++;
         else villageMissing++;
 
-        const slotCode = `VIL-${String(psIdx).padStart(3, '0')}`;
         const slug = psData.pollingStationName.replace(/\W/g, '').slice(0, 12);
         psSlots.push({
           unitKey: `PS-${psData.mandalId}-${slug}-${psIdx}`,
@@ -1463,6 +1467,7 @@ export class InchargeProvisioningService {
   /**
    * Generates a pre-filled downloadable roster template in XLSX or CSV format
    * containing all hierarchy slots for the constituency.
+   * Legacy synthetic numbers (9101-9104 range) are stripped so the admin can fill real numbers cleanly.
    */
   static async generateRosterTemplate(
     constituencyId: string,
@@ -1470,16 +1475,21 @@ export class InchargeProvisioningService {
   ): Promise<Buffer | string> {
     const slotsResp = await this.getRequiredRosterSlots(constituencyId);
 
-    const rows = slotsResp.allSlots.map((slot) => ({
-      'Tier Level': slot.level,
-      'Slot Code': slot.slotCode,
-      'Unit Key': slot.unitKey,
-      'Jurisdiction Name': slot.jurisdictionName,
-      'Voter Count': slot.voterCount,
-      'Incharge Name': slot.assignedUser?.name || '',
-      'Mobile Number (10 Digits)': slot.assignedUser?.mobileNumber || '',
-      'Default Passcode': '123456',
-    }));
+    const rows = slotsResp.allSlots.map((slot) => {
+      const existingMobile = slot.assignedUser?.mobileNumber || '';
+      const cleanExisting = existingMobile.replace(/\D/g, '').slice(-10);
+      const isSynthetic = /^910[1-4]\d{6}$/.test(cleanExisting) || !/^[6-9]\d{9}$/.test(cleanExisting);
+      return {
+        'Tier Level': slot.level,
+        'Slot Code': slot.slotCode,
+        'Unit Key': slot.unitKey,
+        'Jurisdiction Name': slot.jurisdictionName,
+        'Voter Count': slot.voterCount,
+        'Incharge Name': isSynthetic ? '' : (slot.assignedUser?.name || ''),
+        'Mobile Number (10 Digits)': isSynthetic ? '' : cleanExisting,
+        'Default Passcode': '123456',
+      };
+    });
 
     const worksheet = xlsx.utils.json_to_sheet(rows);
     const workbook = xlsx.utils.book_new();
@@ -1495,6 +1505,8 @@ export class InchargeProvisioningService {
 
   /**
    * Parses uploaded Excel (.xlsx, .xls) or CSV spreadsheet buffer into validated cadre input rows.
+   * Normalizes column headers (BOM/case/punctuation insensitive), locates header rows across sheets,
+   * and converts numeric Excel cells without precision/float suffix issues.
    */
   static parseRosterSpreadsheet(buffer: Buffer): CadreInputEntry[] {
     const workbook = xlsx.read(buffer, { type: 'buffer' });
@@ -1505,80 +1517,117 @@ export class InchargeProvisioningService {
       throw err;
     }
 
-    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rawRows: any[] = xlsx.utils.sheet_to_json(firstSheet, { defval: '' });
+    const normalizeHeader = (val: unknown): string =>
+      String(val ?? '')
+        .replace(/^\uFEFF/, '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
 
-    if (!rawRows || rawRows.length === 0) {
-      const err: any = new Error('The uploaded spreadsheet contains no data rows.');
+    const cellToString = (val: unknown): string => {
+      if (val === null || val === undefined) return '';
+      if (typeof val === 'number') {
+        if (!Number.isFinite(val)) return '';
+        return Number.isInteger(val) ? val.toFixed(0) : String(Math.round(val));
+      }
+      return String(val).replace(/^\uFEFF/, '').trim().replace(/\.0+$/, '');
+    };
+
+    const MOBILE_KEYS = [
+      'mobilenumber10digits', 'mobilenumber', 'mobileno', 'mobile', 'phonenumber', 'phoneno', 'phone',
+      'contactnumber', 'contactno', 'contact', 'whatsappnumber', 'whatsappno', 'whatsapp', 'cell',
+    ];
+    const SLOT_KEYS = ['slotcode', 'slot', 'usercode', 'code', 'cadrecode', 'inchargecode'];
+    const UNIT_KEYS = ['unitkey', 'unitid', 'key'];
+    const NAME_KEYS = ['inchargename', 'leadername', 'fullname', 'name', 'incharge', 'personname'];
+    const PASSCODE_KEYS = ['defaultpasscode', 'passcode', 'password', 'pin'];
+    const LEVEL_KEYS = ['tierlevel', 'level', 'tier', 'role'];
+
+    let headerRowIdx = -1;
+    let matrix: unknown[][] = [];
+    let normalizedHeaders: string[] = [];
+
+    for (const sheetName of workbook.SheetNames) {
+      const sheet = workbook.Sheets[sheetName];
+      if (!sheet) continue;
+      const rows = xlsx.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: true });
+      if (!rows || rows.length === 0) continue;
+
+      for (let r = 0; r < Math.min(rows.length, 15); r++) {
+        const rowVals = Array.isArray(rows[r]) ? rows[r] : [];
+        const normRow = rowVals.map(normalizeHeader);
+        const hasMobileCol = normRow.some((h) => MOBILE_KEYS.includes(h));
+        const hasSlotOrUnitCol = normRow.some((h) => SLOT_KEYS.includes(h) || UNIT_KEYS.includes(h));
+        if (hasMobileCol && (hasSlotOrUnitCol || normRow.filter(Boolean).length >= 2)) {
+          headerRowIdx = r;
+          matrix = rows;
+          normalizedHeaders = normRow;
+          break;
+        }
+      }
+      if (headerRowIdx >= 0) break;
+    }
+
+    if (headerRowIdx < 0) {
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const fallbackRows = firstSheet ? xlsx.utils.sheet_to_json<unknown[]>(firstSheet, { header: 1, defval: '', raw: true }) : [];
+      if (!fallbackRows || fallbackRows.length === 0) {
+        const err: any = new Error('The uploaded spreadsheet contains no data rows.');
+        err.statusCode = 400;
+        err.code = 'NO_DATA_ROWS';
+        throw err;
+      }
+      const err: any = new Error(
+        'Could not locate required columns ("Mobile Number (10 Digits)" and "Slot Code" / "Unit Key") in the uploaded spreadsheet. Please use the downloaded template columns.'
+      );
       err.statusCode = 400;
-      err.code = 'NO_DATA_ROWS';
+      err.code = 'UNRECOGNIZED_HEADERS';
       throw err;
     }
 
+    if (matrix.length <= headerRowIdx + 1) {
+      return [];
+    }
+
+    const findColIdx = (candidates: string[]): number => {
+      for (const c of candidates) {
+        const idx = normalizedHeaders.indexOf(c);
+        if (idx >= 0) return idx;
+      }
+      return -1;
+    };
+
+    const mobileCol = findColIdx(MOBILE_KEYS);
+    const slotCol = findColIdx(SLOT_KEYS);
+    const unitCol = findColIdx(UNIT_KEYS);
+    const nameCol = findColIdx(NAME_KEYS);
+    const passcodeCol = findColIdx(PASSCODE_KEYS);
+    const levelCol = findColIdx(LEVEL_KEYS);
+
     const entries: CadreInputEntry[] = [];
+    const IGNORED_VALUES = new Set(['', 'N/A', 'NA', 'NONE', 'UNASSIGNED', 'PENDING', 'NULL', '-', '0']);
 
-    for (let rIdx = 0; rIdx < rawRows.length; rIdx++) {
-      const row = rawRows[rIdx];
-      const mobileVal = String(
-        row['Mobile Number (10 Digits)'] ||
-        row['Mobile Number'] ||
-        row['Mobile'] ||
-        row['Phone'] ||
-        row['Phone Number'] ||
-        row['mobileNumber'] ||
-        ''
-      ).trim();
+    for (let rIdx = headerRowIdx + 1; rIdx < matrix.length; rIdx++) {
+      const row = Array.isArray(matrix[rIdx]) ? matrix[rIdx] : [];
+      const mobileVal = mobileCol >= 0 ? cellToString(row[mobileCol]) : '';
 
-      // Skip rows with blank or placeholder mobile numbers
-      if (!mobileVal || mobileVal === 'N/A' || mobileVal === '-' || mobileVal === '0') {
+      if (IGNORED_VALUES.has(mobileVal.toUpperCase())) {
         continue;
       }
 
-      const slotCode = String(
-        row['Slot Code'] ||
-        row['SlotCode'] ||
-        row['Code'] ||
-        row['slotCode'] ||
-        ''
-      ).trim();
-
-      const unitKey = String(
-        row['Unit Key'] ||
-        row['UnitKey'] ||
-        row['unitKey'] ||
-        ''
-      ).trim();
-
-      const inchargeName = String(
-        row['Incharge Name'] ||
-        row['Name'] ||
-        row['Full Name'] ||
-        row['inchargeName'] ||
-        ''
-      ).trim();
-
-      const passcode = String(
-        row['Default Passcode'] ||
-        row['Passcode'] ||
-        row['Password'] ||
-        row['passcode'] ||
-        '123456'
-      ).trim();
-
-      const level = String(
-        row['Tier Level'] ||
-        row['Level'] ||
-        row['Tier'] ||
-        row['level'] ||
-        ''
-      ).trim() as any;
+      const slotCode = slotCol >= 0 ? cellToString(row[slotCol]) : '';
+      const unitKey = unitCol >= 0 ? cellToString(row[unitCol]) : '';
+      const rawName = nameCol >= 0 ? cellToString(row[nameCol]) : '';
+      const inchargeName = rawName.toUpperCase() === 'UNASSIGNED' ? '' : rawName;
+      const rawPasscode = passcodeCol >= 0 ? cellToString(row[passcodeCol]) : '';
+      const level = (levelCol >= 0 ? cellToString(row[levelCol]) : '') as any;
 
       entries.push({
         unitKey: unitKey || undefined,
         slotCode: slotCode || undefined,
         inchargeName: inchargeName || undefined,
         mobileNumber: mobileVal,
-        passcode: passcode || '123456',
+        passcode: rawPasscode || undefined,
         level: level || undefined,
       });
     }
@@ -1695,7 +1744,8 @@ export class InchargeProvisioningService {
       partyPrefix = party?.shortName?.replace(/\W/g, '').toUpperCase() || party?.code?.replace(/\W/g, '').toUpperCase() || '';
     }
 
-    const defaultPasscode = opts.defaultPasscode || '123456';
+    const explicitUiPasscode = (opts.defaultPasscode || '').trim();
+    const defaultPasscode = explicitUiPasscode || '123456';
     const slotsResp = await this.getRequiredRosterSlots(opts.constituencyId);
 
     const slotByUnitKey = new Map<string, CadreSlotItem>();
@@ -1707,6 +1757,197 @@ export class InchargeProvisioningService {
       slotByCode.set(slot.slotCode.toUpperCase(), slot);
       if (slot.canonicalCode) {
         slotByCanonical.set(slot.canonicalCode.toUpperCase(), slot);
+      }
+    }
+
+    const resolveSlot = (entry: CadreInputEntry): CadreSlotItem | undefined => {
+      const rawSlot = (entry.slotCode || '').trim().toUpperCase();
+      const rawUnit = (entry.unitKey || '').trim().toUpperCase();
+
+      // Strip optional party prefix (e.g. GDE-BTH-001 -> BTH-001, TCP-B1-V1 -> B1-V1)
+      const stripPartyPrefix = (code: string) =>
+        code.replace(/^[A-Z0-9]+-(?=(MDL-|BTH-|VIL-|PS-|VG-|B\d+-V\d+))/i, '');
+
+      const candidates = Array.from(
+        new Set(
+          [
+            rawUnit,
+            rawSlot,
+            stripPartyPrefix(rawSlot),
+            stripPartyPrefix(rawUnit),
+          ].filter(Boolean)
+        )
+      );
+
+      for (const cand of candidates) {
+        const direct =
+          slotByUnitKey.get(cand) ||
+          slotByCode.get(cand) ||
+          slotByCanonical.get(cand);
+        if (direct) return direct;
+      }
+
+      // Smart fuzzy matching for flexible formats (e.g. MDL-KONDAPI, BTH-1, B01-V01, VIL-1)
+      for (const lookupKey of candidates) {
+        if (lookupKey.startsWith('MDL-')) {
+          const mandalQuery = lookupKey.replace(/^MDL-/, '').replace(/\W/g, '');
+          const found = slotsResp.sections.mandals.find((m) =>
+            m.slotCode.replace(/\W/g, '').includes(mandalQuery) ||
+            mandalQuery.includes(m.slotCode.replace(/^MDL-/, '').replace(/\W/g, '')) ||
+            m.jurisdictionName.replace(/\W/g, '').toUpperCase().includes(mandalQuery)
+          );
+          if (found) return found;
+        } else if (lookupKey.startsWith('BTH-')) {
+          const boothNum = parseInt(lookupKey.replace(/\D/g, ''), 10);
+          if (!isNaN(boothNum)) {
+            const found = slotsResp.sections.booths.find((b) =>
+              parseInt(String(b.boothNumber).replace(/\D/g, ''), 10) === boothNum
+            );
+            if (found) return found;
+          }
+        } else if (/^B\d+-V\d+$/i.test(lookupKey)) {
+          const match = lookupKey.match(/^B(\d+)-V(\d+)$/i);
+          if (match) {
+            const normalizedCanonical = `B${parseInt(match[1], 10)}-V${parseInt(match[2], 10)}`;
+            const found = slotByCanonical.get(normalizedCanonical);
+            if (found) return found;
+          }
+        } else if (lookupKey.startsWith('VIL-') || lookupKey.startsWith('PS-')) {
+          const psNum = parseInt(lookupKey.replace(/\D/g, ''), 10);
+          if (!isNaN(psNum) && slotsResp.sections.pollingStations[psNum - 1]) {
+            return slotsResp.sections.pollingStations[psNum - 1];
+          }
+        }
+      }
+
+      return undefined;
+    };
+
+    interface ResolvedPlanItem {
+      targetSlot: CadreSlotItem;
+      cleanMobile: string;
+      userCode: string;
+      userName: string;
+      passcode: string;
+    }
+
+    const planMap = new Map<string, ResolvedPlanItem>();
+    for (const { entry, cleanMobile, slotIdentifier } of normalizedEntries) {
+      const targetSlot = resolveSlot(entry);
+      if (!targetSlot) {
+        const err: any = new Error(
+          `Unrecognized slot identifier "${slotIdentifier}". Please verify slot codes (e.g. MDL-..., VIL-001, BTH-001, B1-V1) or unit keys.`
+        );
+        err.statusCode = 400;
+        err.code = 'UNKNOWN_SLOT_IDENTIFIER';
+        throw err;
+      }
+
+      const rawRowPasscode = entry.passcode?.trim() || '';
+      const passcode =
+        rawRowPasscode && (rawRowPasscode !== '123456' || !explicitUiPasscode || explicitUiPasscode === '123456')
+          ? rawRowPasscode
+          : defaultPasscode;
+
+      const userCode = partyPrefix ? `${partyPrefix}-${targetSlot.slotCode}` : targetSlot.slotCode;
+      const userName = entry.inchargeName?.trim() || `${targetSlot.jurisdictionName} Incharge`;
+
+      planMap.set(targetSlot.unitKey, {
+        targetSlot,
+        cleanMobile,
+        userCode,
+        userName,
+        passcode,
+      });
+    }
+
+    const planItems = Array.from(planMap.values());
+
+    // Hash each unique passcode ONCE (eliminates blocking CPU loop for large 2,967-row uploads)
+    const passwordHashCache = new Map<string, string>();
+    for (const item of planItems) {
+      if (!passwordHashCache.has(item.passcode)) {
+        passwordHashCache.set(item.passcode, await bcrypt.hash(item.passcode, 10));
+      }
+    }
+
+    // Batch pre-load existing users & constituency assignments in minimal DB roundtrips
+    const allMobiles = planItems.map((p) => p.cleanMobile);
+    const allUserCodes = planItems.map((p) => p.userCode);
+
+    const existingUsers = await prisma.user.findMany({
+      where: {
+        OR: [
+          { mobileNumber: { in: allMobiles } },
+          { userCode: { in: allUserCodes } },
+        ],
+      },
+      select: { id: true, mobileNumber: true, userCode: true, organisationId: true },
+    });
+
+    const userByMobile = new Map(existingUsers.map((u) => [u.mobileNumber, u]));
+    const userByCode = new Map(existingUsers.filter((u) => u.userCode).map((u) => [u.userCode!, u]));
+
+    const existingConstituencyAssigns = await prisma.userHierarchyAssignment.findMany({
+      where: { constituencyId: constituency.id },
+      select: {
+        id: true,
+        userId: true,
+        roleType: true,
+        mandalId: true,
+        pollingStationId: true,
+        villageId: true,
+        boothId: true,
+        voterGroupId: true,
+        isActive: true,
+        user: { select: { userCode: true } },
+      },
+    });
+
+    // Free any userCode collisions before concurrent upserts to guarantee zero P2002 unique violations
+    const claimedByMobileIds = new Set<string>(
+      planItems
+        .map((p) => userByMobile.get(p.cleanMobile)?.id)
+        .filter((id): id is string => Boolean(id))
+    );
+    const displacedUsersToRename: Array<{ id: string; tempCode: string }> = [];
+    const targetCodesSet = new Set(allUserCodes);
+
+    for (const item of planItems) {
+      const byMob = userByMobile.get(item.cleanMobile);
+      const byCod = userByCode.get(item.userCode);
+
+      if (byCod && byMob?.id !== byCod.id && claimedByMobileIds.has(byCod.id)) {
+        // Code holder is already claimed by another mobile in this batch -> do not fall back to byCod
+        userByCode.delete(item.userCode);
+      } else if (byMob && byCod && byMob.id !== byCod.id) {
+        displacedUsersToRename.push({
+          id: byCod.id,
+          tempCode: `PREV-${byCod.id.slice(0, 8)}-${Date.now()}`,
+        });
+        userByCode.delete(item.userCode);
+      }
+
+      if (byMob && byMob.userCode && byMob.userCode !== item.userCode && targetCodesSet.has(byMob.userCode)) {
+        displacedUsersToRename.push({
+          id: byMob.id,
+          tempCode: `SHIFT-${byMob.id.slice(0, 8)}-${Date.now()}`,
+        });
+        userByCode.delete(byMob.userCode);
+      }
+    }
+
+    if (displacedUsersToRename.length > 0) {
+      const RENAME_CHUNK = 20;
+      for (let i = 0; i < displacedUsersToRename.length; i += RENAME_CHUNK) {
+        await Promise.all(
+          displacedUsersToRename.slice(i, i + RENAME_CHUNK).map((d) =>
+            prisma.user.update({
+              where: { id: d.id },
+              data: { userCode: d.tempCode },
+            }).catch(() => {})
+          )
+        );
       }
     }
 
@@ -1726,164 +1967,154 @@ export class InchargeProvisioningService {
     let boothsProvisioned = 0;
     let groupsProvisioned = 0;
 
-    for (const { entry, cleanMobile, slotIdentifier } of normalizedEntries) {
-      const lookupKey = (entry.slotCode || entry.unitKey || '').trim().toUpperCase();
-      let targetSlot =
-        slotByUnitKey.get(lookupKey) ||
-        slotByCode.get(lookupKey) ||
-        slotByCanonical.get(lookupKey);
+    // Index existing assignments by user+role and by unit for O(1) lookup
+    const assignByUserRole = new Map<string, (typeof existingConstituencyAssigns)[number]>();
+    for (const a of existingConstituencyAssigns) {
+      const key = `${a.userId}:${a.roleType}`;
+      if (!assignByUserRole.has(key)) {
+        assignByUserRole.set(key, a);
+      }
+    }
 
-      // Smart fuzzy matching for flexible formats (e.g. MDL-KONDAPI, BTH-1, B01-V01)
-      if (!targetSlot) {
-        if (lookupKey.startsWith('MDL-')) {
-          const mandalQuery = lookupKey.replace(/^MDL-/, '').replace(/\W/g, '');
-          targetSlot = slotsResp.sections.mandals.find((m) =>
-            m.slotCode.replace(/\W/g, '').includes(mandalQuery) ||
-            mandalQuery.includes(m.slotCode.replace(/^MDL-/, '').replace(/\W/g, '')) ||
-            m.jurisdictionName.replace(/\W/g, '').toUpperCase().includes(mandalQuery)
-          );
-        } else if (lookupKey.startsWith('BTH-')) {
-          const boothNum = parseInt(lookupKey.replace(/\D/g, ''), 10);
-          if (!isNaN(boothNum)) {
-            targetSlot = slotsResp.sections.booths.find((b) =>
-              parseInt(String(b.boothNumber).replace(/\D/g, ''), 10) === boothNum
+    const findConflictingSlotAssignIds = (targetSlot: CadreSlotItem, keepUserId: string): string[] => {
+      return existingConstituencyAssigns
+        .filter((a) => {
+          if (!a.isActive || a.userId === keepUserId || a.roleType !== targetSlot.roleRequired) return false;
+          if (targetSlot.level === '100_VOTER_GROUP' && targetSlot.groupId) {
+            return a.voterGroupId === targetSlot.groupId;
+          }
+          if (targetSlot.level === 'BOOTH' && targetSlot.boothId) {
+            return a.boothId === targetSlot.boothId;
+          }
+          if (targetSlot.level === 'MANDAL' && targetSlot.mandalId) {
+            return a.mandalId === targetSlot.mandalId;
+          }
+          if (targetSlot.level === 'POLLING_STATION') {
+            if (targetSlot.pollingStationId) return a.pollingStationId === targetSlot.pollingStationId;
+            return (
+              a.mandalId === targetSlot.mandalId &&
+              Boolean(
+                a.user?.userCode?.toUpperCase() === targetSlot.slotCode.toUpperCase() ||
+                a.user?.userCode?.toUpperCase().endsWith(`-${targetSlot.slotCode.toUpperCase()}`)
+              )
             );
           }
-        } else if (/^B\d+-V\d+$/i.test(lookupKey)) {
-          const match = lookupKey.match(/^B(\d+)-V(\d+)$/i);
-          if (match) {
-            const bNum = parseInt(match[1], 10);
-            const vNum = parseInt(match[2], 10);
-            const normalizedCanonical = `B${bNum}-V${vNum}`;
-            targetSlot = slotByCanonical.get(normalizedCanonical);
+          return false;
+        })
+        .map((a) => a.id);
+    };
+
+    const CHUNK_SIZE = 20;
+    for (let i = 0; i < planItems.length; i += CHUNK_SIZE) {
+      const chunk = planItems.slice(i, i + CHUNK_SIZE);
+      const chunkResults = await Promise.all(
+        chunk.map(async (item) => {
+          const { targetSlot, cleanMobile, userCode, userName, passcode } = item;
+          const passwordHash = passwordHashCache.get(passcode)!;
+
+          const existingUser = userByMobile.get(cleanMobile) || userByCode.get(userCode);
+          let savedUser: { id: string };
+
+          if (existingUser) {
+            savedUser = await prisma.user.update({
+              where: { id: existingUser.id },
+              data: {
+                userCode,
+                mobileNumber: cleanMobile,
+                name: userName,
+                role: targetSlot.roleRequired,
+                accountStatus: AccountStatus.ACTIVE,
+                organisationId: orgId || existingUser.organisationId,
+                passwordHash,
+              },
+              select: { id: true },
+            });
+          } else {
+            savedUser = await prisma.user.create({
+              data: {
+                userCode,
+                mobileNumber: cleanMobile,
+                name: userName,
+                role: targetSlot.roleRequired,
+                accountStatus: AccountStatus.ACTIVE,
+                organisationId: orgId,
+                passwordHash,
+              },
+              select: { id: true },
+            });
           }
-        } else if (lookupKey.startsWith('VIL-') || lookupKey.startsWith('PS-')) {
-          const psNum = parseInt(lookupKey.replace(/\D/g, ''), 10);
-          if (!isNaN(psNum)) {
-            targetSlot = slotsResp.sections.pollingStations[psNum - 1];
+
+          // Deactivate stale active assignments held by previous incharges on this exact slot
+          const staleIds = findConflictingSlotAssignIds(targetSlot, savedUser.id);
+          if (staleIds.length > 0) {
+            await prisma.userHierarchyAssignment.updateMany({
+              where: { id: { in: staleIds } },
+              data: { isActive: false },
+            });
           }
-        }
-      }
 
-      if (!targetSlot) {
-        const err: any = new Error(
-          `Unrecognized slot identifier "${slotIdentifier}". Please verify slot codes (e.g. MDL-..., VIL-001, BTH-001, B1-V1) or unit keys.`
-        );
-        err.statusCode = 400;
-        err.code = 'UNKNOWN_SLOT_IDENTIFIER';
-        throw err;
-      }
+          const existingAssign = assignByUserRole.get(`${savedUser.id}:${targetSlot.roleRequired}`);
+          if (existingAssign) {
+            await prisma.userHierarchyAssignment.update({
+              where: { id: existingAssign.id },
+              data: {
+                mandalId: targetSlot.mandalId,
+                pollingStationId: targetSlot.pollingStationId,
+                villageId: targetSlot.villageId,
+                boothId: targetSlot.boothId,
+                voterGroupId: targetSlot.groupId,
+                isActive: true,
+              },
+            });
+          } else {
+            await prisma.userHierarchyAssignment.create({
+              data: {
+                userId: savedUser.id,
+                roleType: targetSlot.roleRequired,
+                constituencyId: constituency.id,
+                mandalId: targetSlot.mandalId,
+                pollingStationId: targetSlot.pollingStationId,
+                villageId: targetSlot.villageId,
+                boothId: targetSlot.boothId,
+                voterGroupId: targetSlot.groupId,
+                isActive: true,
+              },
+            });
+          }
 
-      const passcode = entry.passcode?.trim() || defaultPasscode;
-      const passwordHash = bcrypt.hashSync(passcode, 10);
-      const userCode = partyPrefix ? `${partyPrefix}-${targetSlot.slotCode}` : targetSlot.slotCode;
-      const userName = entry.inchargeName?.trim() || `${targetSlot.jurisdictionName} Incharge`;
+          if (targetSlot.level === '100_VOTER_GROUP' && targetSlot.groupId) {
+            await Promise.all([
+              prisma.voterGroup.update({
+                where: { id: targetSlot.groupId },
+                data: { assignedInchargeId: savedUser.id },
+              }).catch(() => {}),
+              prisma.voter.updateMany({
+                where: { voterGroupId: targetSlot.groupId },
+                data: { assignedInchargeId: savedUser.id },
+              }).catch(() => {}),
+            ]);
+          }
 
-      // 1. Idempotent User upsert by mobile or userCode
-      let user = await prisma.user.findFirst({
-        where: {
-          OR: [
-            { mobileNumber: cleanMobile },
-            { userCode },
-          ],
-        },
-      });
-
-      if (user) {
-        user = await prisma.user.update({
-          where: { id: user.id },
-          data: {
-            userCode,
-            mobileNumber: cleanMobile,
-            name: userName,
+          return {
+            level: targetSlot.level,
             role: targetSlot.roleRequired,
-            accountStatus: AccountStatus.ACTIVE,
-            organisationId: orgId || user.organisationId,
-            passwordHash,
-          },
-        });
-      } else {
-        user = await prisma.user.create({
-          data: {
             userCode,
-            mobileNumber: cleanMobile,
             name: userName,
-            role: targetSlot.roleRequired,
-            accountStatus: AccountStatus.ACTIVE,
-            organisationId: orgId,
-            passwordHash,
-          },
-        });
+            mobileNumber: cleanMobile,
+            jurisdictionName: targetSlot.jurisdictionName,
+            passcode,
+            status: 'ASSIGNED',
+          };
+        })
+      );
+
+      for (const resItem of chunkResults) {
+        if (resItem.level === '100_VOTER_GROUP') groupsProvisioned++;
+        else if (resItem.level === 'BOOTH') boothsProvisioned++;
+        else if (resItem.level === 'POLLING_STATION') villagesProvisioned++;
+        else if (resItem.level === 'MANDAL') mandalsProvisioned++;
+        roster.push(resItem);
       }
-
-      // 2. Idempotent UserHierarchyAssignment
-      const existingAssign = await prisma.userHierarchyAssignment.findFirst({
-        where: {
-          userId: user.id,
-          roleType: targetSlot.roleRequired,
-          constituencyId: constituency.id,
-        },
-      });
-
-      if (existingAssign) {
-        await prisma.userHierarchyAssignment.update({
-          where: { id: existingAssign.id },
-          data: {
-            mandalId: targetSlot.mandalId,
-            pollingStationId: targetSlot.pollingStationId,
-            villageId: targetSlot.villageId,
-            boothId: targetSlot.boothId,
-            voterGroupId: targetSlot.groupId,
-            isActive: true,
-          },
-        });
-      } else {
-        await prisma.userHierarchyAssignment.create({
-          data: {
-            userId: user.id,
-            roleType: targetSlot.roleRequired,
-            constituencyId: constituency.id,
-            mandalId: targetSlot.mandalId,
-            pollingStationId: targetSlot.pollingStationId,
-            villageId: targetSlot.villageId,
-            boothId: targetSlot.boothId,
-            voterGroupId: targetSlot.groupId,
-            isActive: true,
-          },
-        });
-      }
-
-      // 3. If 100-voter group, link to VoterGroup and assigned voters
-      if (targetSlot.level === '100_VOTER_GROUP' && targetSlot.groupId) {
-        await prisma.voterGroup.update({
-          where: { id: targetSlot.groupId },
-          data: { assignedInchargeId: user.id },
-        }).catch(() => {});
-
-        await prisma.voter.updateMany({
-          where: { voterGroupId: targetSlot.groupId },
-          data: { assignedInchargeId: user.id },
-        }).catch(() => {});
-
-        groupsProvisioned++;
-      } else if (targetSlot.level === 'BOOTH') {
-        boothsProvisioned++;
-      } else if (targetSlot.level === 'POLLING_STATION') {
-        villagesProvisioned++;
-      } else if (targetSlot.level === 'MANDAL') {
-        mandalsProvisioned++;
-      }
-
-      roster.push({
-        level: targetSlot.level,
-        role: targetSlot.roleRequired,
-        userCode,
-        name: userName,
-        mobileNumber: cleanMobile,
-        jurisdictionName: targetSlot.jurisdictionName,
-        passcode,
-        status: 'ASSIGNED',
-      });
     }
 
     return {

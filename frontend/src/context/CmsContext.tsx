@@ -186,7 +186,10 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
   // Update document title, favicon, and CSS variables when config changes
   useEffect(() => {
     if (typeof document !== 'undefined') {
-      document.title = config.organisationName || 'Political Connect Platform';
+      const hasSession = Boolean(localStorage.getItem('kdp_active_session'));
+      document.title = hasSession
+        ? config.organisationName || 'VIAP — Voter Intelligent Application'
+        : 'VIAP — Command Station Sign In';
       applyThemeVariables(config.primaryColor, config.secondaryColor, config.accentColor);
       if (config.faviconUrl && !config.faviconUrl.startsWith('data:')) {
         let favicon = document.querySelector<HTMLLinkElement>("link[rel~='icon']");

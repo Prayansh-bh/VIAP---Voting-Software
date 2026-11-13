@@ -1837,8 +1837,8 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
           const q = cadreSearchQuery.toLowerCase();
           return (
             slot.slotCode.toLowerCase().includes(q) ||
-            slot.title.toLowerCase().includes(q) ||
-            (slot.subtitle && slot.subtitle.toLowerCase().includes(q)) ||
+            (slot.title || (slot as any).jurisdictionName || '').toLowerCase().includes(q) ||
+            ((slot.subtitle || (slot as any).pollingStationName || '').toLowerCase().includes(q)) ||
             (slot.mandalName && slot.mandalName.toLowerCase().includes(q)) ||
             (slot.villageName && slot.villageName.toLowerCase().includes(q)) ||
             (slot.assignedUser?.name && slot.assignedUser.name.toLowerCase().includes(q)) ||
@@ -2088,11 +2088,13 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
                           type="file"
                           accept=".xlsx,.xls,.csv"
                           onChange={(e) => {
-                            if (e.target.files?.[0]) {
-                              setRosterSpreadsheetFile(e.target.files[0]);
+                            const selected = e.target.files?.[0];
+                            if (selected) {
+                              setRosterSpreadsheetFile(selected);
                               setRosterUploadSuccess(null);
                               setRosterUploadError(null);
                             }
+                            e.target.value = '';
                           }}
                           className="hidden"
                         />
@@ -2207,7 +2209,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
 
                       return (
                         <div
-                          key={slot.slotIdentifier}
+                          key={slot.slotIdentifier || (slot as any).unitKey || slot.slotCode}
                           className={`p-3.5 rounded-2xl border transition flex flex-col md:flex-row md:items-center justify-between gap-3 ${isAssignedInDb ? 'bg-slate-950/40 border-slate-800/60' : 'bg-slate-950 border-slate-800'}`}
                         >
                           {/* Slot Info */}
@@ -2216,10 +2218,10 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
                               <span className="font-mono text-xs font-bold px-2 py-0.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shrink-0">
                                 {slot.slotCode}
                               </span>
-                              <span className="text-xs font-bold text-white truncate">{slot.title}</span>
+                              <span className="text-xs font-bold text-white truncate">{slot.title || (slot as any).jurisdictionName || slot.slotCode}</span>
                             </div>
                             <div className="text-[11px] text-slate-400 truncate flex items-center gap-2">
-                              <span>{slot.subtitle}</span>
+                              <span>{slot.subtitle || (slot as any).pollingStationName || slot.mandalName || ''}</span>
                               {slot.voterRange && (
                                 <span className="font-mono text-[10px] text-purple-400 px-1.5 py-0.2 rounded bg-purple-500/10 border border-purple-500/20">
                                   Electors: {slot.voterRange} ({slot.voterCount})

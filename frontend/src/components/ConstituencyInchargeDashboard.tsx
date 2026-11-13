@@ -722,6 +722,8 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
   const [migratedPageSize, setMigratedPageSize] = useState(15);
   const [electoralPage, setElectoralPage] = useState(1);
   const [electoralPageSize, setElectoralPageSize] = useState(15);
+  const [voterViewMode, setVoterViewMode] = useState<'cards' | 'table'>('cards');
+  const [fakeViewMode, setFakeViewMode] = useState<'cards' | 'table'>('cards');
   const [electoralVoters, setElectoralVoters] = useState<Voter[]>([]);
   const [electoralTotal, setElectoralTotal] = useState(0);
   const [isElectoralLoading, setIsElectoralLoading] = useState(false);
@@ -1138,58 +1140,61 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
   };
 
   return (
-    <div className="flex h-full overflow-hidden bg-slate-50 text-slate-800" id="constituency-dashboard-root">
+    <div className="flex h-full overflow-hidden bg-[#06070B] text-slate-100" id="constituency-dashboard-root">
       
       {/* --------------------------------------------------------
-          SIDEBAR: DARK NAVY WITH YELLOW HIGH LIGHT
+          SLIDING MODULES DRAWER (UNIVERSAL MOBILE & DESKTOP)
          -------------------------------------------------------- */}
       <aside className={`
-        fixed inset-y-0 left-0 z-40 w-64 h-full bg-slate-950 text-slate-300 flex flex-col justify-between border-r border-slate-900 transition-transform duration-200 ease-in-out
-        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} md:fixed shrink-0 select-none
+        fixed inset-y-0 right-0 z-50 w-80 max-w-[88vw] h-full bg-[#0D0F18]/95 backdrop-blur-2xl text-slate-300 flex flex-col justify-between border-l border-white/[0.08] transition-transform duration-300 ease-in-out shadow-2xl select-none
+        ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'}
       `}>
         {/* Brand Block */}
-        <div className="p-5 border-b border-slate-900/90 space-y-2.5">
+        <div className="p-5 border-b border-white/[0.08] space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 flex items-center justify-center text-slate-950 shrink-0 font-black text-sm shadow-md shadow-amber-400/20">
-                <Crown className="w-5 h-5 text-slate-950" />
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-cyan-400 flex items-center justify-center text-white shrink-0 font-black text-sm shadow-lg shadow-cyan-500/25">
+                <Crown className="w-5 h-5 text-white" />
               </div>
               <div>
                 <h1 className="text-sm font-black text-white tracking-tight">{session.organisationName || 'Kondapi Connect'}</h1>
-                <p className="text-[10px] text-amber-400 font-extrabold uppercase tracking-widest">Constituency Command</p>
+                <p className="text-[10px] text-cyan-400 font-extrabold uppercase tracking-widest">Constituency Command</p>
               </div>
             </div>
             <button
               onClick={() => setIsSidebarOpen(false)}
-              className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 cursor-pointer"
-              aria-label="Close sidebar"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+              aria-label="Close menu"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
-          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 flex items-center gap-2">
+          <div className="bg-[#121522] border border-white/[0.08] rounded-xl p-2.5 flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-            <span className="text-[10px] font-mono text-slate-300 font-bold uppercase tracking-wider truncate">
-              {session?.userName || 'Chundi Ramesh Naidu'}
-            </span>
+            <div className="min-w-0">
+              <span className="text-[11px] text-white font-bold block truncate">
+                {session?.userName || 'Chundi Ramesh Naidu'}
+              </span>
+              <span className="text-[9px] text-cyan-400 uppercase font-mono block">Constituency Incharge</span>
+            </div>
           </div>
         </div>
 
-        {/* Sidebar Nav Items */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1 no-scrollbar">
+        {/* Drawer Nav Items */}
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1.5 no-scrollbar">
           {[
-            { id: 'dashboard', name: 'Dashboard', icon: Home },
-            { id: 'electoral_roll', name: 'Electoral Roll', icon: Database },
-            { id: 'mandal_list', name: 'Mandal List', icon: Layers },
-            { id: 'village_list', name: 'Village List', icon: MapPin },
-            { id: 'tasks', name: 'High Command Tasks', icon: Calendar },
-            { id: 'caste_analytics', name: 'Caste Analytics', icon: BarChart3 },
-            { id: 'cadre_network', name: 'Cadre Network', icon: Users },
-            { id: 'fake_votes', name: 'Fake Votes', icon: AlertTriangle },
-            { id: 'strategic_intelligence', name: 'Strategic Intelligence', icon: Compass },
-            { id: 'training_analytics', name: 'Training Analytics', icon: GraduationCap },
-            { id: 'live_voter_tracking', name: 'Live Voter Tracking', icon: Activity },
-            { id: 'migrated_voters', name: 'Migrated Voters', icon: Globe }
+            { id: 'dashboard', name: 'Dashboard', desc: 'Live Telemetry & Metrics', icon: Home },
+            { id: 'electoral_roll', name: 'Electoral Roll', desc: 'Voter Directory & Status', icon: Database },
+            { id: 'mandal_list', name: 'Mandal List', desc: 'Mandals & Village Maps', icon: Layers },
+            { id: 'village_list', name: 'Village List', desc: 'Polling Station Units', icon: MapPin },
+            { id: 'tasks', name: 'High Command Tasks', desc: 'Directives & Checklists', icon: Calendar },
+            { id: 'caste_analytics', name: 'Caste Analytics', desc: 'Demographic Breakdown', icon: BarChart3 },
+            { id: 'cadre_network', name: 'Cadre Network', desc: '7-Tier Organizational Tree', icon: Users },
+            { id: 'fake_votes', name: 'Fake Votes', desc: 'Objection Audits & Reports', icon: AlertTriangle },
+            { id: 'strategic_intelligence', name: 'Strategic Intelligence', desc: 'AI Battleground Forecasts', icon: Compass },
+            { id: 'training_analytics', name: 'Training Analytics', desc: 'Video Course Progress', icon: GraduationCap },
+            { id: 'live_voter_tracking', name: 'Live Voter Tracking', desc: 'Hourly Polling Velocity', icon: Activity },
+            { id: 'migrated_voters', name: 'Migrated Voters', desc: 'Out-of-Station Outreach', icon: Globe }
           ].map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -1202,102 +1207,171 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   setIsSidebarOpen(false);
                 }}
                 className={`
-                  w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer tracking-wide
+                  w-full flex items-center gap-3 px-3.5 py-3 text-xs font-bold rounded-2xl transition-all cursor-pointer text-left
                   ${isActive 
-                    ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 font-black shadow-md shadow-amber-400/20' 
-                    : 'hover:bg-slate-900/80 hover:text-white text-slate-400'
+                    ? 'bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 text-white font-black shadow-lg shadow-cyan-500/25 border border-cyan-400/30' 
+                    : 'hover:bg-slate-900 hover:text-white text-slate-300 bg-[#121522]/60 border border-white/[0.05]'
                   }
                 `}
               >
-                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-slate-950' : 'text-slate-400'}`} />
-                <span className="truncate">{item.name}</span>
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-slate-950 text-cyan-300' : 'bg-slate-800 text-slate-400'}`}>
+                  <Icon className="w-4 h-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="block truncate font-bold text-xs">{item.name}</span>
+                  <span className={`block truncate text-[10px] ${isActive ? 'text-white/80' : 'text-slate-500'}`}>{item.desc}</span>
+                </div>
               </button>
             );
           })}
         </nav>
 
         {/* Bottom Lock / Exit Controls */}
-        <div className="p-4 border-t border-slate-900 space-y-2">
+        <div className="p-4 border-t border-white/[0.08] space-y-2">
           <button
             type="button"
-            onClick={() => setIsSessionsOpen(true)}
-            className="w-full flex items-center justify-center gap-2 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-all uppercase tracking-wider cursor-pointer border border-slate-800"
+            onClick={() => {
+              setIsSessionsOpen(true);
+              setIsSidebarOpen(false);
+            }}
+            className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#121522] hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all uppercase tracking-wider cursor-pointer border border-white/[0.08]"
           >
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
             Active Sessions
           </button>
           <button
             onClick={onLogout}
-            className="w-full flex items-center justify-center gap-2 py-2 bg-slate-900 hover:bg-red-950 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-all uppercase tracking-wider cursor-pointer"
+            className="w-full flex items-center justify-center gap-2 py-2.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 hover:text-white rounded-xl text-xs font-bold transition-all uppercase tracking-wider cursor-pointer"
           >
-            <LogOut className="w-3.5 h-3.5" />
+            <LogOut className="w-4 h-4" />
             Disconnect Portal
           </button>
         </div>
       </aside>
 
-      {/* Mobile Drawer Backdrop */}
+      {/* Drawer Backdrop Overlay (Mobile & Desktop) */}
       {isSidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden"
+          className="fixed inset-0 bg-black/75 backdrop-blur-md z-40 transition-opacity"
           onClick={() => setIsSidebarOpen(false)}
           aria-hidden="true"
         />
       )}
 
       {/* --------------------------------------------------------
-          MAIN DISPLAY VIEW AREA
+          MAIN DISPLAY VIEW AREA - EXECUTIVE MOBILE CANVAS
          -------------------------------------------------------- */}
-      <main className="flex-1 h-full overflow-y-auto overflow-x-hidden md:pl-64" id="main-workspace-section">
-        {/* Mobile Header Bar */}
-        <div className="md:hidden flex items-center justify-between bg-white border border-slate-200/80 rounded-xl p-3 shadow-xs m-4 mb-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-amber-400 flex items-center justify-center font-black text-slate-950 text-xs shadow-xs">
-              <Crown className="w-4 h-4 text-slate-950" />
+      <main className="flex-1 h-full overflow-y-auto overflow-x-hidden bg-[#06070B]" id="main-workspace-section">
+        {/* Centered App Container Shell */}
+        <div className="max-w-3xl xl:max-w-4xl mx-auto min-h-screen bg-[#06070B] border-x border-white/[0.06] shadow-2xl relative flex flex-col pb-28">
+          
+          {/* Universal Sticky App Header */}
+          <div className="sticky top-0 z-30 bg-[#0C0E17]/95 backdrop-blur-md border-b border-white/[0.08] px-3.5 sm:px-5 py-3 space-y-2.5 shadow-xl">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-cyan-400 flex items-center justify-center font-black text-white text-sm shadow-lg shadow-cyan-500/25 shrink-0">
+                  <Crown className="w-5 h-5 text-white" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-black text-sm sm:text-base text-white tracking-tight truncate block">
+                      {session?.assignedConstituency || 'Kondapi'} Command
+                    </span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                  </div>
+                  <span className="text-[10px] text-cyan-400 font-bold tracking-wide uppercase truncate block">
+                    {session?.userName || 'Chundi Ramesh Naidu'} • MLA Incharge
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsSessionsOpen(true)}
+                  className="p-2 bg-[#121522] hover:bg-slate-800 text-slate-300 border border-white/[0.08] rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95 transition"
+                  title="Active Sessions"
+                >
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span className="hidden sm:inline text-[10px] uppercase">Sessions</span>
+                </button>
+                <button
+                  onClick={() => setIsSidebarOpen(true)}
+                  className="px-3 py-2 bg-gradient-to-r from-blue-600/25 to-cyan-500/25 hover:from-blue-600/40 hover:to-cyan-500/40 text-cyan-300 border border-cyan-500/40 rounded-xl text-xs font-black cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95 transition"
+                  aria-label="Open 12 modules menu"
+                >
+                  <Menu className="w-4 h-4" />
+                  <span>Modules</span>
+                </button>
+              </div>
             </div>
-            <div>
-              <span className="font-black text-xs text-slate-900 tracking-tight block">
-                {session?.assignedConstituency || 'Constituency'} Command
-              </span>
-              <span className="text-[10px] text-amber-600 font-bold">Assembly Dashboard</span>
+
+            {/* Horizontal Swipeable 12-Tab Fast-Switcher Strip */}
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 -mx-1 px-1">
+              {[
+                { id: 'dashboard', name: 'Dashboard', icon: Home },
+                { id: 'electoral_roll', name: 'Voters', icon: Database },
+                { id: 'mandal_list', name: 'Mandals', icon: Layers },
+                { id: 'village_list', name: 'Villages', icon: MapPin },
+                { id: 'tasks', name: 'Tasks', icon: Calendar },
+                { id: 'caste_analytics', name: 'Demographics', icon: BarChart3 },
+                { id: 'cadre_network', name: 'Cadre', icon: Users },
+                { id: 'fake_votes', name: 'Fake Votes', icon: AlertTriangle },
+                { id: 'strategic_intelligence', name: 'AI Intel', icon: Compass },
+                { id: 'training_analytics', name: 'Training', icon: GraduationCap },
+                { id: 'live_voter_tracking', name: 'Live Turnout', icon: Activity },
+                { id: 'migrated_voters', name: 'Migrated', icon: Globe }
+              ].map((item) => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveTab(item.id as ConstTabType);
+                      setSelectedMandalInVillageList(null);
+                    }}
+                    className={`shrink-0 flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 text-white font-black shadow-lg shadow-cyan-500/30 scale-[1.02] border border-cyan-400/40'
+                        : 'bg-[#121522]/80 border border-white/[0.06] text-slate-300 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                    <span>{item.name}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
-          <button
-            onClick={() => setIsSidebarOpen(true)}
-            className="p-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg shadow-xs cursor-pointer flex items-center gap-1.5 text-xs font-bold"
-            aria-label="Open navigation menu"
-          >
-            <Menu className="w-4 h-4" />
-            <span>Menu</span>
-          </button>
-        </div>
 
-        <div className="p-4 sm:p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto" id="constituency-main-container">
+          <div className="p-3.5 sm:p-6 space-y-6 flex-1" id="constituency-main-container">
           
           {/* Header Title block */}
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-slate-200/80 pb-5 gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 uppercase tracking-wider">
-                  <Crown className="w-3 h-3 text-amber-600" />
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-white/[0.08] pb-5 gap-4">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-extrabold bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 uppercase tracking-wider shadow-sm shadow-cyan-500/10">
+                  <Crown className="w-3.5 h-3.5 text-cyan-400" />
                   Assembly Constituency Command
                 </span>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-[#121522] text-slate-300 border border-white/[0.08]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   AP State • Kondapi
                 </span>
               </div>
-              <h2 className="text-2xl font-black text-slate-950 tracking-tight">
+              <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
                 Kondapi Constituency Dashboard
               </h2>
-              <p className="text-xs text-slate-500 font-medium">
+              <p className="text-xs sm:text-sm text-slate-400 font-medium">
                 Live political telemetry, booth infrastructure, and cadre performance across all Mandals.
               </p>
             </div>
             
             <div className="flex items-center gap-2 shrink-0">
-              <div className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 shadow-xs flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs font-bold text-slate-700">Constituency Incharge</span>
+              <div className="px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 shadow-sm flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-xs font-bold text-slate-200">Constituency Incharge</span>
               </div>
             </div>
           </div>
@@ -1308,73 +1382,79 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
           {activeTab === 'dashboard' && (
             <div className="space-y-6 animate-fade-in" id="const-dashboard-tab">
               {/* Summary Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
                 
-                <div className="bg-white/95 backdrop-blur-sm border border-slate-200/90 rounded-2xl p-4 shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between space-y-3">
+                {/* Total Voters */}
+                <div className="bg-[#0D0F18]/95 backdrop-blur-xl border border-white/[0.08] hover:border-cyan-500/50 rounded-2xl p-4 shadow-xl transition-all duration-200 flex flex-col justify-between space-y-3 group">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Total Voters</span>
-                    <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                    <span className="text-[10px] sm:text-[11px] text-slate-400 font-bold uppercase tracking-wider">Total Voters</span>
+                    <div className="w-8 h-8 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 flex items-center justify-center group-hover:scale-105 transition-transform">
                       <Users className="w-4 h-4" />
                     </div>
                   </div>
                   <div>
-                    <span className="text-2xl font-black text-slate-950 tracking-tight">{liveConstituencyStats.totalVoters.toLocaleString()}</span>
-                    <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Aggregated from scoped hierarchy</p>
+                    <span className="text-2xl sm:text-3xl font-black text-white tracking-tight">{liveConstituencyStats.totalVoters.toLocaleString()}</span>
+                    <p className="text-[10px] text-slate-400 font-medium mt-0.5">Aggregated from scoped hierarchy</p>
                   </div>
                 </div>
 
-                <div className="bg-white/95 backdrop-blur-sm border border-slate-200/90 rounded-2xl p-4 shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between space-y-3">
+                {/* Total Mandals */}
+                <div className="bg-[#0D0F18]/95 backdrop-blur-xl border border-white/[0.08] hover:border-indigo-500/50 rounded-2xl p-4 shadow-xl transition-all duration-200 flex flex-col justify-between space-y-3 group">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Total Mandals</span>
-                    <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                    <span className="text-[10px] sm:text-[11px] text-slate-400 font-bold uppercase tracking-wider">Total Mandals</span>
+                    <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 flex items-center justify-center group-hover:scale-105 transition-transform">
                       <Layers className="w-4 h-4" />
                     </div>
                   </div>
                   <div>
-                    <span className="text-2xl font-black text-slate-950 tracking-tight">{liveConstituencyStats.totalMandals}</span>
-                    <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Current operational mandals</p>
+                    <span className="text-2xl sm:text-3xl font-black text-white tracking-tight">{liveConstituencyStats.totalMandals}</span>
+                    <p className="text-[10px] text-slate-400 font-medium mt-0.5">Current operational mandals</p>
                   </div>
                 </div>
 
-                <div className="bg-white/95 backdrop-blur-sm border border-slate-200/90 rounded-2xl p-4 shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between space-y-3">
+                {/* Total Villages */}
+                <div className="bg-[#0D0F18]/95 backdrop-blur-xl border border-white/[0.08] hover:border-violet-500/50 rounded-2xl p-4 shadow-xl transition-all duration-200 flex flex-col justify-between space-y-3 group">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Total Villages</span>
-                    <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+                    <span className="text-[10px] sm:text-[11px] text-slate-400 font-bold uppercase tracking-wider">Total Villages</span>
+                    <div className="w-8 h-8 rounded-xl bg-violet-500/10 text-violet-400 border border-violet-500/30 flex items-center justify-center group-hover:scale-105 transition-transform">
                       <MapPin className="w-4 h-4" />
                     </div>
                   </div>
                   <div>
-                    <span className="text-2xl font-black text-slate-950 tracking-tight">{liveConstituencyStats.totalVillages}</span>
-                    <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Resolved from child units</p>
+                    <span className="text-2xl sm:text-3xl font-black text-white tracking-tight">{liveConstituencyStats.totalVillages}</span>
+                    <p className="text-[10px] text-slate-400 font-medium mt-0.5">Resolved from child units</p>
                   </div>
                 </div>
 
-                <div className="bg-white/95 backdrop-blur-sm border border-slate-200/90 rounded-2xl p-4 shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between space-y-3">
+                {/* Total Booths */}
+                <div className="bg-[#0D0F18]/95 backdrop-blur-xl border border-white/[0.08] hover:border-fuchsia-500/50 rounded-2xl p-4 shadow-xl transition-all duration-200 flex flex-col justify-between space-y-3 group">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Total Booths</span>
-                    <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+                    <span className="text-[10px] sm:text-[11px] text-slate-400 font-bold uppercase tracking-wider">Total Booths</span>
+                    <div className="w-8 h-8 rounded-xl bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/30 flex items-center justify-center group-hover:scale-105 transition-transform">
                       <Vote className="w-4 h-4" />
                     </div>
                   </div>
                   <div>
-                    <span className="text-2xl font-black text-slate-950 tracking-tight">{liveConstituencyStats.totalBooths}</span>
-                    <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Active polling stations</p>
+                    <span className="text-2xl sm:text-3xl font-black text-white tracking-tight">{liveConstituencyStats.totalBooths}</span>
+                    <p className="text-[10px] text-slate-400 font-medium mt-0.5">Active polling stations</p>
                   </div>
                 </div>
 
-                <div className="bg-gradient-to-br from-amber-50 to-amber-100/70 border border-amber-300/80 rounded-2xl p-4 shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between space-y-3">
+                {/* Live Turnout (spans full width on mobile) */}
+                <div className="col-span-2 sm:col-span-2 lg:col-span-1 bg-gradient-to-br from-emerald-500/20 via-teal-500/10 to-[#0D0F18] border border-emerald-500/40 hover:border-emerald-400 rounded-2xl p-4 shadow-xl shadow-emerald-500/10 transition-all duration-200 flex flex-col justify-between space-y-3 group">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-amber-800 font-extrabold uppercase tracking-wider flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                    <span className="text-[10px] sm:text-[11px] text-emerald-300 font-black uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                       Live Turnout
                     </span>
-                    <div className="w-8 h-8 rounded-xl bg-amber-200/80 text-amber-800 flex items-center justify-center">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center justify-center group-hover:scale-105 transition-transform">
                       <Activity className="w-4 h-4" />
                     </div>
                   </div>
                   <div>
-                    <span className="text-xl font-black text-amber-900 tracking-tight">{liveConstituencyStats.voted.toLocaleString()} Done</span>
-                    <div className="text-[10px] font-bold text-amber-800 bg-white/80 px-2 py-0.5 rounded-lg border border-amber-200/70 w-fit mt-1">
+                    <span className="text-xl sm:text-2xl font-black text-white tracking-tight">{liveConstituencyStats.voted.toLocaleString()} Done</span>
+                    <div className="text-[10px] font-bold text-emerald-300 bg-[#121522] px-2.5 py-1 rounded-lg border border-emerald-500/30 w-fit mt-1.5 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                       Remaining: {liveConstituencyStats.remaining.toLocaleString()}
                     </div>
                   </div>
@@ -1391,16 +1471,16 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                 const neutralPct = hasData ? Number(((constituencyStats.neutral / totalSurveyed) * 100).toFixed(1)) : 0;
 
                 return (
-                  <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+                  <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
                     <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">{backendSummary?.user?.unitName || 'Constituency'} Political Position</h3>
-                      <p className="text-xs text-slate-500">Overall support share of registered parties derived directly from database voter records.</p>
+                      <h3 className="text-xs font-black uppercase tracking-wider text-cyan-400">{backendSummary?.user?.unitName || 'Constituency'} Political Position</h3>
+                      <p className="text-xs text-slate-400">Overall support share of registered parties derived directly from database voter records.</p>
                     </div>
 
                     {!hasData ? (
-                      <div className="p-8 text-center bg-slate-50 border border-slate-200 rounded-xl space-y-1">
-                        <p className="font-bold text-slate-800">No Voter Survey Records Ingested</p>
-                        <p className="text-xs text-slate-500">Upload official voter rolls or submit ground surveys to display live party preference distributions.</p>
+                      <div className="p-8 text-center bg-[#121522] border border-white/[0.08] rounded-xl space-y-2">
+                        <p className="font-bold text-white text-sm">No Voter Survey Records Ingested</p>
+                        <p className="text-xs text-slate-400">Upload official voter rolls or submit ground surveys to display live party preference distributions.</p>
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -1411,13 +1491,13 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                             { party: 'YSRCP', votes: constituencyStats.ysrcp, pct: ysrcpPct, color: 'bg-blue-600 border-blue-700' },
                             { party: 'Neutral', votes: constituencyStats.neutral, pct: neutralPct, color: 'bg-slate-400 border-slate-500' },
                           ].map((item) => (
-                            <div key={item.party} className="flex items-center justify-between border-b border-slate-100 pb-1.5 last:border-b-0">
+                            <div key={item.party} className="flex items-center justify-between border-b border-slate-800 pb-2 last:border-b-0">
                               <div className="flex items-center gap-2">
                                 <span className={`w-3 h-3 rounded-full ${item.color} shrink-0`} />
-                                <span className="text-xs font-black text-slate-900">{item.party}</span>
+                                <span className="text-xs font-black text-white">{item.party}</span>
                               </div>
                               <div className="text-right text-xs">
-                                <span className="font-extrabold text-slate-900">{item.pct}%</span>
+                                <span className="font-extrabold text-white">{item.pct}%</span>
                                 <span className="text-[10px] text-slate-400 ml-1.5 font-bold">({item.votes.toLocaleString()} votes)</span>
                               </div>
                             </div>
@@ -1427,32 +1507,32 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         {/* Middle Column: Interactive Progress Bars */}
                         <div className="md:col-span-2 flex flex-col justify-center space-y-4">
                           <div className="space-y-1">
-                            <div className="flex justify-between text-xs font-extrabold text-slate-900">
+                            <div className="flex justify-between text-xs font-extrabold text-slate-200">
                               <span>TDP Preference Share</span>
-                              <span>{tdpPct}%</span>
+                              <span className="text-yellow-400">{tdpPct}%</span>
                             </div>
-                            <div className="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div className="w-full h-3.5 bg-slate-800 rounded-full overflow-hidden">
                               <div className="h-full bg-yellow-400" style={{ width: `${tdpPct}%` }} />
                             </div>
                           </div>
 
                           <div className="space-y-1">
-                            <div className="flex justify-between text-xs font-extrabold text-slate-900">
+                            <div className="flex justify-between text-xs font-extrabold text-slate-200">
                               <span>YSRCP Preference Share</span>
-                              <span>{ysrcpPct}%</span>
+                              <span className="text-blue-400">{ysrcpPct}%</span>
                             </div>
-                            <div className="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div className="w-full h-3.5 bg-slate-800 rounded-full overflow-hidden">
                               <div className="h-full bg-blue-600" style={{ width: `${ysrcpPct}%` }} />
                             </div>
                           </div>
 
                           <div className="space-y-1">
-                            <div className="flex justify-between text-xs font-extrabold text-slate-900">
+                            <div className="flex justify-between text-xs font-extrabold text-slate-200">
                               <span>Neutral / Deciding Voters</span>
-                              <span>{neutralPct}%</span>
+                              <span className="text-slate-400">{neutralPct}%</span>
                             </div>
-                            <div className="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden">
-                              <div className="h-full bg-slate-400" style={{ width: `${neutralPct}%` }} />
+                            <div className="w-full h-3.5 bg-slate-800 rounded-full overflow-hidden">
+                              <div className="h-full bg-slate-500" style={{ width: `${neutralPct}%` }} />
                             </div>
                           </div>
                         </div>
@@ -1463,10 +1543,10 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
               })()}
 
               {/* Brief Quick Links Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
-                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Campaign Operations Summary</h4>
-                  <p className="text-xs text-slate-500 leading-relaxed font-medium">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
+                <div className="bg-[#0D0F18]/95 backdrop-blur-xl border border-white/[0.08] rounded-2xl p-5 sm:p-6 shadow-xl space-y-3">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-cyan-400">Campaign Operations Summary</h4>
+                  <p className="text-xs text-slate-300 leading-relaxed font-medium">
                     {constituencyStats.voters > 0 ? (
                       <>
                         The overall constituency position reflects {constituencyStats.mandals} mapped mandals with {constituencyStats.voters.toLocaleString()} enrolled voters in database.
@@ -1478,15 +1558,15 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   </p>
                   <button 
                     onClick={() => setActiveTab('mandal_list')}
-                    className="text-xs font-black text-yellow-600 hover:text-yellow-700 flex items-center gap-1 cursor-pointer uppercase"
+                    className="text-xs font-black text-cyan-400 hover:text-cyan-300 flex items-center gap-1.5 cursor-pointer uppercase tracking-wider"
                   >
                     Go to Mandal Analysis <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
 
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
-                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Command Center Status</h4>
-                  <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                <div className="bg-[#0D0F18]/95 backdrop-blur-xl border border-white/[0.08] rounded-2xl p-5 sm:p-6 shadow-xl space-y-3">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-cyan-400">Command Center Status</h4>
+                  <p className="text-xs text-slate-300 leading-relaxed font-medium">
                     {constituencyStats.booths > 0 ? (
                       <>Voter database synchronization active across all {constituencyStats.booths} polling booths. Flagged verification reports are audited continuously.</>
                     ) : (
@@ -1495,7 +1575,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   </p>
                   <button 
                     onClick={() => setActiveTab('cadre_network')}
-                    className="text-xs font-black text-yellow-600 hover:text-yellow-700 flex items-center gap-1 cursor-pointer uppercase"
+                    className="text-xs font-black text-cyan-400 hover:text-cyan-300 flex items-center gap-1.5 cursor-pointer uppercase tracking-wider"
                   >
                     Inspect Cadre Network <ChevronRight className="w-3.5 h-3.5" />
                   </button>
@@ -1513,32 +1593,32 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
              -------------------------------------------------------- */}
           {activeTab === 'electoral_roll' && (
             <div className="space-y-6 animate-fade-in" id="const-electoral-roll-tab">
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-5">
+              <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-5">
                 {/* Header & Quick stats */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 gap-4">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="p-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200">
+                      <span className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
                         <Database className="w-4 h-4" />
                       </span>
-                      <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">Constituency Electoral Roll</h3>
+                      <h3 className="text-sm font-black uppercase tracking-wider text-white">Constituency Electoral Roll</h3>
                     </div>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p className="text-xs text-slate-400 mt-1">
                       Official verified voter records across all Mandals and Booths in this Assembly Constituency.
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-xs bg-slate-100 border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-black">
+                    <span className="text-xs bg-slate-900/90 border border-slate-800 text-cyan-400 px-3 py-1.5 rounded-xl font-black">
                       Total Voters: {electoralTotal.toLocaleString()}
                     </span>
                     <button
                       type="button"
                       onClick={() => void loadElectoralRoll()}
                       disabled={isElectoralLoading}
-                      className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+                      className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
                       title="Refresh Roll"
                     >
-                      <RefreshCw className={`w-4 h-4 ${isElectoralLoading ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`w-4 h-4 ${isElectoralLoading ? 'animate-spin text-cyan-400' : ''}`} />
                     </button>
                   </div>
                 </div>
@@ -1552,7 +1632,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       placeholder="Search by Voter Name, EPIC ID, Relative Name, or Mobile..."
                       value={electoralSearch}
                       onChange={(e) => setElectoralSearch(e.target.value)}
-                      className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-amber-400"
+                      className="w-full pl-9 pr-4 py-2 bg-[#121522] border border-white/[0.08] rounded-xl text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40"
                     />
                   </div>
 
@@ -1560,7 +1640,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                     <select
                       value={electoralPrefFilter}
                       onChange={(e) => setElectoralPrefFilter(e.target.value)}
-                      className="w-full py-2 px-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-none focus:border-amber-400"
+                      className="w-full py-2 px-3 bg-[#121522] border border-white/[0.08] rounded-xl text-xs font-bold text-slate-200 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40"
                     >
                       <option value="ALL">All Political Alignments</option>
                       <option value="TDP">TDP (Support)</option>
@@ -1577,7 +1657,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                     <select
                       value={electoralGenderFilter}
                       onChange={(e) => setElectoralGenderFilter(e.target.value)}
-                      className="w-full py-2 px-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-none focus:border-amber-400"
+                      className="w-full py-2 px-3 bg-[#121522] border border-white/[0.08] rounded-xl text-xs font-bold text-slate-200 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40"
                     >
                       <option value="ALL">All Genders</option>
                       <option value="MALE">Male</option>
@@ -1589,15 +1669,15 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
                 {/* Error Banner */}
                 {electoralError && !isElectoralLoading && (
-                  <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between text-red-700 text-xs font-bold">
+                  <div className="p-4 bg-red-950/40 border border-red-800/80 rounded-xl flex items-center justify-between text-red-300 text-xs font-bold">
                     <div className="flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                      <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
                       <span>{electoralError}</span>
                     </div>
                     <button
                       type="button"
                       onClick={() => void loadElectoralRoll()}
-                      className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-[10px] font-black uppercase tracking-wider cursor-pointer"
+                      className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer"
                     >
                       Retry
                     </button>
@@ -1607,17 +1687,17 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                 {/* Loading State */}
                 {isElectoralLoading && (
                   <div className="py-16 text-center space-y-3">
-                    <Loader2 className="w-8 h-8 animate-spin text-amber-500 mx-auto" />
-                    <p className="text-xs font-bold text-slate-500">Querying verified electoral roll records...</p>
+                    <Loader2 className="w-8 h-8 animate-spin text-cyan-400 mx-auto" />
+                    <p className="text-xs font-bold text-slate-400">Querying verified electoral roll records...</p>
                   </div>
                 )}
 
                 {/* Empty State */}
                 {!isElectoralLoading && !electoralError && electoralVoters.length === 0 && (
-                  <div className="py-16 text-center space-y-3 border-2 border-dashed border-slate-200 rounded-xl">
-                    <Database className="w-10 h-10 text-slate-300 mx-auto" />
+                  <div className="py-16 text-center space-y-3 border-2 border-dashed border-slate-800 rounded-2xl bg-[#0B1120]/50">
+                    <Database className="w-10 h-10 text-slate-600 mx-auto" />
                     <div className="space-y-1">
-                      <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">No Voters Found</h4>
+                      <h4 className="text-sm font-black text-white uppercase tracking-tight">No Voters Found</h4>
                       <p className="text-xs text-slate-400 font-medium max-w-sm mx-auto">
                         No voter records match the specified filters in this constituency. Try modifying the search keyword or filter settings.
                       </p>
@@ -1625,94 +1705,181 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   </div>
                 )}
 
-                {/* Table */}
+                {/* View Mode Switcher & Counter */}
+                {!isElectoralLoading && !electoralError && electoralVoters.length > 0 && (
+                  <div className="flex items-center justify-between pb-1">
+                    <span className="text-[11px] font-bold text-slate-400">
+                      Showing <span className="text-white font-mono">{electoralVoters.length}</span> of <span className="text-cyan-400 font-mono">{electoralTotal.toLocaleString()}</span> voters
+                    </span>
+                    <div className="flex items-center gap-1 bg-[#121522] border border-white/[0.08] p-1 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => setVoterViewMode('cards')}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                          voterViewMode === 'cards' ? 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-black shadow-sm' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        📱 Cards
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVoterViewMode('table')}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                          voterViewMode === 'table' ? 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-black shadow-sm' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        📄 Table
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Mobile Cards / Table Display */}
                 {!isElectoralLoading && !electoralError && electoralVoters.length > 0 && (
                   <div className="space-y-4">
-                    <div className="overflow-x-auto rounded-lg border border-slate-200">
-                      <table className="w-full text-left border-collapse text-xs">
-                        <thead>
-                          <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-black uppercase text-[10px] tracking-wider">
-                            <th className="py-3 px-3.5 text-center">S.No</th>
-                            <th className="py-3 px-3.5">EPIC ID</th>
-                            <th className="py-3 px-3.5">Voter Details</th>
-                            <th className="py-3 px-3.5">Relative</th>
-                            <th className="py-3 px-3.5">Age / Gender</th>
-                            <th className="py-3 px-3.5">Mandal / Village</th>
-                            <th className="py-3 px-3.5">Booth</th>
-                            <th className="py-3 px-3.5">Preference</th>
-                            <th className="py-3 px-3.5 text-center">Vote Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                          {electoralVoters.map((voter, idx) => {
-                            const prefColor = CONST_PARTY_COLORS[voter.politicalPreference] || '#64748b';
-                            return (
-                              <tr key={voter.id || voter.epicNumber || idx} className="hover:bg-slate-50/80 transition-colors">
-                                <td className="py-3 px-3.5 text-center text-slate-400 font-mono text-[11px]">
-                                  {(electoralPage - 1) * electoralPageSize + idx + 1}
-                                </td>
-                                <td className="py-3 px-3.5 font-mono font-black text-slate-900 tracking-wider">
-                                  {voter.epicNumber}
-                                </td>
-                                <td className="py-3 px-3.5">
-                                  <div className="font-black text-slate-950 uppercase">{voter.name}</div>
-                                  {voter.mobileNumber && (
-                                    <div className="text-[10px] text-slate-400 font-mono">{voter.mobileNumber}</div>
+                    {voterViewMode === 'cards' ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                        {electoralVoters.map((voter, idx) => {
+                          const prefColor = CONST_PARTY_COLORS[voter.politicalPreference] || '#64748b';
+                          return (
+                            <div 
+                              key={voter.id || voter.epicNumber || idx}
+                              className="bg-[#0D0F18]/95 border border-white/[0.08] hover:border-cyan-500/50 rounded-2xl p-4 space-y-3 transition shadow-md flex flex-col justify-between"
+                            >
+                              <div className="space-y-2.5">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <div className="font-black text-sm text-white uppercase tracking-tight">{voter.name}</div>
+                                    <div className="text-[11px] text-slate-400 font-medium">
+                                      {voter.relationType || 'S/O'}: {voter.fatherHusbandName || '—'}
+                                    </div>
+                                  </div>
+                                  {voter.voteStatus === 'VOTE DONE' ? (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 uppercase">
+                                      <Check className="w-3 h-3 text-emerald-400" /> Voted
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-800 text-slate-400 border border-slate-700 uppercase">
+                                      Not Voted
+                                    </span>
                                   )}
-                                  {voter.houseNumber && (
-                                    <div className="text-[10px] text-slate-400 font-medium">H.No: {voter.houseNumber}</div>
-                                  )}
-                                </td>
-                                <td className="py-3 px-3.5 text-slate-600">
-                                  <div className="text-xs font-semibold">{voter.fatherHusbandName || '—'}</div>
-                                  <div className="text-[10px] text-slate-400 uppercase font-medium">{voter.relationType || 'Relative'}</div>
-                                </td>
-                                <td className="py-3 px-3.5 text-slate-700">
-                                  <span className="font-bold">{voter.age}</span>
-                                  <span className="text-slate-400 text-[10px] font-semibold uppercase ml-1.5">
-                                    • {voter.gender}
+                                </div>
+
+                                <div className="flex items-center gap-2 flex-wrap text-[10px]">
+                                  <span className="px-2.5 py-0.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 font-mono font-black">
+                                    EPIC: {voter.epicNumber}
                                   </span>
-                                </td>
-                                <td className="py-3 px-3.5">
-                                  <div className="font-bold text-slate-900">{voter.mandal || '—'}</div>
-                                  <div className="text-[10px] text-slate-500 font-medium">{voter.village || '—'}</div>
-                                </td>
-                                <td className="py-3 px-3.5 font-semibold text-slate-700">
-                                  {voter.boothNumber || '—'}
-                                </td>
-                                <td className="py-3 px-3.5">
+                                  <span className="px-2 py-0.5 rounded-lg bg-[#121522] border border-white/[0.08] text-slate-300 font-bold">
+                                    Age: {voter.age} • {voter.gender}
+                                  </span>
                                   <span
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
+                                    className="px-2.5 py-0.5 rounded-lg font-bold uppercase tracking-wider text-[9px]"
                                     style={{
-                                      backgroundColor: `${prefColor}15`,
+                                      backgroundColor: `${prefColor}20`,
                                       color: prefColor,
                                       border: `1px solid ${prefColor}40`,
                                     }}
                                   >
-                                    <span
-                                      className="w-1.5 h-1.5 rounded-full"
-                                      style={{ backgroundColor: prefColor }}
-                                    />
                                     {voter.politicalPreference || 'Neutral'}
                                   </span>
-                                </td>
-                                <td className="py-3 px-3.5 text-center">
-                                  {voter.voteStatus === 'VOTE DONE' ? (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
-                                      <Check className="w-3 h-3 text-emerald-600" /> Voted
+                                </div>
+
+                                <div className="text-[11px] text-slate-400 flex items-center justify-between border-t border-white/[0.08] pt-2 font-mono">
+                                  <span className="truncate">📍 {voter.mandal} • {voter.village}</span>
+                                  <span className="text-cyan-400 font-bold shrink-0">Booth #{voter.boothNumber || '—'}</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-white/[0.08] bg-[#0D0F18]">
+                        <table className="w-full text-left border-collapse text-xs min-w-[700px]">
+                          <thead>
+                            <tr className="bg-[#121522] border-b border-white/[0.08] text-slate-300 font-black uppercase text-[10px] tracking-wider">
+                              <th className="py-3 px-3.5 text-center">S.No</th>
+                              <th className="py-3 px-3.5">EPIC ID</th>
+                              <th className="py-3 px-3.5">Voter Details</th>
+                              <th className="py-3 px-3.5">Relative</th>
+                              <th className="py-3 px-3.5">Age / Gender</th>
+                              <th className="py-3 px-3.5">Mandal / Village</th>
+                              <th className="py-3 px-3.5">Booth</th>
+                              <th className="py-3 px-3.5">Preference</th>
+                              <th className="py-3 px-3.5 text-center">Vote Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/[0.06] font-medium text-slate-300">
+                            {electoralVoters.map((voter, idx) => {
+                              const prefColor = CONST_PARTY_COLORS[voter.politicalPreference] || '#64748b';
+                              return (
+                                <tr key={voter.id || voter.epicNumber || idx} className="hover:bg-slate-800/40 transition-colors">
+                                  <td className="py-3 px-3.5 text-center text-slate-500 font-mono text-[11px]">
+                                    {(electoralPage - 1) * electoralPageSize + idx + 1}
+                                  </td>
+                                  <td className="py-3 px-3.5 font-mono font-black text-cyan-400 tracking-wider">
+                                    {voter.epicNumber}
+                                  </td>
+                                  <td className="py-3 px-3.5">
+                                    <div className="font-black text-white uppercase">{voter.name}</div>
+                                    {voter.mobileNumber && (
+                                      <div className="text-[10px] text-slate-400 font-mono">{voter.mobileNumber}</div>
+                                    )}
+                                    {voter.houseNumber && (
+                                      <div className="text-[10px] text-slate-400 font-medium">H.No: {voter.houseNumber}</div>
+                                    )}
+                                  </td>
+                                  <td className="py-3 px-3.5 text-slate-300">
+                                    <div className="text-xs font-semibold">{voter.fatherHusbandName || '—'}</div>
+                                    <div className="text-[10px] text-slate-400 uppercase font-medium">{voter.relationType || 'Relative'}</div>
+                                  </td>
+                                  <td className="py-3 px-3.5 text-slate-300">
+                                    <span className="font-bold text-white">{voter.age}</span>
+                                    <span className="text-slate-400 text-[10px] font-semibold uppercase ml-1.5">
+                                      • {voter.gender}
                                     </span>
-                                  ) : (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200 uppercase">
-                                      Not Voted
+                                  </td>
+                                  <td className="py-3 px-3.5">
+                                    <div className="font-bold text-white">{voter.mandal || '—'}</div>
+                                    <div className="text-[10px] text-slate-400 font-medium">{voter.village || '—'}</div>
+                                  </td>
+                                  <td className="py-3 px-3.5 font-semibold text-slate-300">
+                                    {voter.boothNumber || '—'}
+                                  </td>
+                                  <td className="py-3 px-3.5">
+                                    <span
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
+                                      style={{
+                                        backgroundColor: `${prefColor}20`,
+                                        color: prefColor,
+                                        border: `1px solid ${prefColor}50`,
+                                      }}
+                                    >
+                                      <span
+                                        className="w-1.5 h-1.5 rounded-full"
+                                        style={{ backgroundColor: prefColor }}
+                                      />
+                                      {voter.politicalPreference || 'Neutral'}
                                     </span>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                                  </td>
+                                  <td className="py-3 px-3.5 text-center">
+                                    {voter.voteStatus === 'VOTE DONE' ? (
+                                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 uppercase">
+                                        <Check className="w-3 h-3 text-emerald-400" /> Voted
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700 uppercase">
+                                        Not Voted
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
 
                     {/* Pagination */}
                     <Pagination
@@ -1726,7 +1893,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       }}
                       pageSizeOptions={[10, 15, 25, 50, 100]}
                       itemName="voters"
-                      accentColor="amber"
+                      accentColor="blue"
                     />
                   </div>
                 )}
@@ -1739,22 +1906,22 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
              -------------------------------------------------------- */}
           {activeTab === 'mandal_list' && (
             <div className="space-y-6 animate-fade-in" id="const-mandal-tab">
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+              <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
                 
                 {/* Header with quick stats */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 gap-4">
                   <div>
-                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Mandal Analysis</h3>
-                    <p className="text-xs text-slate-500">View detailed performance, leadership margins, and drill-down into polling villages.</p>
+                    <h3 className="text-xs font-black uppercase tracking-wider text-cyan-400">Mandal Analysis</h3>
+                    <p className="text-xs text-slate-400">View detailed performance, leadership margins, and drill-down into polling villages.</p>
                   </div>
                   <div className="flex gap-2 flex-wrap">
-                    <span className="text-[10px] bg-slate-50 border border-slate-200 text-slate-600 font-extrabold px-2.5 py-1 rounded">
+                    <span className="text-[10px] bg-slate-900 border border-slate-800 text-slate-300 font-extrabold px-2.5 py-1 rounded-lg">
                       Total: 6
                     </span>
-                    <span className="text-[10px] bg-emerald-50 border border-emerald-200 text-emerald-700 font-extrabold px-2.5 py-1 rounded">
+                    <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-extrabold px-2.5 py-1 rounded-lg">
                       TDP Leading: 4
                     </span>
-                    <span className="text-[10px] bg-red-50 border border-red-200 text-red-700 font-extrabold px-2.5 py-1 rounded">
+                    <span className="text-[10px] bg-red-500/10 border border-red-500/30 text-red-400 font-extrabold px-2.5 py-1 rounded-lg">
                       YSRCP Leading: 2
                     </span>
                   </div>
@@ -1769,21 +1936,21 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       placeholder="Search Mandal..." 
                       value={mandalSearch}
                       onChange={(e) => setMandalSearch(e.target.value)}
-                      className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-yellow-400"
+                      className="w-full pl-9 pr-4 py-2 bg-[#0B1120] border border-slate-700/80 rounded-xl text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                     />
                   </div>
 
                   {/* Filter pills */}
-                  <div className="flex gap-2.5 flex-wrap">
+                  <div className="flex gap-2 flex-wrap">
                     {(['ALL', 'TDP LEADING', 'YSRCP LEADING', 'CLOSE CONTEST'] as const).map(tab => (
                       <button
                         key={tab}
                         onClick={() => setMandalFilter(tab)}
                         className={`
-                          px-3.5 py-1.5 rounded-lg text-xs font-extrabold uppercase transition-all cursor-pointer border
+                          px-3.5 py-1.5 rounded-xl text-xs font-extrabold uppercase transition-all cursor-pointer border
                           ${mandalFilter === tab 
-                            ? 'bg-slate-900 border-slate-900 text-white shadow-sm' 
-                            : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'
+                            ? 'bg-gradient-to-r from-blue-600 to-cyan-500 border-cyan-400 text-white font-black shadow-md shadow-cyan-500/20' 
+                            : 'bg-slate-900/80 border-slate-800 hover:bg-slate-800 text-slate-300'
                           }
                         `}
                       >
@@ -1794,78 +1961,78 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                 </div>
 
                 {/* Mandals Grid list */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 pt-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 pt-2">
                   {filteredMandals.map((mandal) => {
                     const isPending = false;
                     const statusColors = 
-                      isPending ? 'bg-amber-50 text-amber-800 border-amber-200 animate-pulse' :
-                      mandal.status === 'WINNING' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
-                      mandal.status === 'TRAILING' ? 'bg-red-50 text-red-800 border-red-200' :
-                      'bg-amber-50 text-amber-800 border-amber-200';
+                      isPending ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 animate-pulse' :
+                      mandal.status === 'WINNING' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' :
+                      mandal.status === 'TRAILING' ? 'bg-red-500/20 text-red-400 border-red-500/40' :
+                      'bg-cyan-500/20 text-cyan-400 border-cyan-500/40';
 
                     const marginColor = 
-                      mandal.status === 'WINNING' ? 'text-emerald-600' :
-                      mandal.status === 'TRAILING' ? 'text-rose-600' :
-                      mandal.status === 'CLOSE CONTEST' ? 'text-orange-500' : 'text-slate-600';
+                      mandal.status === 'WINNING' ? 'text-emerald-400' :
+                      mandal.status === 'TRAILING' ? 'text-rose-400' :
+                      mandal.status === 'CLOSE CONTEST' ? 'text-cyan-400' : 'text-slate-400';
 
                     return (
                       <div 
                         key={mandal.name} 
-                        className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-4 hover:shadow-md transition-shadow flex flex-col justify-between"
+                        className="bg-[#0B1120] border border-slate-800 hover:border-cyan-500/40 rounded-2xl p-5 space-y-4 hover:shadow-xl transition-all flex flex-col justify-between"
                       >
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between">
-                            <h4 className="text-base font-black text-slate-900 uppercase tracking-tight">{mandal.name}</h4>
-                            <span className={`px-2.5 py-0.5 border rounded text-[9px] font-black tracking-widest uppercase ${statusColors}`}>
+                            <h4 className="text-base font-black text-white uppercase tracking-tight">{mandal.name}</h4>
+                            <span className={`px-2.5 py-0.5 border rounded-full text-[9px] font-black tracking-widest uppercase ${statusColors}`}>
                               {mandal.status}
                             </span>
                           </div>
                           
-                          <div className="grid grid-cols-3 gap-2 py-2 text-center text-[10px] font-bold text-slate-500">
+                          <div className="grid grid-cols-3 gap-2 py-2 text-center text-[10px] font-bold text-slate-400">
                             <div>
-                              <span className="block text-slate-400 text-[9px] uppercase font-black">Voters</span>
-                              <span className="text-slate-950 font-black text-sm">{isPending ? 'PENDING' : mandal.voters.toLocaleString()}</span>
+                              <span className="block text-slate-500 text-[9px] uppercase font-black">Voters</span>
+                              <span className="text-white font-black text-sm">{isPending ? 'PENDING' : mandal.voters.toLocaleString()}</span>
                             </div>
                             <div>
-                              <span className="block text-slate-400 text-[9px] uppercase font-black">Villages</span>
-                              <span className="text-blue-600 font-black text-sm">{mandal.villages}</span>
+                              <span className="block text-slate-500 text-[9px] uppercase font-black">Villages</span>
+                              <span className="text-sky-400 font-black text-sm">{mandal.villages}</span>
                             </div>
                             <div>
-                              <span className="block text-slate-400 text-[9px] uppercase font-black">Booths</span>
-                              <span className="text-purple-600 font-black text-sm">{isPending ? 'PENDING' : mandal.booths}</span>
+                              <span className="block text-slate-500 text-[9px] uppercase font-black">Booths</span>
+                              <span className="text-purple-400 font-black text-sm">{isPending ? 'PENDING' : mandal.booths}</span>
                             </div>
                           </div>
 
                           {/* Party share bar visual */}
                           {isPending ? (
-                            <div className="space-y-1 pt-1.5 border-t border-slate-200/60 text-center py-1">
-                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">AWAITING SYSTEM SYNC</span>
-                              <div className="w-full h-2 bg-slate-200 rounded-full" />
+                            <div className="space-y-1 pt-1.5 border-t border-slate-800 text-center py-1">
+                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">AWAITING SYSTEM SYNC</span>
+                              <div className="w-full h-2 bg-slate-800 rounded-full" />
                             </div>
                           ) : (
-                            <div className="space-y-1 pt-1.5 border-t border-slate-200/60">
+                            <div className="space-y-1 pt-1.5 border-t border-slate-800">
                               <div className="flex justify-between text-xs font-black">
-                                <span className="text-amber-600">TDP: {mandal.voters > 0 ? Math.round(mandal.tdp / mandal.voters * 100) : 0}%</span>
-                                <span className="text-blue-600">YSRCP: {mandal.voters > 0 ? Math.round(mandal.ysrcp / mandal.voters * 100) : 0}%</span>
+                                <span className="text-yellow-400">TDP: {mandal.voters > 0 ? Math.round(mandal.tdp / mandal.voters * 100) : 0}%</span>
+                                <span className="text-blue-400">YSRCP: {mandal.voters > 0 ? Math.round(mandal.ysrcp / mandal.voters * 100) : 0}%</span>
                               </div>
-                              <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden flex">
+                              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden flex">
                                 <div className="h-full bg-yellow-400" style={{ width: `${mandal.voters > 0 ? (mandal.tdp / mandal.voters * 100) : 0}%` }} />
                                 <div className="h-full bg-blue-600" style={{ width: `${mandal.voters > 0 ? (mandal.ysrcp / mandal.voters * 100) : 0}%` }} />
-                                <div className="h-full bg-slate-400" style={{ width: `${mandal.voters > 0 ? (mandal.neutral / mandal.voters * 100) : 0}%` }} />
+                                <div className="h-full bg-slate-600" style={{ width: `${mandal.voters > 0 ? (mandal.neutral / mandal.voters * 100) : 0}%` }} />
                               </div>
                             </div>
                           )}
                         </div>
 
-                        <div className="flex items-center justify-between pt-3 border-t border-slate-200/60">
-                          <div className="text-[10px] font-bold text-slate-500">
+                        <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+                          <div className="text-[10px] font-bold text-slate-400">
                             {isPending ? (
-                              <span className="text-[9px] text-slate-400 font-bold uppercase block">NO ACTIVE SURVEY DATA</span>
+                              <span className="text-[9px] text-slate-500 font-bold uppercase block">NO ACTIVE SURVEY DATA</span>
                             ) : (
                               <>
-                                <span className="text-[11px] font-black text-slate-500 uppercase">Leading: </span>
+                                <span className="text-[11px] font-black text-slate-400 uppercase">Leading: </span>
                                 <span className={`text-[13px] md:text-sm font-black uppercase tracking-wide ${
-                                  mandal.leading === 'TDP' ? 'text-amber-500' : 'text-blue-600'
+                                  mandal.leading === 'TDP' ? 'text-yellow-400' : 'text-blue-400'
                                 }`}>
                                   {mandal.leading}
                                 </span>
@@ -1878,7 +2045,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           
                           <button
                             onClick={() => setDrilledMandal(mandal.name)}
-                            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black rounded-lg uppercase tracking-wider cursor-pointer"
+                            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-cyan-400 hover:text-cyan-300 border border-slate-800 text-[10px] font-black rounded-xl uppercase tracking-wider cursor-pointer"
                           >
                             View Details
                           </button>
@@ -1900,79 +2067,79 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
               {!selectedMandalInVillageList ? (
                 // STEP 1 - LANDING PAGE: MANDAL DIRECTORY
                 <div className="space-y-6">
-                  <div className="bg-slate-900 text-white rounded-xl p-6 shadow-md border border-slate-800 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                  <div className="bg-[#0B1120] text-white rounded-2xl p-5 sm:p-6 shadow-xl border border-slate-800 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                     <div>
-                      <p className="text-[10px] text-yellow-400 font-extrabold uppercase tracking-widest">KONDAPI CONSTITUENCY</p>
-                      <h2 className="text-xl md:text-2xl font-black uppercase tracking-tight mt-1">MANDAL DIRECTORY</h2>
+                      <p className="text-[10px] text-cyan-400 font-extrabold uppercase tracking-widest">KONDAPI CONSTITUENCY</p>
+                      <h2 className="text-xl md:text-2xl font-black uppercase tracking-tight mt-1 text-white">MANDAL DIRECTORY</h2>
                       <p className="text-xs text-slate-400 mt-0.5">Select a mandal to explore real-time booth intelligence and village polling statistics.</p>
                     </div>
-                    <div className="bg-slate-850 px-4 py-2.5 rounded-lg border border-slate-800 text-right shrink-0">
-                      <span className="block text-[10px] text-yellow-400 font-extrabold uppercase tracking-widest">6 MANDALS • 112 GRAM PANCHAYATS</span>
+                    <div className="bg-slate-900 px-4 py-2.5 rounded-xl border border-slate-800 text-right shrink-0">
+                      <span className="block text-[10px] text-cyan-400 font-extrabold uppercase tracking-widest">6 MANDALS • 112 GRAM PANCHAYATS</span>
                       <span className="text-sm font-black text-white">{constituencyStats.voters.toLocaleString()} TOTAL VOTERS</span>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
                     {mandalsData.map(m => {
                       const statusColors = 
-                        m.status === 'WINNING' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
-                        m.status === 'TRAILING' ? 'bg-red-50 text-red-800 border-red-200' :
-                        'bg-amber-50 text-amber-800 border-amber-200';
+                        m.status === 'WINNING' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' :
+                        m.status === 'TRAILING' ? 'bg-red-500/20 text-red-400 border-red-500/40' :
+                        'bg-cyan-500/20 text-cyan-400 border-cyan-500/40';
 
                       const marginColor = 
-                        m.status === 'WINNING' ? 'text-emerald-600' :
-                        m.status === 'TRAILING' ? 'text-rose-600' :
-                        m.status === 'CLOSE CONTEST' ? 'text-orange-500' : 'text-slate-600';
+                        m.status === 'WINNING' ? 'text-emerald-400' :
+                        m.status === 'TRAILING' ? 'text-rose-400' :
+                        m.status === 'CLOSE CONTEST' ? 'text-cyan-400' : 'text-slate-400';
 
                       return (
                         <button
                           key={m.name}
                           onClick={() => setSelectedMandalInVillageList(m.name)}
-                          className="text-left bg-white border border-slate-200 rounded-xl p-5 hover:border-yellow-400 hover:shadow-md transition-all flex flex-col justify-between space-y-4 group cursor-pointer"
+                          className="text-left bg-[#0F172A]/90 border border-slate-800 rounded-2xl p-5 hover:border-cyan-400/60 hover:shadow-xl transition-all flex flex-col justify-between space-y-4 group cursor-pointer"
                         >
                           <div className="w-full space-y-2">
                             <div className="flex items-start justify-between">
                               <div>
-                                <h4 className="text-base font-black text-slate-900 group-hover:text-yellow-600 transition-colors uppercase tracking-tight">{m.name}</h4>
+                                <h4 className="text-base font-black text-white group-hover:text-cyan-400 transition-colors uppercase tracking-tight">{m.name}</h4>
                                 <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                                  <span className="text-blue-600 font-black text-xs">{m.villages}</span> Gram Panchayats
+                                  <span className="text-sky-400 font-black text-xs">{m.villages}</span> Gram Panchayats
                                 </span>
                               </div>
-                              <span className={`px-2 py-0.5 border rounded text-[9px] font-black tracking-widest uppercase shrink-0 ${statusColors}`}>
+                              <span className={`px-2 py-0.5 border rounded-full text-[9px] font-black tracking-widest uppercase shrink-0 ${statusColors}`}>
                                 {m.status}
                               </span>
                             </div>
 
-                            <div className="border-t border-slate-100 pt-3 flex justify-between items-center text-xs">
+                            <div className="border-t border-slate-800 pt-3 flex justify-between items-center text-xs">
                               <div>
                                 <span className="block text-[9px] text-slate-400 font-bold uppercase">Total Voters</span>
-                                <span className="font-black text-sm text-slate-950">{m.voters.toLocaleString()}</span>
+                                <span className="font-black text-sm text-white">{m.voters.toLocaleString()}</span>
                               </div>
                               <div className="text-right">
                                 <span className="block text-[9px] text-slate-400 font-bold uppercase">Booths</span>
-                                <span className="font-black text-sm text-purple-600">{m.booths}</span>
+                                <span className="font-black text-sm text-purple-400">{m.booths}</span>
                               </div>
                             </div>
 
                             {/* Progress bars */}
-                            <div className="space-y-1 pt-1.5 border-t border-slate-100">
+                            <div className="space-y-1 pt-1.5 border-t border-slate-800">
                               <div className="flex justify-between text-xs font-black">
-                                <span className="text-amber-600">TDP: {m.voters > 0 ? Math.round(m.tdp / m.voters * 100) : 0}%</span>
-                                <span className="text-blue-600">YSRCP: {m.voters > 0 ? Math.round(m.ysrcp / m.voters * 100) : 0}%</span>
+                                <span className="text-yellow-400">TDP: {m.voters > 0 ? Math.round(m.tdp / m.voters * 100) : 0}%</span>
+                                <span className="text-blue-400">YSRCP: {m.voters > 0 ? Math.round(m.ysrcp / m.voters * 100) : 0}%</span>
                               </div>
-                              <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden flex">
+                              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden flex">
                                 <div className="h-full bg-yellow-400" style={{ width: `${m.voters > 0 ? (m.tdp / m.voters * 100) : 0}%` }} />
                                 <div className="h-full bg-blue-600" style={{ width: `${m.voters > 0 ? (m.ysrcp / m.voters * 100) : 0}%` }} />
-                                <div className="h-full bg-slate-300" style={{ width: `${m.voters > 0 ? (m.neutral / m.voters * 100) : 0}%` }} />
+                                <div className="h-full bg-slate-600" style={{ width: `${m.voters > 0 ? (m.neutral / m.voters * 100) : 0}%` }} />
                               </div>
                             </div>
                           </div>
 
-                          <div className="w-full pt-3 border-t border-slate-100 flex items-center justify-between text-[10px] font-bold text-slate-500">
+                          <div className="w-full pt-3 border-t border-slate-800 flex items-center justify-between text-[10px] font-bold text-slate-400">
                             <div>
-                              <span className="text-[11px] font-black text-slate-500 uppercase">Leading: </span>
+                              <span className="text-[11px] font-black text-slate-400 uppercase">Leading: </span>
                               <span className={`text-[13px] md:text-sm font-black uppercase tracking-wide ${
-                                m.leading === 'TDP' ? 'text-amber-500' : 'text-blue-600'
+                                m.leading === 'TDP' ? 'text-yellow-400' : 'text-blue-400'
                               }`}>
                                 {m.leading}
                               </span>
@@ -1980,7 +2147,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                                 Margin: +{m.lead.toLocaleString()} votes
                               </span>
                             </div>
-                            <span className="text-yellow-600 font-black uppercase tracking-wider group-hover:translate-x-1 transition-transform flex items-center gap-1">
+                            <span className="text-cyan-400 font-black uppercase tracking-wider group-hover:translate-x-1 transition-transform flex items-center gap-1">
                               Explore GP List <ChevronRight className="w-3.5 h-3.5" />
                             </span>
                           </div>
@@ -1991,24 +2158,24 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                 </div>
               ) : (
                 // STEP 2 - DRILLDOWN VIEW: MANDAL VILLAGE LIST
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-slate-100 pb-4 gap-3">
+                <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-slate-800 pb-4 gap-3">
                     <div className="space-y-1">
                       <button
                         onClick={() => setSelectedMandalInVillageList(null)}
-                        className="flex items-center gap-2 text-xs font-black text-slate-500 hover:text-slate-950 uppercase tracking-wider cursor-pointer mb-1 transition-colors"
+                        className="flex items-center gap-2 text-xs font-black text-cyan-400 hover:text-cyan-300 uppercase tracking-wider cursor-pointer mb-1 transition-colors"
                       >
                         <ArrowLeft className="w-4 h-4" /> Back to Mandal Directory
                       </button>
-                      <h3 className="text-base font-black uppercase tracking-tight text-slate-950">
+                      <h3 className="text-base font-black uppercase tracking-tight text-white">
                         {selectedMandalInVillageList} Mandal — Village List ({filteredVillages.length})
                       </h3>
-                      <p className="text-xs text-slate-500 font-medium">
+                      <p className="text-xs text-slate-400 font-medium">
                         Reviewing dynamic polling data and political leanings for all active Gram Panchayats in {selectedMandalInVillageList} Mandal.
                       </p>
                     </div>
                     <div className="flex items-center gap-3 self-start md:self-auto">
-                      <span className="px-3 py-1.5 bg-yellow-50 text-yellow-800 border border-yellow-200 rounded-lg text-xs font-extrabold uppercase">
+                      <span className="px-3 py-1.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 rounded-xl text-xs font-extrabold uppercase">
                         Real-time Synchronized
                       </span>
                     </div>
@@ -2023,7 +2190,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         placeholder={`Search villages in ${selectedMandalInVillageList}...`} 
                         value={villageSearch}
                         onChange={(e) => setVillageSearch(e.target.value)}
-                        className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-yellow-400"
+                        className="w-full pl-9 pr-4 py-2 bg-[#0B1120] border border-slate-700/80 rounded-xl text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                       />
                     </div>
 
@@ -2034,10 +2201,10 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           key={tab}
                           onClick={() => setVillageFilter(tab)}
                           className={`
-                            px-3.5 py-1.5 rounded-lg text-xs font-extrabold uppercase transition-all cursor-pointer border
+                            px-3.5 py-1.5 rounded-xl text-xs font-extrabold uppercase transition-all cursor-pointer border
                             ${villageFilter === tab 
-                              ? 'bg-slate-900 border-slate-900 text-white shadow-sm' 
-                              : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'
+                              ? 'bg-gradient-to-r from-blue-600 to-cyan-500 border-cyan-400 text-white font-black shadow-md shadow-cyan-500/20' 
+                              : 'bg-slate-900/80 border-slate-800 hover:bg-slate-800 text-slate-300'
                             }
                           `}
                         >
@@ -2048,10 +2215,10 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   </div>
 
                   {/* Villages Table */}
-                  <div className="overflow-x-auto border border-slate-100 rounded-xl">
+                  <div className="overflow-x-auto border border-slate-800 rounded-xl bg-[#0B1120]">
                     <table className="w-full min-w-[700px] text-left border-collapse text-xs">
                       <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-black uppercase text-[9px] tracking-wider">
+                        <tr className="bg-[#131E33] border-b border-slate-800 text-slate-300 font-black uppercase text-[9px] tracking-wider">
                           <th className="py-3 px-4 text-center">S.No</th>
                           <th className="py-3 px-4">Village / GP Name</th>
                           <th className="py-3 px-4">Mandal Name</th>
@@ -2064,45 +2231,45 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           <th className="py-3 px-4 text-center">Action</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100 bg-white">
+                      <tbody className="divide-y divide-slate-800/80 bg-[#0B1120]">
                         {paginatedVillages.map((v, idx) => {
                           const statusColors = 
-                            v.status === 'WINNING' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                            v.status === 'TRAILING' ? 'bg-rose-50 text-rose-700 border-rose-200' :
-                            'bg-orange-50 text-orange-700 border-orange-200';
+                            v.status === 'WINNING' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' :
+                            v.status === 'TRAILING' ? 'bg-rose-500/20 text-rose-400 border-rose-500/40' :
+                            'bg-cyan-500/20 text-cyan-400 border-cyan-500/40';
 
                           return (
-                            <tr key={v.name} className="hover:bg-slate-50 font-bold text-slate-700">
-                              <td className="py-3 px-4 text-center text-slate-400">{(villagesPage - 1) * villagesPageSize + idx + 1}</td>
-                              <td className="py-3 px-4 font-black text-slate-900 uppercase">{v.name}</td>
-                              <td className="py-3 px-4 uppercase text-slate-500">{v.mandal}</td>
-                              <td className="py-3 px-4 text-right text-slate-900 font-extrabold text-sm">{v.voters.toLocaleString()}</td>
+                            <tr key={v.name} className="hover:bg-slate-800/40 font-bold text-slate-200">
+                              <td className="py-3 px-4 text-center text-slate-500">{(villagesPage - 1) * villagesPageSize + idx + 1}</td>
+                              <td className="py-3 px-4 font-black text-white uppercase">{v.name}</td>
+                              <td className="py-3 px-4 uppercase text-slate-400">{v.mandal}</td>
+                              <td className="py-3 px-4 text-right text-white font-extrabold text-sm">{v.voters.toLocaleString()}</td>
                               <td className="py-3 px-4 text-right">
-                                <span className="text-amber-500 font-black text-sm">{v.tdp.toLocaleString()}</span>
-                                <span className="block text-[10px] text-amber-500 font-black">({Math.round(v.tdp / v.voters * 100)}%)</span>
+                                <span className="text-yellow-400 font-black text-sm">{v.tdp.toLocaleString()}</span>
+                                <span className="block text-[10px] text-yellow-400 font-black">({Math.round(v.tdp / v.voters * 100)}%)</span>
                               </td>
                               <td className="py-3 px-4 text-right">
-                                <span className="text-blue-600 font-black text-sm">{v.ysrcp.toLocaleString()}</span>
-                                <span className="block text-[10px] text-blue-600 font-black">({Math.round(v.ysrcp / v.voters * 100)}%)</span>
+                                <span className="text-blue-400 font-black text-sm">{v.ysrcp.toLocaleString()}</span>
+                                <span className="block text-[10px] text-blue-400 font-black">({Math.round(v.ysrcp / v.voters * 100)}%)</span>
                               </td>
                               <td className="py-3 px-4 text-right">
-                                <span className="text-slate-600 font-black text-sm">{v.neutral.toLocaleString()}</span>
+                                <span className="text-slate-300 font-black text-sm">{v.neutral.toLocaleString()}</span>
                                 <span className="block text-[10px] text-slate-500 font-black">({Math.round(v.neutral / v.voters * 100)}%)</span>
                               </td>
                               <td className="py-3 px-4 text-right">
-                                <span className={`inline-block font-black text-sm px-2 py-0.5 rounded ${v.leading === 'TDP' ? 'text-amber-600 bg-amber-50 border border-amber-200' : 'text-blue-600 bg-blue-50 border border-blue-200'}`}>
+                                <span className={`inline-block font-black text-sm px-2 py-0.5 rounded ${v.leading === 'TDP' ? 'text-yellow-400 bg-yellow-500/10 border border-yellow-500/30' : 'text-blue-400 bg-blue-500/10 border border-blue-500/30'}`}>
                                   {v.leading} +{v.lead.toLocaleString()}
                                 </span>
                               </td>
                               <td className="py-3 px-4 text-center">
-                                <span className={`px-2.5 py-1 border rounded text-[9px] font-black uppercase tracking-wider ${statusColors}`}>
+                                <span className={`px-2.5 py-1 border rounded-full text-[9px] font-black uppercase tracking-wider ${statusColors}`}>
                                   {v.status}
                                 </span>
                               </td>
                               <td className="py-3 px-4 text-center">
                                 <button
                                   onClick={() => setDrilledMandal(v.mandal)}
-                                  className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white border border-slate-850 rounded text-[9px] font-black uppercase tracking-wider cursor-pointer transition-colors"
+                                  className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-cyan-400 border border-slate-800 rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer transition-colors"
                                 >
                                   View Mandal
                                 </button>
@@ -2125,7 +2292,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                     }}
                     pageSizeOptions={[10, 15, 25, 50]}
                     itemName="villages"
-                    accentColor="amber"
+                    accentColor="blue"
                   />
                 </div>
               )}
@@ -2137,49 +2304,49 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
              -------------------------------------------------------- */}
           {activeTab === 'tasks' && (
             <div className="space-y-6 animate-fade-in" id="const-tasks-tab">
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+              <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
                 
                 <div>
-                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">High Command Tasks</h3>
-                  <p className="text-xs text-slate-500">Priority strategic actions assigned to the Constituency Incharge by the Central TDP Office.</p>
+                  <h3 className="text-xs font-black uppercase tracking-wider text-cyan-400">High Command Tasks</h3>
+                  <p className="text-xs text-slate-400">Priority strategic actions assigned to the Constituency Incharge by the Central TDP Office.</p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 pt-2">
                   {tasksList.map(task => {
                     const priorityColor = 
-                      task.priority === 'HIGH PRIORITY' ? 'bg-red-50 text-red-800 border-red-200' :
-                      task.priority === 'MEDIUM PRIORITY' ? 'bg-amber-50 text-amber-800 border-amber-200' :
-                      'bg-slate-50 text-slate-800 border-slate-200';
+                      task.priority === 'HIGH PRIORITY' ? 'bg-red-500/20 text-red-400 border-red-500/40' :
+                      task.priority === 'MEDIUM PRIORITY' ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40' :
+                      'bg-slate-800 text-slate-300 border-slate-700';
 
                     const statusColor = 
-                      task.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-800' :
-                      task.status === 'IN PROGRESS' ? 'bg-blue-100 text-blue-800' :
-                      'bg-slate-100 text-slate-800';
+                      task.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-400' :
+                      task.status === 'IN PROGRESS' ? 'bg-blue-500/20 text-blue-400' :
+                      'bg-slate-800 text-slate-400';
 
                     return (
                       <div 
                         key={task.id} 
-                        className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex flex-col justify-between space-y-4 shadow-sm hover:shadow-md transition-shadow"
+                        className="bg-[#0B1120] border border-slate-800 hover:border-cyan-500/40 rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-lg transition-all"
                       >
                         <div className="space-y-2">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <span className={`px-2.5 py-0.5 border rounded text-[9px] font-black uppercase tracking-widest ${priorityColor}`}>
+                            <span className={`px-2.5 py-0.5 border rounded-full text-[9px] font-black uppercase tracking-widest ${priorityColor}`}>
                               {task.priority}
                             </span>
-                            <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${statusColor}`}>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest ${statusColor}`}>
                               {task.status}
                             </span>
                           </div>
                           
-                          <h4 className="text-sm font-black text-slate-900 uppercase tracking-tight">{task.title}</h4>
-                          <p className="text-xs text-slate-500 font-medium leading-relaxed">{task.description}</p>
+                          <h4 className="text-sm font-black text-white uppercase tracking-tight">{task.title}</h4>
+                          <p className="text-xs text-slate-300 font-medium leading-relaxed">{task.description}</p>
                         </div>
 
-                        <div className="flex items-center justify-between border-t border-slate-200/60 pt-3 mt-1.5">
+                        <div className="flex items-center justify-between border-t border-slate-800 pt-3 mt-1.5">
                           <span className="text-[10px] text-slate-400 font-bold">DUE DATE: {task.dueDate}</span>
                           <button
                             onClick={() => setSelectedTask(task)}
-                            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black rounded-lg uppercase tracking-wider cursor-pointer"
+                            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-cyan-400 hover:text-cyan-300 border border-slate-800 text-[10px] font-black rounded-xl uppercase tracking-wider cursor-pointer transition-colors"
                           >
                             Open Details
                           </button>
@@ -2193,42 +2360,42 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
               {/* Task Details Modal */}
               {selectedTask && (
-                <div className="fixed inset-0 bg-slate-950/60 flex items-center justify-center p-4 z-50 animate-fade-in">
-                  <div className="bg-white rounded-xl border border-slate-200 max-w-md w-full p-6 space-y-4 shadow-xl">
+                <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+                  <div className="bg-[#0F172A] rounded-2xl border border-slate-700 max-w-md w-full p-6 space-y-4 shadow-2xl">
                     <div className="flex items-start justify-between">
                       <div>
-                        <span className="text-[9px] font-black text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded uppercase tracking-widest">
+                        <span className="text-[9px] font-black text-red-400 bg-red-500/20 border border-red-500/30 px-2 py-0.5 rounded-full uppercase tracking-widest">
                           {selectedTask.priority}
                         </span>
-                        <h4 className="text-base font-black text-slate-950 uppercase mt-1.5">{selectedTask.title}</h4>
+                        <h4 className="text-base font-black text-white uppercase mt-1.5">{selectedTask.title}</h4>
                       </div>
                       <button 
                         onClick={() => setSelectedTask(null)}
-                        className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                        className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer"
                       >
                         <X className="w-5 h-5" />
                       </button>
                     </div>
 
-                    <div className="space-y-2 border-y border-slate-100 py-3 text-xs leading-relaxed text-slate-600 font-medium">
+                    <div className="space-y-2 border-y border-slate-800 py-3 text-xs leading-relaxed text-slate-300 font-medium">
                       <p>{selectedTask.description}</p>
                       
-                      <div className="bg-slate-50 border border-slate-150 rounded-lg p-3 space-y-1.5 font-bold mt-3">
-                        <p className="text-[10px] text-slate-400 font-black uppercase">Action Progress Checklist:</p>
-                        <div className="flex items-center gap-2 text-slate-800">
-                          <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <div className="bg-[#0B1120] border border-slate-800 rounded-xl p-3.5 space-y-2 font-bold mt-3">
+                        <p className="text-[10px] text-cyan-400 font-black uppercase">Action Progress Checklist:</p>
+                        <div className="flex items-center gap-2 text-slate-200">
+                          <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
                           <span>Assign task coordinators in each mandal</span>
                         </div>
-                        <div className="flex items-center gap-2 text-slate-800">
+                        <div className="flex items-center gap-2 text-slate-200">
                           {selectedTask.status === 'COMPLETED' ? (
-                            <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
+                            <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
                           ) : (
-                            <span className="w-4 h-4 rounded-full border border-slate-300 shrink-0" />
+                            <span className="w-4 h-4 rounded-full border border-slate-600 shrink-0" />
                           )}
                           <span>Consolidate field visit tracking logs</span>
                         </div>
-                        <div className="flex items-center gap-2 text-slate-800">
-                          <span className="w-4 h-4 rounded-full border border-slate-300 shrink-0" />
+                        <div className="flex items-center gap-2 text-slate-200">
+                          <span className="w-4 h-4 rounded-full border border-slate-600 shrink-0" />
                           <span>Submit final audit to Assembly Desk</span>
                         </div>
                       </div>
@@ -2245,14 +2412,14 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                               });
                               setSelectedTask(null);
                             }}
-                            className="px-3 py-1.5 bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-black rounded-lg text-[10px] uppercase cursor-pointer"
+                            className="px-3.5 py-1.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black rounded-xl text-[10px] uppercase cursor-pointer shadow-md shadow-cyan-500/20"
                           >
                             Mark Complete
                           </button>
                         )}
                         <button
                           onClick={() => setSelectedTask(null)}
-                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black rounded-lg text-[10px] uppercase cursor-pointer"
+                          className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-black rounded-xl text-[10px] uppercase cursor-pointer"
                         >
                           Close
                         </button>
@@ -2285,66 +2452,66 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
             return (
               <div className="space-y-6 animate-fade-in" id="const-caste-tab">
                 {/* HEADER SECTION */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl">
                   <div className="flex items-center gap-3.5">
-                    <div className="p-2.5 bg-yellow-50 text-yellow-600 rounded-xl border border-yellow-100 shadow-sm shrink-0">
+                    <div className="p-2.5 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/30 shadow-sm shrink-0">
                       <FileText className="w-5.5 h-5.5" />
                     </div>
                     <div>
-                      <h2 className="text-base font-black text-slate-900 uppercase tracking-tight">Caste & Demographic Analytics</h2>
-                      <p className="text-[11px] text-slate-500 font-bold uppercase mt-0.5">
+                      <h2 className="text-base font-black text-white uppercase tracking-tight">Caste & Demographic Analytics</h2>
+                      <p className="text-[11px] text-slate-400 font-bold uppercase mt-0.5">
                         Detailed breakdown of {demoLevel === 'constituency' ? 'Constituency' : demoLevel === 'mandal' ? `${demoMandal} Mandal` : `${demoVillage} Village`}: {formattedActiveVoters} Voters
                       </p>
                     </div>
                   </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-right shadow-sm shrink-0 min-w-[140px]">
+                  <div className="bg-[#0B1120] border border-slate-800 rounded-xl px-4 py-2 text-right shadow-sm shrink-0 min-w-[140px]">
                     <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider">ACTIVE VIEW VOTERS</p>
-                    <p className="text-base font-black text-slate-900 tracking-tight mt-0.5">{formattedActiveVoters}</p>
+                    <p className="text-base font-black text-cyan-400 tracking-tight mt-0.5">{formattedActiveVoters}</p>
                   </div>
                 </div>
 
                 {/* TABS CONTAINER */}
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-                  <div className="flex flex-wrap border-b border-slate-200 gap-6 md:gap-8 text-[11px] font-black uppercase tracking-wider pb-px">
+                <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
+                  <div className="flex flex-wrap border-b border-slate-800 gap-4 sm:gap-8 text-[11px] font-black uppercase tracking-wider pb-px">
                     <button
                       onClick={() => setDemoLevel('constituency')}
                       className={`flex items-center gap-2 pb-3 transition-all cursor-pointer border-b-2 ${
                         demoLevel === 'constituency'
-                          ? 'border-slate-900 text-slate-900 font-black'
-                          : 'border-transparent text-slate-400 hover:text-slate-800'
+                          ? 'border-cyan-400 text-cyan-400 font-black'
+                          : 'border-transparent text-slate-400 hover:text-white'
                       }`}
                     >
-                      <Home className={`w-4 h-4 ${demoLevel === 'constituency' ? 'text-slate-800' : 'text-slate-400'}`} />
+                      <Home className={`w-4 h-4 ${demoLevel === 'constituency' ? 'text-cyan-400' : 'text-slate-400'}`} />
                       Constituency Level
                     </button>
                     <button
                       onClick={() => setDemoLevel('mandal')}
                       className={`flex items-center gap-2 pb-3 transition-all cursor-pointer border-b-2 ${
                         demoLevel === 'mandal'
-                          ? 'border-slate-900 text-slate-900 font-black'
-                          : 'border-transparent text-slate-400 hover:text-slate-800'
+                          ? 'border-cyan-400 text-cyan-400 font-black'
+                          : 'border-transparent text-slate-400 hover:text-white'
                       }`}
                     >
-                      <Compass className={`w-4 h-4 ${demoLevel === 'mandal' ? 'text-slate-800' : 'text-slate-400'}`} />
+                      <Compass className={`w-4 h-4 ${demoLevel === 'mandal' ? 'text-cyan-400' : 'text-slate-400'}`} />
                       Mandal Level Analytics
                     </button>
                     <button
                       onClick={() => setDemoLevel('village')}
                       className={`flex items-center gap-2 pb-3 transition-all cursor-pointer border-b-2 ${
                         demoLevel === 'village'
-                          ? 'border-slate-900 text-slate-900 font-black'
-                          : 'border-transparent text-slate-400 hover:text-slate-800'
+                          ? 'border-cyan-400 text-cyan-400 font-black'
+                          : 'border-transparent text-slate-400 hover:text-white'
                       }`}
                     >
-                      <MapPin className={`w-4 h-4 ${demoLevel === 'village' ? 'text-slate-800' : 'text-slate-400'}`} />
+                      <MapPin className={`w-4 h-4 ${demoLevel === 'village' ? 'text-cyan-400' : 'text-slate-400'}`} />
                       Village Level Analytics
                     </button>
                   </div>
 
                   {/* Granular Drill Down Selectors */}
                   {demoLevel !== 'constituency' && (
-                    <div className="flex flex-wrap gap-4 bg-slate-50 border border-slate-150 p-4 rounded-xl">
+                    <div className="flex flex-wrap gap-4 bg-[#0B1120] border border-slate-800 p-4 rounded-xl">
                       <div className="flex flex-col gap-1 shrink-0">
                         <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Select Mandal</label>
                         <select 
@@ -2355,7 +2522,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                             const matching = villagesData.find(v => v.mandal === e.target.value);
                             if (matching) setDemoVillage(matching.name);
                           }}
-                          className="bg-white border border-slate-200 rounded px-2.5 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-yellow-400"
+                          className="bg-[#131E33] border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-cyan-400"
                         >
                           {mandalsData.map(m => (
                             <option key={m.name} value={m.name}>{m.name}</option>
@@ -2369,7 +2536,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           <select 
                             value={demoVillage} 
                             onChange={(e) => setDemoVillage(e.target.value)}
-                            className="bg-white border border-slate-200 rounded px-2.5 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-yellow-400"
+                            className="bg-[#131E33] border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-cyan-400"
                           >
                             {villagesData.filter(v => v.mandal === demoMandal).map(v => (
                               <option key={v.name} value={v.name}>{v.name}</option>
@@ -2382,17 +2549,17 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                 </div>
 
                 {/* THE 4 ANALYTICS CARDS GRID */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
                   
                   {/* 1. SUB-CASTE ANALYSIS */}
-                  <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-5 flex flex-col justify-between">
+                  <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 shadow-xl space-y-5 flex flex-col justify-between">
                     <div className="space-y-4">
-                      <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                      <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                         <div className="flex items-center gap-2">
-                          <Users className="w-4 h-4 text-slate-500" />
-                          <h3 className="text-xs font-black text-slate-900 uppercase tracking-tight">Sub-Caste Analysis</h3>
+                          <Users className="w-4 h-4 text-slate-400" />
+                          <h3 className="text-xs font-black text-white uppercase tracking-tight">Sub-Caste Analysis</h3>
                         </div>
-                        <span className="bg-slate-100 border border-slate-200 text-slate-500 font-mono text-[9px] font-black px-2 py-0.5 rounded uppercase">
+                        <span className="bg-slate-900 border border-slate-800 text-cyan-400 font-mono text-[9px] font-black px-2 py-0.5 rounded-full uppercase">
                           N={formattedActiveVoters}
                         </span>
                       </div>
@@ -2401,11 +2568,11 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       <div className="relative pt-1">
                         {/* Gridlines Background */}
                         <div className="absolute inset-y-0 left-[120px] right-0 flex justify-between pointer-events-none pl-3 pr-1">
-                          <div className="w-px h-full border-l border-dashed border-slate-100"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
                         </div>
 
                         {/* Bar Rows */}
@@ -2416,11 +2583,11 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                             return (
                               <div key={idx} className="flex items-center min-h-[22px]">
                                 {/* Label */}
-                                <div className="w-[120px] text-right pr-3 text-[10px] font-bold text-slate-500 truncate uppercase">
+                                <div className="w-[120px] text-right pr-3 text-[10px] font-bold text-slate-400 truncate uppercase">
                                   {item.name} ({formattedVoters})
                                 </div>
                                 {/* Axis Line */}
-                                <div className="w-px h-5.5 bg-slate-300 self-stretch"></div>
+                                <div className="w-px h-5.5 bg-slate-700 self-stretch"></div>
                                 {/* Bar Area */}
                                 <div className="flex-1 pl-3 flex items-center">
                                   <div 
@@ -2435,7 +2602,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                                       <div className="h-full bg-blue-600 border-r border-blue-700/20" style={{ width: `${item.ysrcpPref}%` }} />
                                     )}
                                     {item.neutralPref > 0 && (
-                                      <div className="h-full bg-slate-300" style={{ width: `${item.neutralPref}%` }} />
+                                      <div className="h-full bg-slate-500" style={{ width: `${item.neutralPref}%` }} />
                                     )}
                                   </div>
                                 </div>
@@ -2447,7 +2614,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                     </div>
 
                     {/* Legend */}
-                    <div className="flex justify-center gap-5 pt-3.5 border-t border-slate-100 text-[9px] font-black uppercase tracking-wider text-slate-400">
+                    <div className="flex justify-center gap-5 pt-3.5 border-t border-slate-800 text-[9px] font-black uppercase tracking-wider text-slate-400">
                       <div className="flex items-center gap-1.5">
                         <div className="w-2.5 h-2.5 bg-yellow-400 rounded-sm"></div>
                         <span>TDP Support</span>
@@ -2457,21 +2624,21 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         <span>YSRCP Support</span>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 bg-slate-300 rounded-sm"></div>
+                        <div className="w-2.5 h-2.5 bg-slate-500 rounded-sm"></div>
                         <span>Neutral</span>
                       </div>
                     </div>
                   </div>
 
                   {/* 2. PROFESSION ANALYSIS */}
-                  <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-5 flex flex-col justify-between">
+                  <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 shadow-xl space-y-5 flex flex-col justify-between">
                     <div className="space-y-4">
-                      <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                      <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                         <div className="flex items-center gap-2">
-                          <Layers className="w-4 h-4 text-slate-500" />
-                          <h3 className="text-xs font-black text-slate-900 uppercase tracking-tight">Profession Analysis</h3>
+                          <Layers className="w-4 h-4 text-slate-400" />
+                          <h3 className="text-xs font-black text-white uppercase tracking-tight">Profession Analysis</h3>
                         </div>
-                        <span className="bg-slate-100 border border-slate-200 text-slate-500 font-mono text-[9px] font-black px-2 py-0.5 rounded uppercase">
+                        <span className="bg-slate-900 border border-slate-800 text-cyan-400 font-mono text-[9px] font-black px-2 py-0.5 rounded-full uppercase">
                           N={formattedActiveVoters}
                         </span>
                       </div>
@@ -2480,11 +2647,11 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       <div className="relative pt-1">
                         {/* Gridlines Background */}
                         <div className="absolute inset-y-0 left-[140px] right-0 flex justify-between pointer-events-none pl-3 pr-1">
-                          <div className="w-px h-full border-l border-dashed border-slate-100"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
                         </div>
 
                         {/* Bar Rows */}
@@ -2495,11 +2662,11 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                             return (
                               <div key={idx} className="flex items-center min-h-[22px]">
                                 {/* Label */}
-                                <div className="w-[140px] text-right pr-3 text-[10px] font-bold text-slate-500 truncate uppercase">
+                                <div className="w-[140px] text-right pr-3 text-[10px] font-bold text-slate-400 truncate uppercase">
                                   {item.name.replace("Farmers / Agri Workers", "Farmer").replace("Private Employee", "Private Job").replace("Homemakers", "Homemaker").replace("Students / Youth", "Student").replace("Business Owners", "Business")} ({formattedVoters})
                                 </div>
                                 {/* Axis Line */}
-                                <div className="w-px h-5.5 bg-slate-300 self-stretch"></div>
+                                <div className="w-px h-5.5 bg-slate-700 self-stretch"></div>
                                 {/* Bar Area */}
                                 <div className="flex-1 pl-3 flex items-center">
                                   <div 
@@ -2514,7 +2681,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                                       <div className="h-full bg-blue-600 border-r border-blue-700/20" style={{ width: `${item.ysrcpPref}%` }} />
                                     )}
                                     {item.neutralPref > 0 && (
-                                      <div className="h-full bg-slate-300" style={{ width: `${item.neutralPref}%` }} />
+                                      <div className="h-full bg-slate-500" style={{ width: `${item.neutralPref}%` }} />
                                     )}
                                   </div>
                                 </div>
@@ -2526,7 +2693,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                     </div>
 
                     {/* Legend */}
-                    <div className="flex justify-center gap-5 pt-3.5 border-t border-slate-100 text-[9px] font-black uppercase tracking-wider text-slate-400">
+                    <div className="flex justify-center gap-5 pt-3.5 border-t border-slate-800 text-[9px] font-black uppercase tracking-wider text-slate-400">
                       <div className="flex items-center gap-1.5">
                         <div className="w-2.5 h-2.5 bg-yellow-400 rounded-sm"></div>
                         <span>TDP Support</span>
@@ -2536,21 +2703,21 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         <span>YSRCP Support</span>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 bg-slate-300 rounded-sm"></div>
+                        <div className="w-2.5 h-2.5 bg-slate-500 rounded-sm"></div>
                         <span>Neutral</span>
                       </div>
                     </div>
                   </div>
 
                   {/* 3. AGE GROUP ANALYSIS */}
-                  <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-5 flex flex-col justify-between">
+                  <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 shadow-xl space-y-5 flex flex-col justify-between">
                     <div className="space-y-4">
-                      <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                      <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                         <div className="flex items-center gap-2">
-                          <Clock className="w-4 h-4 text-slate-500" />
-                          <h3 className="text-xs font-black text-slate-900 uppercase tracking-tight">Age Group Analysis</h3>
+                          <Clock className="w-4 h-4 text-slate-400" />
+                          <h3 className="text-xs font-black text-white uppercase tracking-tight">Age Group Analysis</h3>
                         </div>
-                        <span className="bg-slate-100 border border-slate-200 text-slate-500 font-mono text-[9px] font-black px-2 py-0.5 rounded uppercase">
+                        <span className="bg-slate-900 border border-slate-800 text-cyan-400 font-mono text-[9px] font-black px-2 py-0.5 rounded-full uppercase">
                           N={formattedActiveVoters}
                         </span>
                       </div>
@@ -2559,11 +2726,11 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       <div className="relative pt-1">
                         {/* Gridlines Background */}
                         <div className="absolute inset-y-0 left-[120px] right-0 flex justify-between pointer-events-none pl-3 pr-1">
-                          <div className="w-px h-full border-l border-dashed border-slate-100"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
                         </div>
 
                         {/* Bar Rows */}
@@ -2574,11 +2741,11 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                             return (
                               <div key={idx} className="flex items-center min-h-[22px]">
                                 {/* Label */}
-                                <div className="w-[120px] text-right pr-3 text-[10px] font-bold text-slate-500 truncate uppercase">
+                                <div className="w-[120px] text-right pr-3 text-[10px] font-bold text-slate-400 truncate uppercase">
                                   {item.group.replace(" (Youth)", "").replace(" (Middle)", "").replace(" (Senior)", "").replace(" (Elders)", "")} ({formattedVoters})
                                 </div>
                                 {/* Axis Line */}
-                                <div className="w-px h-5.5 bg-slate-300 self-stretch"></div>
+                                <div className="w-px h-5.5 bg-slate-700 self-stretch"></div>
                                 {/* Bar Area */}
                                 <div className="flex-1 pl-3 flex items-center">
                                   <div 
@@ -2593,7 +2760,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                                       <div className="h-full bg-blue-600 border-r border-blue-700/20" style={{ width: `${item.ysrcpPref}%` }} />
                                     )}
                                     {item.neutralPref > 0 && (
-                                      <div className="h-full bg-slate-300" style={{ width: `${item.neutralPref}%` }} />
+                                      <div className="h-full bg-slate-500" style={{ width: `${item.neutralPref}%` }} />
                                     )}
                                   </div>
                                 </div>
@@ -2605,7 +2772,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                     </div>
 
                     {/* Legend */}
-                    <div className="flex justify-center gap-5 pt-3.5 border-t border-slate-100 text-[9px] font-black uppercase tracking-wider text-slate-400">
+                    <div className="flex justify-center gap-5 pt-3.5 border-t border-slate-800 text-[9px] font-black uppercase tracking-wider text-slate-400">
                       <div className="flex items-center gap-1.5">
                         <div className="w-2.5 h-2.5 bg-yellow-400 rounded-sm"></div>
                         <span>TDP Support</span>
@@ -2615,21 +2782,21 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         <span>YSRCP Support</span>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 bg-slate-300 rounded-sm"></div>
+                        <div className="w-2.5 h-2.5 bg-slate-500 rounded-sm"></div>
                         <span>Neutral</span>
                       </div>
                     </div>
                   </div>
 
                   {/* 4. GENDER ANALYSIS */}
-                  <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-5 flex flex-col justify-between">
+                  <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 shadow-xl space-y-5 flex flex-col justify-between">
                     <div className="space-y-4">
-                      <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                      <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                         <div className="flex items-center gap-2">
-                          <User className="w-4 h-4 text-slate-500" />
-                          <h3 className="text-xs font-black text-slate-900 uppercase tracking-tight">Gender Analysis</h3>
+                          <User className="w-4 h-4 text-slate-400" />
+                          <h3 className="text-xs font-black text-white uppercase tracking-tight">Gender Analysis</h3>
                         </div>
-                        <span className="bg-slate-100 border border-slate-200 text-slate-500 font-mono text-[9px] font-black px-2 py-0.5 rounded uppercase">
+                        <span className="bg-slate-900 border border-slate-800 text-cyan-400 font-mono text-[9px] font-black px-2 py-0.5 rounded-full uppercase">
                           N={formattedActiveVoters}
                         </span>
                       </div>
@@ -2638,11 +2805,11 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       <div className="relative pt-1">
                         {/* Gridlines Background */}
                         <div className="absolute inset-y-0 left-[120px] right-0 flex justify-between pointer-events-none pl-3 pr-1">
-                          <div className="w-px h-full border-l border-dashed border-slate-100"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
-                          <div className="w-px h-full border-l border-dashed border-slate-150"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
+                          <div className="w-px h-full border-l border-dashed border-slate-800/80"></div>
                         </div>
 
                         {/* Bar Rows */}
@@ -2653,11 +2820,11 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                             return (
                               <div key={idx} className="flex items-center min-h-[22px]">
                                 {/* Label */}
-                                <div className="w-[120px] text-right pr-3 text-[10px] font-bold text-slate-500 truncate uppercase">
+                                <div className="w-[120px] text-right pr-3 text-[10px] font-bold text-slate-400 truncate uppercase">
                                   {item.name} ({formattedVoters})
                                 </div>
                                 {/* Axis Line */}
-                                <div className="w-px h-5.5 bg-slate-300 self-stretch"></div>
+                                <div className="w-px h-5.5 bg-slate-700 self-stretch"></div>
                                 {/* Bar Area */}
                                 <div className="flex-1 pl-3 flex items-center">
                                   <div 
@@ -2672,7 +2839,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                                       <div className="h-full bg-blue-600 border-r border-blue-700/20" style={{ width: `${item.ysrcpPref}%` }} />
                                     )}
                                     {item.neutralPref > 0 && (
-                                      <div className="h-full bg-slate-300" style={{ width: `${item.neutralPref}%` }} />
+                                      <div className="h-full bg-slate-500" style={{ width: `${item.neutralPref}%` }} />
                                     )}
                                   </div>
                                 </div>
@@ -2684,7 +2851,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                     </div>
 
                     {/* Legend */}
-                    <div className="flex justify-center gap-5 pt-3.5 border-t border-slate-100 text-[9px] font-black uppercase tracking-wider text-slate-400">
+                    <div className="flex justify-center gap-5 pt-3.5 border-t border-slate-800 text-[9px] font-black uppercase tracking-wider text-slate-400">
                       <div className="flex items-center gap-1.5">
                         <div className="w-2.5 h-2.5 bg-yellow-400 rounded-sm"></div>
                         <span>TDP Support</span>
@@ -2694,7 +2861,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         <span>YSRCP Support</span>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 bg-slate-300 rounded-sm"></div>
+                        <div className="w-2.5 h-2.5 bg-slate-500 rounded-sm"></div>
                         <span>Neutral</span>
                       </div>
                     </div>
@@ -2712,50 +2879,50 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
             <div className="space-y-6 animate-fade-in" id="const-cadre-tab">
               
               {/* Core Strengths */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
                 {[
-                  { title: 'Constituency', count: 1, color: 'text-slate-950 bg-slate-50 border-slate-200' },
-                  { title: 'Mandals Covered', count: liveConstituencyStats.totalMandals, color: 'text-slate-950 bg-slate-50 border-slate-200' },
-                  { title: 'Villages Covered', count: cadreStats.villages || liveConstituencyStats.totalVillages, color: 'text-blue-600 bg-blue-50/30 border-blue-200' },
-                  { title: 'Booths Covered', count: cadreStats.booths || liveConstituencyStats.totalBooths, color: 'text-purple-600 bg-purple-50/30 border-purple-200' },
-                  { title: '100-Voter Incharges', count: cadreStats.voterIncharges, color: 'text-amber-500 bg-amber-50/50 border-amber-300' }
+                  { title: 'Constituency', count: 1, color: 'text-cyan-400 border-slate-800 hover:border-cyan-500/40' },
+                  { title: 'Mandals Covered', count: liveConstituencyStats.totalMandals, color: 'text-white border-slate-800 hover:border-cyan-500/40' },
+                  { title: 'Villages Covered', count: cadreStats.villages || liveConstituencyStats.totalVillages, color: 'text-sky-400 border-slate-800 hover:border-sky-500/40' },
+                  { title: 'Booths Covered', count: cadreStats.booths || liveConstituencyStats.totalBooths, color: 'text-purple-400 border-slate-800 hover:border-purple-500/40' },
+                  { title: '100-Voter Incharges', count: cadreStats.voterIncharges, color: 'text-cyan-400 border-cyan-500/40 bg-cyan-500/10' }
                 ].map(card => (
-                  <div key={card.title} className={`${card.color} border-2 rounded-xl p-4 shadow-sm text-center flex flex-col justify-between`}>
-                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-wider block">{card.title}</span>
+                  <div key={card.title} className={`bg-[#0F172A]/90 backdrop-blur-xl ${card.color} border rounded-2xl p-4 shadow-xl text-center flex flex-col justify-between transition-all`}>
+                    <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">{card.title}</span>
                     <span className="text-2xl font-black mt-1 block tracking-tight">{card.count.toLocaleString()}</span>
                   </div>
                 ))}
               </div>
 
               {/* Strength & Health Report */}
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+              <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
                 <div>
-                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Network Strength & Health Report</h3>
-                  <p className="text-xs text-slate-500">Verification counts, active member ratios, and directory of working leaders.</p>
+                  <h3 className="text-xs font-black uppercase tracking-wider text-cyan-400">Network Strength & Health Report</h3>
+                  <p className="text-xs text-slate-400">Verification counts, active member ratios, and directory of working leaders.</p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
                   {/* Performance Indicators */}
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3.5 flex flex-col justify-center">
-                    <div className="flex justify-between items-center text-xs font-bold border-b border-slate-200/60 pb-2">
-                      <span className="text-slate-500">Active Members:</span>
-                      <span className="text-emerald-600 font-black text-sm">{cadreStats.activeMembers} ({cadreStats.totalCadres > 0 ? ((cadreStats.activeMembers / cadreStats.totalCadres) * 100).toFixed(1) : '0.0'}%)</span>
+                  <div className="bg-[#0B1120] border border-slate-800 rounded-2xl p-4 space-y-3.5 flex flex-col justify-center">
+                    <div className="flex justify-between items-center text-xs font-bold border-b border-slate-800 pb-2">
+                      <span className="text-slate-400">Active Members:</span>
+                      <span className="text-emerald-400 font-black text-sm">{cadreStats.activeMembers} ({cadreStats.totalCadres > 0 ? ((cadreStats.activeMembers / cadreStats.totalCadres) * 100).toFixed(1) : '0.0'}%)</span>
                     </div>
-                    <div className="flex justify-between items-center text-xs font-bold border-b border-slate-200/60 pb-2">
-                      <span className="text-slate-500">Inactive Members:</span>
-                      <span className="text-rose-600 font-black text-sm">{cadreStats.inactiveMembers} ({cadreStats.totalCadres > 0 ? ((cadreStats.inactiveMembers / cadreStats.totalCadres) * 100).toFixed(1) : '0.0'}%)</span>
+                    <div className="flex justify-between items-center text-xs font-bold border-b border-slate-800 pb-2">
+                      <span className="text-slate-400">Inactive Members:</span>
+                      <span className="text-rose-400 font-black text-sm">{cadreStats.inactiveMembers} ({cadreStats.totalCadres > 0 ? ((cadreStats.inactiveMembers / cadreStats.totalCadres) * 100).toFixed(1) : '0.0'}%)</span>
                     </div>
                     <div className="flex justify-between items-center text-xs font-bold pb-1">
-                      <span className="text-slate-500">Network Coverage:</span>
-                      <span className="text-emerald-600 font-black text-sm bg-emerald-50 px-2.5 py-0.5 rounded border border-emerald-100">{liveConstituencyStats.totalBooths > 0 && cadreStats.booths > 0 ? Math.round((cadreStats.booths / liveConstituencyStats.totalBooths) * 100) : 0}% of Booths</span>
+                      <span className="text-slate-400">Network Coverage:</span>
+                      <span className="text-emerald-400 font-black text-sm bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/30">{liveConstituencyStats.totalBooths > 0 && cadreStats.booths > 0 ? Math.round((cadreStats.booths / liveConstituencyStats.totalBooths) * 100) : 0}% of Booths</span>
                     </div>
                   </div>
 
                   {/* Interactive Cadre Drill-Down selectors */}
                   <div className="md:col-span-2 space-y-4">
-                    <div className="flex items-center gap-1.5 border-b border-slate-100 pb-2">
-                      <Sparkles className="w-4 h-4 text-yellow-500" />
-                      <h4 className="text-[11px] font-black text-slate-900 uppercase">Interactive Cadre Directory</h4>
+                    <div className="flex items-center gap-1.5 border-b border-slate-800 pb-2">
+                      <Sparkles className="w-4 h-4 text-cyan-400" />
+                      <h4 className="text-[11px] font-black text-white uppercase">Interactive Cadre Directory</h4>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2764,7 +2931,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         <select 
                           value={cadreSelectMandal}
                           onChange={(e) => setCadreSelectMandal(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none"
+                          className="w-full bg-[#0B1120] border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-cyan-400"
                         >
                           <option value="Singarayakonda">Singarayakonda</option>
                           <option value="Kondapi">Kondapi</option>
@@ -2777,7 +2944,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         <select 
                           value={cadreSelectVillage}
                           onChange={(e) => setCadreSelectVillage(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none"
+                          className="w-full bg-[#0B1120] border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-cyan-400"
                         >
                           {villagesData.filter(v => v.mandal === cadreSelectMandal).map(v => (
                             <option key={v.name} value={v.name}>{v.name}</option>
@@ -2790,7 +2957,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         <select 
                           value={cadreSelectBooth}
                           onChange={(e) => setCadreSelectBooth(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none"
+                          className="w-full bg-[#0B1120] border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-xs font-bold text-white focus:outline-none focus:border-cyan-400"
                         >
                           {cadreBoothOptions.map((booth) => (
                             <option key={booth} value={booth}>{booth}</option>
@@ -2800,45 +2967,45 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                     </div>
 
                     {/* Hierarchy Flow Chart List */}
-                    <div className="space-y-3.5 bg-slate-50 border border-slate-150 rounded-xl p-4 text-xs font-bold">
+                    <div className="space-y-3.5 bg-[#0B1120] border border-slate-800 rounded-2xl p-4 text-xs font-bold">
                       <div className="flex items-center gap-3">
-                        <span className="w-5 h-5 rounded bg-slate-900 text-yellow-400 text-[10px] font-black flex items-center justify-center shrink-0">M</span>
+                        <span className="w-6 h-6 rounded-lg bg-cyan-400 text-slate-950 text-[10px] font-black flex items-center justify-center shrink-0 shadow-sm">M</span>
                         <div>
                           <p className="text-[9px] text-slate-400 font-black uppercase">Mandal President</p>
-                          <p className="text-slate-900 font-extrabold">{derivedCadreDirectory.mandalIncharge?.name || 'Unavailable'} ({derivedCadreDirectory.mandalIncharge?.mobileNumber || 'N/A'})</p>
+                          <p className="text-white font-extrabold">{derivedCadreDirectory.mandalIncharge?.name || 'Unavailable'} ({derivedCadreDirectory.mandalIncharge?.mobileNumber || 'N/A'})</p>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-3">
-                        <span className="w-5 h-5 rounded bg-slate-800 text-white text-[10px] font-black flex items-center justify-center shrink-0">V</span>
+                        <span className="w-6 h-6 rounded-lg bg-slate-800 text-white text-[10px] font-black flex items-center justify-center shrink-0 border border-slate-700">V</span>
                         <div>
                           <p className="text-[9px] text-slate-400 font-black uppercase">Village Coordinator</p>
-                          <p className="text-slate-900 font-extrabold">{derivedCadreDirectory.villageIncharge?.name || 'Unavailable'} ({derivedCadreDirectory.villageIncharge?.mobileNumber || 'N/A'})</p>
+                          <p className="text-white font-extrabold">{derivedCadreDirectory.villageIncharge?.name || 'Unavailable'} ({derivedCadreDirectory.villageIncharge?.mobileNumber || 'N/A'})</p>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-3">
-                        <span className="w-5 h-5 rounded bg-yellow-400 text-slate-950 text-[10px] font-black flex items-center justify-center shrink-0">B</span>
+                        <span className="w-6 h-6 rounded-lg bg-gradient-to-br from-blue-600 to-cyan-400 text-white text-[10px] font-black flex items-center justify-center shrink-0 shadow-sm">B</span>
                         <div>
                           <p className="text-[9px] text-slate-400 font-black uppercase">Booth Incharge ({derivedCadreDirectory.boothIncharge?.unitName || cadreSelectBooth})</p>
-                          <p className="text-slate-900 font-extrabold">{derivedCadreDirectory.boothIncharge?.name || 'Unavailable'} ({derivedCadreDirectory.boothIncharge?.mobileNumber || 'N/A'})</p>
+                          <p className="text-white font-extrabold">{derivedCadreDirectory.boothIncharge?.name || 'Unavailable'} ({derivedCadreDirectory.boothIncharge?.mobileNumber || 'N/A'})</p>
                         </div>
                       </div>
 
-                      <div className="border-t border-slate-200/60 pt-2.5">
+                      <div className="border-t border-slate-800 pt-2.5">
                         <p className="text-[9px] text-slate-400 font-black uppercase mb-1.5">100-Voter Ground Incharges assigned to this booth:</p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
                           {derivedCadreDirectory.voter100List.map((item, idx) => (
-                            <div key={idx} className="bg-white border border-slate-200 rounded p-2 flex items-center justify-between">
+                            <div key={idx} className="bg-[#131E33] border border-slate-800 rounded-xl p-2.5 flex items-center justify-between">
                               <div>
-                                <p className="text-slate-900 font-extrabold uppercase text-[10px]">{item.name}</p>
+                                <p className="text-white font-extrabold uppercase text-[10px]">{item.name}</p>
                                 <p className="text-[9px] text-slate-400 font-mono mt-0.5">{item.mobile}</p>
                               </div>
-                              <span className="text-[10px] bg-amber-50 text-amber-600 border border-amber-200 px-2 py-0.5 rounded-md font-black">{item.votersCount} Voters</span>
+                              <span className="text-[10px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 px-2 py-0.5 rounded-md font-black">{item.votersCount} Voters</span>
                             </div>
                           ))}
                           {derivedCadreDirectory.voter100List.length === 0 && (
-                            <div className="bg-white border border-slate-200 rounded p-2 text-slate-400 font-semibold col-span-full">
+                            <div className="bg-[#131E33] border border-slate-800 rounded-xl p-2.5 text-slate-400 font-semibold col-span-full">
                               No backend-assigned 100-voter incharges found for this booth yet.
                             </div>
                           )}
@@ -2857,11 +3024,11 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
              -------------------------------------------------------- */}
           {activeTab === 'fake_votes' && (
             <div className="space-y-6 animate-fade-in" id="const-fake-tab">
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+              <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
                 
                 <div>
-                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Identified / Flagged Voter Records</h3>
-                  <p className="text-xs text-slate-500">Monitor and audit potential duplicates, shifted residences, or address discrepancies undergoing investigation.</p>
+                  <h3 className="text-xs font-black uppercase tracking-wider text-cyan-400">Identified / Flagged Voter Records</h3>
+                  <p className="text-xs text-slate-400">Monitor and audit potential duplicates, shifted residences, or address discrepancies undergoing investigation.</p>
                 </div>
 
                 {/* Filter and Search controls */}
@@ -2873,7 +3040,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       placeholder="Search Name / EPIC / Booth / Village..." 
                       value={fakeSearch}
                       onChange={(e) => setFakeSearch(e.target.value)}
-                      className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-yellow-400"
+                      className="w-full pl-9 pr-4 py-2 bg-[#0B1120] border border-slate-700/80 rounded-xl text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                     />
                   </div>
 
@@ -2884,10 +3051,10 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         key={tab}
                         onClick={() => setFakeFilterStatus(tab)}
                         className={`
-                          px-3.5 py-1.5 rounded-lg text-xs font-extrabold uppercase transition-all cursor-pointer border
+                          px-3.5 py-1.5 rounded-xl text-xs font-extrabold uppercase transition-all cursor-pointer border
                           ${fakeFilterStatus === tab 
-                            ? 'bg-slate-900 border-slate-900 text-white shadow-sm' 
-                            : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'
+                            ? 'bg-gradient-to-r from-blue-600 to-cyan-500 border-cyan-400 text-white font-black shadow-md shadow-cyan-500/20' 
+                            : 'bg-slate-900/80 border-slate-800 hover:bg-slate-800 text-slate-300'
                           }
                         `}
                       >
@@ -2897,64 +3064,149 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   </div>
                 </div>
 
-                {/* Flagged table */}
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[700px] text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-black uppercase text-[9px] tracking-wider">
-                        <th className="py-3 px-4 text-center">S.No</th>
-                        <th className="py-3 px-4">Voter Name</th>
-                        <th className="py-3 px-4 font-mono">EPIC</th>
-                        <th className="py-3 px-4 text-center">Age / Sex</th>
-                        <th className="py-3 px-4">Village</th>
-                        <th className="py-3 px-4">Booth</th>
-                        <th className="py-3 px-4">Reason Flagged</th>
-                        <th className="py-3 px-4 text-center">Verification Status</th>
-                        <th className="py-3 px-4 text-center">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {paginatedFlaggedVoters.length === 0 ? (
-                        <tr>
-                          <td colSpan={9} className="py-8 text-center text-slate-400 font-medium">
-                            No flagged or doubtful voters found in records.
-                          </td>
-                        </tr>
-                      ) : paginatedFlaggedVoters.map((item, idx) => {
-                        const statusColors = 
-                          item.status === 'RESOLVED' ? 'bg-emerald-100 text-emerald-800' :
-                          item.status === 'VERIFIED ISSUE' ? 'bg-red-100 text-red-800' :
-                          item.status === 'UNDER VERIFICATION' ? 'bg-amber-100 text-amber-800' :
-                          'bg-slate-100 text-slate-800';
+                {/* View Switcher */}
+                <div className="flex items-center justify-between pb-1">
+                  <span className="text-[11px] font-bold text-slate-400">
+                    Flagged Records: <span className="text-cyan-400 font-mono font-black">{flaggedTotal}</span>
+                  </span>
+                  <div className="flex items-center gap-1 bg-[#121522] border border-white/[0.08] p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setFakeViewMode('cards')}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        fakeViewMode === 'cards' ? 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-black shadow-sm' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      📱 Cards
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFakeViewMode('table')}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        fakeViewMode === 'table' ? 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-black shadow-sm' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      📄 Table
+                    </button>
+                  </div>
+                </div>
 
-                        return (
-                          <tr key={item.sNo} className="hover:bg-slate-50 font-bold text-slate-700">
-                            <td className="py-3 px-4 text-center text-slate-400">{(flaggedPage - 1) * flaggedPageSize + idx + 1}</td>
-                            <td className="py-3 px-4 font-black text-slate-900 uppercase">{item.name}</td>
-                            <td className="py-3 px-4 font-mono text-slate-500">{item.epic}</td>
-                            <td className="py-3 px-4 text-center text-slate-600">{item.age} / {item.gender[0]}</td>
-                            <td className="py-3 px-4 uppercase text-slate-900">{item.village}</td>
-                            <td className="py-3 px-4 uppercase text-slate-500">{item.booth}</td>
-                            <td className="py-3 px-4 text-slate-600">{item.reason}</td>
-                            <td className="py-3 px-4 text-center">
-                              <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${statusColors}`}>
-                                {item.status}
-                              </span>
-                            </td>
-                            <td className="py-3 px-4 text-center">
+                {/* Flagged Cards or Table */}
+                {fakeViewMode === 'cards' ? (
+                  <div className="space-y-3">
+                    {paginatedFlaggedVoters.length === 0 ? (
+                      <div className="py-12 text-center text-slate-400 font-medium border border-dashed border-slate-800 rounded-2xl bg-[#0B1120]/40">
+                        No flagged or doubtful voters found in records.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                        {paginatedFlaggedVoters.map((item) => {
+                          const statusColors = 
+                            item.status === 'RESOLVED' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                            item.status === 'VERIFIED ISSUE' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                            item.status === 'UNDER VERIFICATION' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' :
+                            'bg-slate-800 text-slate-300 border border-slate-700';
+
+                          return (
+                            <div 
+                              key={item.sNo}
+                              className="bg-[#0D0F18]/95 border border-red-500/20 hover:border-red-500/50 rounded-2xl p-4 space-y-3 transition shadow-md flex flex-col justify-between"
+                            >
+                              <div className="space-y-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <div className="font-black text-sm text-white uppercase tracking-tight">{item.name}</div>
+                                    <span className="text-[10px] text-cyan-400 font-mono font-black">
+                                      EPIC: {item.epic}
+                                    </span>
+                                  </div>
+                                  <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${statusColors}`}>
+                                    {item.status}
+                                  </span>
+                                </div>
+
+                                <div className="p-2.5 bg-red-950/20 border border-red-900/30 rounded-xl space-y-1">
+                                  <span className="text-[9px] font-black uppercase tracking-wider text-rose-400 block">Flag Reason:</span>
+                                  <p className="text-xs font-semibold text-rose-200">{item.reason}</p>
+                                </div>
+
+                                <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono border-t border-white/[0.08] pt-2">
+                                  <span>📍 {item.village} • {item.booth}</span>
+                                  <span className="text-slate-300 font-bold">{item.age} yrs • {item.gender}</span>
+                                </div>
+                              </div>
+
                               <button
                                 onClick={() => setAuditingVoter(item)}
-                                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white border border-slate-900 rounded text-[9px] font-black uppercase tracking-wider cursor-pointer"
+                                className="w-full py-2 bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer shadow-md shadow-cyan-500/20 active:scale-95 transition"
                               >
-                                Audit/Verify
+                                Audit / Verify Status &rarr;
                               </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-800 bg-[#0B1120]">
+                    <table className="w-full min-w-[700px] text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-[#131E33] border-b border-slate-800 text-slate-300 font-black uppercase text-[9px] tracking-wider">
+                          <th className="py-3 px-4 text-center">S.No</th>
+                          <th className="py-3 px-4">Voter Name</th>
+                          <th className="py-3 px-4 font-mono">EPIC</th>
+                          <th className="py-3 px-4 text-center">Age / Sex</th>
+                          <th className="py-3 px-4">Village</th>
+                          <th className="py-3 px-4">Booth</th>
+                          <th className="py-3 px-4">Reason Flagged</th>
+                          <th className="py-3 px-4 text-center">Verification Status</th>
+                          <th className="py-3 px-4 text-center">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/80">
+                        {paginatedFlaggedVoters.length === 0 ? (
+                          <tr>
+                            <td colSpan={9} className="py-8 text-center text-slate-400 font-medium">
+                              No flagged or doubtful voters found in records.
                             </td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                        ) : paginatedFlaggedVoters.map((item, idx) => {
+                          const statusColors = 
+                            item.status === 'RESOLVED' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                            item.status === 'VERIFIED ISSUE' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                            item.status === 'UNDER VERIFICATION' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' :
+                            'bg-slate-800 text-slate-300 border border-slate-700';
+
+                          return (
+                            <tr key={item.sNo} className="hover:bg-slate-800/40 font-bold text-slate-200">
+                              <td className="py-3 px-4 text-center text-slate-500">{(flaggedPage - 1) * flaggedPageSize + idx + 1}</td>
+                              <td className="py-3 px-4 font-black text-white uppercase">{item.name}</td>
+                              <td className="py-3 px-4 font-mono text-cyan-400">{item.epic}</td>
+                              <td className="py-3 px-4 text-center text-slate-300">{item.age} / {item.gender[0]}</td>
+                              <td className="py-3 px-4 uppercase text-white">{item.village}</td>
+                              <td className="py-3 px-4 uppercase text-slate-400">{item.booth}</td>
+                              <td className="py-3 px-4 text-slate-300">{item.reason}</td>
+                              <td className="py-3 px-4 text-center">
+                                <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${statusColors}`}>
+                                  {item.status}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                <button
+                                  onClick={() => setAuditingVoter(item)}
+                                  className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-cyan-400 border border-slate-800 rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer transition-colors"
+                                >
+                                  Audit/Verify
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
 
                 <Pagination
                   currentPage={flaggedPage}
@@ -2967,34 +3219,34 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   }}
                   pageSizeOptions={[10, 15, 25, 50]}
                   itemName="flagged voters"
-                  accentColor="amber"
+                  accentColor="blue"
                 />
 
               </div>
 
               {/* Audit/Verification Status Update Modal */}
               {auditingVoter && (
-                <div className="fixed inset-0 bg-slate-950/60 flex items-center justify-center p-4 z-50 animate-fade-in">
-                  <form onSubmit={handleUpdateVoterStatus} className="bg-white rounded-xl border border-slate-200 max-w-md w-full p-6 space-y-4 shadow-xl">
-                    <div className="flex items-start justify-between border-b border-slate-100 pb-3">
+                <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+                  <form onSubmit={handleUpdateVoterStatus} className="bg-[#0F172A] rounded-2xl border border-slate-700 max-w-md w-full p-6 space-y-4 shadow-2xl">
+                    <div className="flex items-start justify-between border-b border-slate-800 pb-3">
                       <div>
-                        <h4 className="text-base font-black text-slate-950 uppercase">Update Verification Status</h4>
-                        <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Voter EPIC: {auditingVoter.epic}</p>
+                        <h4 className="text-base font-black text-white uppercase">Update Verification Status</h4>
+                        <p className="text-[10px] text-cyan-400 font-semibold mt-0.5">Voter EPIC: {auditingVoter.epic}</p>
                       </div>
                       <button 
                         type="button"
                         onClick={() => setAuditingVoter(null)}
-                        className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600 cursor-pointer"
+                        className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white cursor-pointer transition-colors"
                       >
                         <X className="w-5 h-5" />
                       </button>
                     </div>
 
-                    <div className="space-y-4 text-xs font-bold text-slate-700">
+                    <div className="space-y-4 text-xs font-bold text-slate-200">
                       <div>
                         <p className="text-[10px] text-slate-400 uppercase">Voter Profile:</p>
-                        <p className="text-slate-950 text-sm font-black mt-0.5">{auditingVoter.name} ({auditingVoter.age} / {auditingVoter.gender})</p>
-                        <p className="text-slate-500 text-[11px] uppercase mt-0.5">Location: {auditingVoter.village} &bull; {auditingVoter.booth}</p>
+                        <p className="text-white text-sm font-black mt-0.5">{auditingVoter.name} ({auditingVoter.age} / {auditingVoter.gender})</p>
+                        <p className="text-slate-400 text-[11px] uppercase mt-0.5">Location: {auditingVoter.village} &bull; {auditingVoter.booth}</p>
                       </div>
 
                       <div className="flex flex-col gap-1.5">
@@ -3003,7 +3255,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           type="text" 
                           value={auditingVoter.reason}
                           onChange={(e) => setAuditingVoter({ ...auditingVoter, reason: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded p-2 text-slate-800"
+                          className="w-full bg-[#0B1120] border border-slate-700 rounded-xl p-2 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                         />
                       </div>
 
@@ -3012,7 +3264,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         <select
                           value={auditingVoter.status}
                           onChange={(e) => setAuditingVoter({ ...auditingVoter, status: e.target.value as any })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded p-2 text-slate-800 font-extrabold focus:outline-none"
+                          className="w-full bg-[#0B1120] border border-slate-700 rounded-xl p-2 text-white font-extrabold focus:outline-none focus:border-cyan-400"
                         >
                           <option value="FLAGGED">FLAGGED (NOT VERIFIED)</option>
                           <option value="UNDER VERIFICATION">UNDER VERIFICATION</option>
@@ -3022,17 +3274,17 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       </div>
                     </div>
 
-                    <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+                    <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800">
                       <button
                         type="button"
                         onClick={() => setAuditingVoter(null)}
-                        className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black rounded-lg text-[10px] uppercase cursor-pointer"
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-black rounded-xl text-[10px] uppercase cursor-pointer"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg text-[10px] uppercase cursor-pointer"
+                        className="px-4 py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black rounded-xl text-[10px] uppercase cursor-pointer shadow-md shadow-cyan-500/20"
                       >
                         Save Decision
                       </button>
@@ -3062,32 +3314,32 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
              -------------------------------------------------------- */}
           {activeTab === 'training_analytics' && (
             <div className="space-y-6 animate-fade-in" id="const-training-tab">
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+              <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
                 
                 <div>
-                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Training Completion Analytics</h3>
-                  <p className="text-xs text-slate-500">Track and assess completion statistics of crucial operational modules across all cadre network layers.</p>
+                  <h3 className="text-xs font-black uppercase tracking-wider text-cyan-400">Training Completion Analytics</h3>
+                  <p className="text-xs text-slate-400">Track and assess completion statistics of crucial operational modules across all cadre network layers.</p>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                   {[
-                    { title: 'Total Cadre', count: trainingStats.totalCadres, stat: '100%', bg: 'bg-slate-50 border-slate-200', countColor: 'text-slate-950 text-2xl', badgeColor: 'bg-slate-100 text-slate-700' },
-                    { title: 'Fully Trained', count: trainingStats.completed, stat: `${trainingStats.totalCadres > 0 ? ((trainingStats.completed / trainingStats.totalCadres) * 100).toFixed(1) : '0.0'}%`, bg: 'bg-emerald-50 border-emerald-200', countColor: 'text-emerald-700 text-2xl', badgeColor: 'bg-emerald-100 text-emerald-800' },
-                    { title: 'In Progress', count: trainingStats.watched + trainingStats.assigned, stat: `${trainingStats.totalCadres > 0 ? (((trainingStats.watched + trainingStats.assigned) / trainingStats.totalCadres) * 100).toFixed(1) : '0.0'}%`, bg: 'bg-amber-50 border-amber-200', countColor: 'text-amber-700 text-2xl', badgeColor: 'bg-amber-100 text-amber-800' },
-                    { title: 'Not Started', count: trainingStats.notStarted, stat: `${trainingStats.totalCadres > 0 ? ((trainingStats.notStarted / trainingStats.totalCadres) * 100).toFixed(1) : '0.0'}%`, bg: 'bg-rose-50 border-rose-200', countColor: 'text-rose-700 text-2xl', badgeColor: 'bg-rose-100 text-rose-800' }
+                    { title: 'Total Cadre', count: trainingStats.totalCadres, stat: '100%', bg: 'bg-[#0B1120] border-slate-800', countColor: 'text-white text-2xl', badgeColor: 'bg-slate-900 border border-slate-800 text-slate-300' },
+                    { title: 'Fully Trained', count: trainingStats.completed, stat: `${trainingStats.totalCadres > 0 ? ((trainingStats.completed / trainingStats.totalCadres) * 100).toFixed(1) : '0.0'}%`, bg: 'bg-emerald-500/10 border-emerald-500/30', countColor: 'text-emerald-400 text-2xl', badgeColor: 'bg-emerald-500/20 text-emerald-300' },
+                    { title: 'In Progress', count: trainingStats.watched + trainingStats.assigned, stat: `${trainingStats.totalCadres > 0 ? (((trainingStats.watched + trainingStats.assigned) / trainingStats.totalCadres) * 100).toFixed(1) : '0.0'}%`, bg: 'bg-cyan-500/10 border-cyan-500/30', countColor: 'text-cyan-400 text-2xl', badgeColor: 'bg-cyan-500/20 text-cyan-300' },
+                    { title: 'Not Started', count: trainingStats.notStarted, stat: `${trainingStats.totalCadres > 0 ? ((trainingStats.notStarted / trainingStats.totalCadres) * 100).toFixed(1) : '0.0'}%`, bg: 'bg-rose-500/10 border-rose-500/30', countColor: 'text-rose-400 text-2xl', badgeColor: 'bg-rose-500/20 text-rose-300' }
                   ].map(stat => (
-                    <div key={stat.title} className={`${stat.bg} border-2 rounded-xl p-4 text-center flex flex-col justify-between space-y-1`}>
-                      <span className="text-[10px] text-slate-500 font-black uppercase tracking-wider block">{stat.title}</span>
-                      <span className={`${stat.countColor} font-black mt-1 block`}>{stat.count}</span>
-                      <span className={`text-[11px] font-mono font-black mt-1 inline-block mx-auto px-2 py-0.5 rounded ${stat.badgeColor}`}>{stat.stat}</span>
+                    <div key={stat.title} className={`${stat.bg} border rounded-2xl p-4 text-center flex flex-col justify-between space-y-1 shadow-md`}>
+                      <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">{stat.title}</span>
+                      <span className={`${stat.countColor} font-black mt-1 block tracking-tight`}>{stat.count}</span>
+                      <span className={`text-[11px] font-mono font-black mt-1 inline-block mx-auto px-2 py-0.5 rounded-full ${stat.badgeColor}`}>{stat.stat}</span>
                     </div>
                   ))}
                 </div>
 
                 {/* Progress breakdown of modules */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-3 border-t border-slate-100 text-xs font-bold text-slate-700">
-                  <div className="space-y-4">
-                    <h4 className="text-[11px] font-black text-slate-950 uppercase mb-2">Campaign Operational Modules Progress</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 pt-3 border-t border-slate-800 text-xs font-bold text-slate-300">
+                  <div className="space-y-4 bg-[#0B1120] border border-slate-800 rounded-2xl p-5">
+                    <h4 className="text-[11px] font-black text-white uppercase mb-2">Campaign Operational Modules Progress</h4>
                     
                     {(() => {
                       const moduleMap = new Map<string, { total: number; completed: number }>();
@@ -3101,9 +3353,9 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
                       if (moduleMap.size === 0) {
                         return (
-                          <div className="p-5 bg-slate-50 border border-slate-200/80 rounded-xl text-center text-slate-400 text-xs">
-                            <p className="font-bold text-slate-600">0 Course Modules Recorded</p>
-                            <p className="text-[11px] text-slate-400 mt-1">Live progress will appear here as cadre members complete their training videos.</p>
+                          <div className="p-5 bg-slate-900/60 border border-slate-800 rounded-xl text-center text-slate-400 text-xs">
+                            <p className="font-bold text-slate-300">0 Course Modules Recorded</p>
+                            <p className="text-[11px] text-slate-500 mt-1">Live progress will appear here as cadre members complete their training videos.</p>
                           </div>
                         );
                       }
@@ -3113,10 +3365,10 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         return (
                           <div key={module} className="space-y-1">
                             <div className="flex justify-between">
-                              <span className="truncate max-w-[200px]" title={module}>{module}</span>
-                              <span className="text-slate-900 font-extrabold">{pct}%</span>
+                              <span className="truncate max-w-[200px] text-slate-300" title={module}>{module}</span>
+                              <span className="text-cyan-400 font-extrabold">{pct}%</span>
                             </div>
-                            <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
                               <div className="h-full bg-yellow-400 rounded-full" style={{ width: `${pct}%` }} />
                             </div>
                           </div>
@@ -3125,30 +3377,30 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                     })()}
                   </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex flex-col justify-between space-y-3">
-                    <h5 className="text-[11px] font-black text-slate-950 uppercase border-b border-slate-200 pb-1.5">Cadre Layer Performance</h5>
+                  <div className="bg-[#0B1120] border border-slate-800 rounded-2xl p-5 flex flex-col justify-between space-y-3">
+                    <h5 className="text-[11px] font-black text-white uppercase border-b border-slate-800 pb-1.5">Cadre Layer Performance</h5>
                     
                     <div className="space-y-2 text-xs">
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-500">Mandal Incharges Trained:</span>
-                        <span className="text-slate-900 font-extrabold">{cadreItems.filter((item) => item.role === 'MANDAL_INCHARGE').length > 0 ? `${cadreItems.filter((item) => item.role === 'MANDAL_INCHARGE' && item.completedTraining > 0).length}/${cadreItems.filter((item) => item.role === 'MANDAL_INCHARGE').length}` : '0/0'}</span>
+                        <span className="text-slate-400">Mandal Incharges Trained:</span>
+                        <span className="text-white font-extrabold">{cadreItems.filter((item) => item.role === 'MANDAL_INCHARGE').length > 0 ? `${cadreItems.filter((item) => item.role === 'MANDAL_INCHARGE' && item.completedTraining > 0).length}/${cadreItems.filter((item) => item.role === 'MANDAL_INCHARGE').length}` : '0/0'}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-500">Village Incharges Trained:</span>
-                        <span className="text-slate-900 font-extrabold">{cadreItems.filter((item) => item.role === 'VILLAGE_INCHARGE').length > 0 ? `${cadreItems.filter((item) => item.role === 'VILLAGE_INCHARGE' && item.completedTraining > 0).length}/${cadreItems.filter((item) => item.role === 'VILLAGE_INCHARGE').length}` : '0/0'}</span>
+                        <span className="text-slate-400">Village Incharges Trained:</span>
+                        <span className="text-white font-extrabold">{cadreItems.filter((item) => item.role === 'VILLAGE_INCHARGE').length > 0 ? `${cadreItems.filter((item) => item.role === 'VILLAGE_INCHARGE' && item.completedTraining > 0).length}/${cadreItems.filter((item) => item.role === 'VILLAGE_INCHARGE').length}` : '0/0'}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-500">Booth Incharges Trained:</span>
-                        <span className="text-slate-900 font-extrabold">{cadreItems.filter((item) => item.role === 'BOOTH_PRESIDENT').length > 0 ? `${cadreItems.filter((item) => item.role === 'BOOTH_PRESIDENT' && item.completedTraining > 0).length}/${cadreItems.filter((item) => item.role === 'BOOTH_PRESIDENT').length}` : '0/0'}</span>
+                        <span className="text-slate-400">Booth Incharges Trained:</span>
+                        <span className="text-white font-extrabold">{cadreItems.filter((item) => item.role === 'BOOTH_PRESIDENT').length > 0 ? `${cadreItems.filter((item) => item.role === 'BOOTH_PRESIDENT' && item.completedTraining > 0).length}/${cadreItems.filter((item) => item.role === 'BOOTH_PRESIDENT').length}` : '0/0'}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-500">100-Voter Leaders Trained:</span>
-                        <span className="text-slate-900 font-extrabold">{cadreItems.filter((item) => item.role === 'VOTER_100_INCHARGE').length > 0 ? `${cadreItems.filter((item) => item.role === 'VOTER_100_INCHARGE' && item.completedTraining > 0).length}/${cadreItems.filter((item) => item.role === 'VOTER_100_INCHARGE').length}` : '0/0'}</span>
+                        <span className="text-slate-400">100-Voter Leaders Trained:</span>
+                        <span className="text-white font-extrabold">{cadreItems.filter((item) => item.role === 'VOTER_100_INCHARGE').length > 0 ? `${cadreItems.filter((item) => item.role === 'VOTER_100_INCHARGE' && item.completedTraining > 0).length}/${cadreItems.filter((item) => item.role === 'VOTER_100_INCHARGE').length}` : '0/0'}</span>
                       </div>
                     </div>
 
-                    <div className="bg-white border border-slate-150 rounded p-3 text-[10px] text-slate-500 leading-relaxed font-semibold">
-                      <span className="text-slate-900 uppercase font-black block mb-0.5">Campaign Coordinator Note:</span>
+                    <div className="bg-[#131E33] border border-slate-800 rounded-xl p-3 text-[10px] text-slate-400 leading-relaxed font-semibold">
+                      <span className="text-cyan-400 uppercase font-black block mb-0.5">Campaign Coordinator Note:</span>
                       Continuous review classes are conducted weekly for new booth workers to ensure 100% procedural consistency on election day.
                     </div>
                   </div>
@@ -3172,11 +3424,11 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
             return (
               <div className="space-y-6 animate-fade-in" id="const-live-voter-tracking-tab">
                 {/* Header card with simulation controls */}
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-4">
+                <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 gap-4">
                     <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Live Voter Turnout Tracking</h3>
-                      <p className="text-xs text-slate-500">Track real-time verified voting speed, queue sizes, and polling station aggregate reports submitted by authorized field agents.</p>
+                      <h3 className="text-xs font-black uppercase tracking-wider text-cyan-400">Live Voter Turnout Tracking</h3>
+                      <p className="text-xs text-slate-400">Track real-time verified voting speed, queue sizes, and polling station aggregate reports submitted by authorized field agents.</p>
                     </div>
                     
                     {/* Simulation toggle button */}
@@ -3184,10 +3436,10 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       <button
                         type="button"
                         onClick={() => { void refreshLiveTurnoutSummary(); }}
-                        className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 border cursor-pointer ${
+                        className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 border cursor-pointer ${
                           isRefreshingLiveTurnout
-                            ? 'bg-amber-500 border-amber-600 text-white animate-pulse'
-                            : 'bg-emerald-600 hover:bg-emerald-700 border-emerald-700 text-white'
+                            ? 'bg-cyan-500 border-cyan-500 text-slate-950 font-black animate-pulse'
+                            : 'bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black border-cyan-400 shadow-md shadow-cyan-500/20'
                         }`}
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingLiveTurnout ? 'animate-spin' : ''}`} />
@@ -3200,50 +3452,50 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   <div className="space-y-3">
                     <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Aggregate Polling Flow</span>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-7 gap-4 items-center">
+                    <div className="grid grid-cols-1 md:grid-cols-7 gap-3 sm:gap-4 items-center">
                       
                       {/* Step 1: Total Assigned */}
-                      <div className="md:col-span-2 bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col justify-between shadow-sm relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-1 h-full bg-slate-400"></div>
+                      <div className="md:col-span-2 bg-[#0B1120] border border-slate-800 rounded-2xl p-4 flex flex-col justify-between shadow-lg relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-1 h-full bg-slate-500"></div>
                         <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Total Voters Assigned</span>
-                        <span className="text-2xl font-black text-slate-900 mt-1">
+                        <span className="text-2xl font-black text-white mt-1">
                           {totalAssigned.toLocaleString()}
                         </span>
-                        <span className="text-[10px] text-slate-500 font-bold uppercase mt-1">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase mt-1">
                           100% of Constituency
                         </span>
                       </div>
 
                       {/* Flow Arrow */}
-                      <div className="hidden md:flex justify-center text-slate-300">
-                        <ChevronRight className="w-5 h-5 animate-pulse" />
+                      <div className="hidden md:flex justify-center text-slate-600">
+                        <ChevronRight className="w-5 h-5 animate-pulse text-cyan-400" />
                       </div>
 
                       {/* Step 2: Total Polled */}
-                      <div className="md:col-span-2 bg-emerald-50/50 border border-emerald-200 rounded-xl p-4 flex flex-col justify-between shadow-sm relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
+                      <div className="md:col-span-2 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 flex flex-col justify-between shadow-lg relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-1 h-full bg-emerald-400"></div>
                         <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Total Votes Polled</span>
-                        <span className="text-2xl font-black text-emerald-600 mt-1">
+                        <span className="text-2xl font-black text-emerald-400 mt-1">
                           {totalVotesPolled.toLocaleString()}
                         </span>
-                        <span className="text-[10px] text-emerald-600 font-black uppercase mt-1">
+                        <span className="text-[10px] text-emerald-400 font-black uppercase mt-1">
                           {totalAssigned > 0 ? ((totalVotesPolled / totalAssigned) * 100).toFixed(2) : '0.00'}% Turnout Rate
                         </span>
                       </div>
 
                       {/* Flow Arrow */}
-                      <div className="hidden md:flex justify-center text-slate-300">
-                        <ChevronRight className="w-5 h-5 animate-pulse" />
+                      <div className="hidden md:flex justify-center text-slate-600">
+                        <ChevronRight className="w-5 h-5 animate-pulse text-cyan-400" />
                       </div>
 
                       {/* Step 3: Pending */}
-                      <div className="md:col-span-2 bg-amber-50/50 border border-amber-200 rounded-xl p-4 flex flex-col justify-between shadow-sm relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-1 h-full bg-amber-500"></div>
+                      <div className="md:col-span-2 bg-cyan-500/10 border border-cyan-500/30 rounded-2xl p-4 flex flex-col justify-between shadow-lg relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-1 h-full bg-cyan-400"></div>
                         <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Pending / Not Yet Updated</span>
-                        <span className="text-2xl font-black text-amber-600 mt-1">
+                        <span className="text-2xl font-black text-cyan-400 mt-1">
                           {pendingVotes.toLocaleString()}
                         </span>
-                        <span className="text-[10px] text-amber-600 font-black uppercase mt-1">
+                        <span className="text-[10px] text-cyan-400 font-black uppercase mt-1">
                           {totalAssigned > 0 ? ((pendingVotes / totalAssigned) * 100).toFixed(2) : '0.00'}% Outstanding
                         </span>
                       </div>
@@ -3253,106 +3505,100 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                 </div>
 
                 {/* Party-wise Aggregate Count (Polled Vote Share) */}
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-                  <div className="border-b border-slate-100 pb-3">
-                    <h4 className="text-xs font-black text-slate-950 uppercase tracking-tight">Party-wise Aggregate Count</h4>
-                    <p className="text-[10px] text-slate-500 mt-0.5">Calculated dynamically from real-time field-level aggregate updates. Strictly confidential and secure, no individual preferences are stored.</p>
+                <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
+                  <div className="border-b border-slate-800 pb-3">
+                    <h4 className="text-xs font-black text-white uppercase tracking-tight">Party-wise Aggregate Count</h4>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Calculated dynamically from real-time field-level aggregate updates. Strictly confidential and secure, no individual preferences are stored.</p>
                   </div>
 
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                     {/* TDP */}
-                    <div className="bg-yellow-50/50 border border-yellow-200 rounded-xl p-3.5 space-y-2 relative overflow-hidden">
-                      <div className="absolute top-0 right-0 w-12 h-12 bg-yellow-400/5 rounded-full -mr-4 -mt-4" />
+                    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-3.5 space-y-2 relative overflow-hidden">
                       <div className="flex items-center gap-1.5">
                         <div className="w-2.5 h-2.5 rounded-full bg-yellow-400 border border-yellow-500" />
-                        <span className="text-[10px] text-slate-600 font-extrabold uppercase tracking-wide">TDP (Our Party)</span>
+                        <span className="text-[10px] text-slate-300 font-extrabold uppercase tracking-wide">TDP (Our Party)</span>
                       </div>
                       <div className="space-y-0.5">
-                        <p className="text-xl font-black text-slate-900">{partyAggregates.TDP.toLocaleString()}</p>
-                        <p className="text-[10px] text-yellow-700 font-extrabold">{totalVotesPolled > 0 ? ((partyAggregates.TDP / totalVotesPolled) * 100).toFixed(1) : '0.0'}% Share</p>
+                        <p className="text-xl font-black text-white">{partyAggregates.TDP.toLocaleString()}</p>
+                        <p className="text-[10px] text-yellow-400 font-extrabold">{totalVotesPolled > 0 ? ((partyAggregates.TDP / totalVotesPolled) * 100).toFixed(1) : '0.0'}% Share</p>
                       </div>
-                      <div className="w-full h-1.5 bg-yellow-100 rounded-full overflow-hidden">
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
                         <div className="h-full bg-yellow-400 rounded-full" style={{ width: `${totalVotesPolled > 0 ? (partyAggregates.TDP / totalVotesPolled) * 100 : 0}%` }} />
                       </div>
                     </div>
 
                     {/* YSRCP */}
-                    <div className="bg-blue-50/50 border border-blue-200 rounded-xl p-3.5 space-y-2 relative overflow-hidden">
-                      <div className="absolute top-0 right-0 w-12 h-12 bg-blue-400/5 rounded-full -mr-4 -mt-4" />
+                    <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-3.5 space-y-2 relative overflow-hidden">
                       <div className="flex items-center gap-1.5">
                         <div className="w-2.5 h-2.5 rounded-full bg-blue-500 border border-blue-600" />
-                        <span className="text-[10px] text-slate-600 font-extrabold uppercase tracking-wide">YSRCP</span>
+                        <span className="text-[10px] text-slate-300 font-extrabold uppercase tracking-wide">YSRCP</span>
                       </div>
                       <div className="space-y-0.5">
-                        <p className="text-xl font-black text-slate-900">{partyAggregates.YSRCP.toLocaleString()}</p>
-                        <p className="text-[10px] text-blue-700 font-extrabold">{totalVotesPolled > 0 ? ((partyAggregates.YSRCP / totalVotesPolled) * 100).toFixed(1) : '0.0'}% Share</p>
+                        <p className="text-xl font-black text-white">{partyAggregates.YSRCP.toLocaleString()}</p>
+                        <p className="text-[10px] text-blue-400 font-extrabold">{totalVotesPolled > 0 ? ((partyAggregates.YSRCP / totalVotesPolled) * 100).toFixed(1) : '0.0'}% Share</p>
                       </div>
-                      <div className="w-full h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
                         <div className="h-full bg-blue-500 rounded-full" style={{ width: `${totalVotesPolled > 0 ? (partyAggregates.YSRCP / totalVotesPolled) * 100 : 0}%` }} />
                       </div>
                     </div>
 
                     {/* JSP */}
-                    <div className="bg-rose-50/50 border border-rose-200 rounded-xl p-3.5 space-y-2 relative overflow-hidden">
-                      <div className="absolute top-0 right-0 w-12 h-12 bg-rose-400/5 rounded-full -mr-4 -mt-4" />
+                    <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-3.5 space-y-2 relative overflow-hidden">
                       <div className="flex items-center gap-1.5">
                         <div className="w-2.5 h-2.5 rounded-full bg-rose-500 border border-rose-600" />
-                        <span className="text-[10px] text-slate-600 font-extrabold uppercase tracking-wide">JSP</span>
+                        <span className="text-[10px] text-slate-300 font-extrabold uppercase tracking-wide">JSP</span>
                       </div>
                       <div className="space-y-0.5">
-                        <p className="text-xl font-black text-slate-900">{partyAggregates.JSP.toLocaleString()}</p>
-                        <p className="text-[10px] text-rose-700 font-extrabold">{totalVotesPolled > 0 ? ((partyAggregates.JSP / totalVotesPolled) * 100).toFixed(1) : '0.0'}% Share</p>
+                        <p className="text-xl font-black text-white">{partyAggregates.JSP.toLocaleString()}</p>
+                        <p className="text-[10px] text-rose-400 font-extrabold">{totalVotesPolled > 0 ? ((partyAggregates.JSP / totalVotesPolled) * 100).toFixed(1) : '0.0'}% Share</p>
                       </div>
-                      <div className="w-full h-1.5 bg-rose-100 rounded-full overflow-hidden">
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
                         <div className="h-full bg-rose-500 rounded-full" style={{ width: `${totalVotesPolled > 0 ? (partyAggregates.JSP / totalVotesPolled) * 100 : 0}%` }} />
                       </div>
                     </div>
 
                     {/* BJP */}
-                    <div className="bg-orange-50/50 border border-orange-200 rounded-xl p-3.5 space-y-2 relative overflow-hidden">
-                      <div className="absolute top-0 right-0 w-12 h-12 bg-orange-400/5 rounded-full -mr-4 -mt-4" />
+                    <div className="bg-orange-500/10 border border-orange-500/30 rounded-2xl p-3.5 space-y-2 relative overflow-hidden">
                       <div className="flex items-center gap-1.5">
                         <div className="w-2.5 h-2.5 rounded-full bg-orange-500 border border-orange-600" />
-                        <span className="text-[10px] text-slate-600 font-extrabold uppercase tracking-wide">BJP</span>
+                        <span className="text-[10px] text-slate-300 font-extrabold uppercase tracking-wide">BJP</span>
                       </div>
                       <div className="space-y-0.5">
-                        <p className="text-xl font-black text-slate-900">{partyAggregates.BJP.toLocaleString()}</p>
-                        <p className="text-[10px] text-orange-700 font-extrabold">{totalVotesPolled > 0 ? ((partyAggregates.BJP / totalVotesPolled) * 100).toFixed(1) : '0.0'}% Share</p>
+                        <p className="text-xl font-black text-white">{partyAggregates.BJP.toLocaleString()}</p>
+                        <p className="text-[10px] text-orange-400 font-extrabold">{totalVotesPolled > 0 ? ((partyAggregates.BJP / totalVotesPolled) * 100).toFixed(1) : '0.0'}% Share</p>
                       </div>
-                      <div className="w-full h-1.5 bg-orange-100 rounded-full overflow-hidden">
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
                         <div className="h-full bg-orange-500 rounded-full" style={{ width: `${totalVotesPolled > 0 ? (partyAggregates.BJP / totalVotesPolled) * 100 : 0}%` }} />
                       </div>
                     </div>
 
                     {/* INC */}
-                    <div className="bg-emerald-50/50 border border-emerald-200 rounded-xl p-3.5 space-y-2 relative overflow-hidden">
-                      <div className="absolute top-0 right-0 w-12 h-12 bg-emerald-400/5 rounded-full -mr-4 -mt-4" />
+                    <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3.5 space-y-2 relative overflow-hidden">
                       <div className="flex items-center gap-1.5">
                         <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-emerald-600" />
-                        <span className="text-[10px] text-slate-600 font-extrabold uppercase tracking-wide">INC</span>
+                        <span className="text-[10px] text-slate-300 font-extrabold uppercase tracking-wide">INC</span>
                       </div>
                       <div className="space-y-0.5">
-                        <p className="text-xl font-black text-slate-900">{partyAggregates.INC.toLocaleString()}</p>
-                        <p className="text-[10px] text-emerald-700 font-extrabold">{totalVotesPolled > 0 ? ((partyAggregates.INC / totalVotesPolled) * 100).toFixed(1) : '0.0'}% Share</p>
+                        <p className="text-xl font-black text-white">{partyAggregates.INC.toLocaleString()}</p>
+                        <p className="text-[10px] text-emerald-400 font-extrabold">{totalVotesPolled > 0 ? ((partyAggregates.INC / totalVotesPolled) * 100).toFixed(1) : '0.0'}% Share</p>
                       </div>
-                      <div className="w-full h-1.5 bg-emerald-100 rounded-full overflow-hidden">
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
                         <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${totalVotesPolled > 0 ? (partyAggregates.INC / totalVotesPolled) * 100 : 0}%` }} />
                       </div>
                     </div>
 
                     {/* Others */}
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2 relative overflow-hidden">
-                      <div className="absolute top-0 right-0 w-12 h-12 bg-slate-400/5 rounded-full -mr-4 -mt-4" />
+                    <div className="bg-[#0B1120] border border-slate-800 rounded-2xl p-3.5 space-y-2 relative overflow-hidden">
                       <div className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 rounded-full bg-slate-400 border border-slate-500" />
-                        <span className="text-[10px] text-slate-600 font-extrabold uppercase tracking-wide">Others</span>
+                        <div className="w-2.5 h-2.5 rounded-full bg-slate-500 border border-slate-600" />
+                        <span className="text-[10px] text-slate-300 font-extrabold uppercase tracking-wide">Others</span>
                       </div>
                       <div className="space-y-0.5">
-                        <p className="text-xl font-black text-slate-900">{partyAggregates.Others.toLocaleString()}</p>
-                        <p className="text-[10px] text-slate-500 font-bold">{totalVotesPolled > 0 ? ((partyAggregates.Others / totalVotesPolled) * 100).toFixed(1) : '0.0'}% Share</p>
+                        <p className="text-xl font-black text-white">{partyAggregates.Others.toLocaleString()}</p>
+                        <p className="text-[10px] text-slate-400 font-bold">{totalVotesPolled > 0 ? ((partyAggregates.Others / totalVotesPolled) * 100).toFixed(1) : '0.0'}% Share</p>
                       </div>
-                      <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-slate-400 rounded-full" style={{ width: `${totalVotesPolled > 0 ? (partyAggregates.Others / totalVotesPolled) * 100 : 0}%` }} />
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-slate-500 rounded-full" style={{ width: `${totalVotesPolled > 0 ? (partyAggregates.Others / totalVotesPolled) * 100 : 0}%` }} />
                       </div>
                     </div>
                   </div>
@@ -3363,7 +3609,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       <span>Proportional Polled Vote Composition</span>
                       <span>Total Votes Polled: {totalVotesPolled.toLocaleString()}</span>
                     </div>
-                    <div className="w-full h-5 rounded-lg overflow-hidden flex shadow-sm border border-slate-100">
+                    <div className="w-full h-5 rounded-xl overflow-hidden flex shadow-lg border border-slate-800">
                       <div className="bg-yellow-400 h-full transition-all duration-300 relative group" style={{ width: `${totalVotesPolled > 0 ? (partyAggregates.TDP / totalVotesPolled) * 100 : 0}%` }}>
                         <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black text-slate-900 truncate px-1">TDP</span>
                       </div>
@@ -3379,7 +3625,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       <div className="bg-emerald-500 h-full transition-all duration-300 relative group" style={{ width: `${totalVotesPolled > 0 ? (partyAggregates.INC / totalVotesPolled) * 100 : 0}%` }}>
                         <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black text-white truncate px-1">INC</span>
                       </div>
-                      <div className="bg-slate-400 h-full transition-all duration-300 relative group" style={{ width: `${totalVotesPolled > 0 ? (partyAggregates.Others / totalVotesPolled) * 100 : 0}%` }}>
+                      <div className="bg-slate-600 h-full transition-all duration-300 relative group" style={{ width: `${totalVotesPolled > 0 ? (partyAggregates.Others / totalVotesPolled) * 100 : 0}%` }}>
                         <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black text-white truncate px-1">OTH</span>
                       </div>
                     </div>
@@ -3387,43 +3633,43 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                 </div>
 
                 {/* Two columns layout */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
                   
                   {/* Left side: Mandal-wise Turnout stats (Lg: col-span-5) */}
-                  <div className="lg:col-span-5 bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-                    <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-                      <h4 className="text-xs font-black text-slate-950 uppercase tracking-tight">Mandal Turnout Summary</h4>
-                      <span className="text-[10px] bg-slate-100 text-slate-500 font-mono px-2 py-0.5 rounded font-black">Turnout Rate</span>
+                  <div className="lg:col-span-5 bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
+                    <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                      <h4 className="text-xs font-black text-white uppercase tracking-tight">Mandal Turnout Summary</h4>
+                      <span className="text-[10px] bg-slate-900 border border-slate-800 text-cyan-400 font-mono px-2 py-0.5 rounded-full font-black">Turnout Rate</span>
                     </div>
 
-                    <div className="space-y-4">
+                    <div className="space-y-3.5">
                       {liveMandalStats.map((mandal) => {
                         const speedColor = 
-                          mandal.status === 'HIGH SPEED' ? 'text-emerald-600 bg-emerald-50 border-emerald-200' :
-                          mandal.status === 'CROWDED' ? 'text-rose-600 bg-rose-50 border-rose-200' :
-                          mandal.status === 'SLOW' ? 'text-amber-600 bg-amber-50 border-amber-200' :
-                          'text-slate-600 bg-slate-50 border-slate-200';
+                          mandal.status === 'HIGH SPEED' ? 'text-emerald-400 bg-emerald-500/20 border-emerald-500/30' :
+                          mandal.status === 'CROWDED' ? 'text-rose-400 bg-rose-500/20 border-rose-500/30' :
+                          mandal.status === 'SLOW' ? 'text-cyan-400 bg-cyan-500/20 border-cyan-500/30' :
+                          'text-slate-400 bg-slate-800 border-slate-700';
 
                         return (
-                          <div key={mandal.name} className="border border-slate-100 rounded-xl p-3.5 space-y-2 bg-slate-50/50">
+                          <div key={mandal.name} className="border border-slate-800 rounded-2xl p-3.5 space-y-2 bg-[#0B1120]">
                             <div className="flex justify-between items-start">
                               <div>
-                                <h5 className="font-extrabold text-slate-900 uppercase text-xs">{mandal.name}</h5>
+                                <h5 className="font-extrabold text-white uppercase text-xs">{mandal.name}</h5>
                                 <span className="text-[10px] text-slate-400 font-bold">
                                   {mandal.cast.toLocaleString()} / {mandal.total.toLocaleString()} votes
                                 </span>
                               </div>
-                              <span className={`px-2 py-0.5 rounded border text-[9px] font-black uppercase tracking-wider ${speedColor}`}>
+                              <span className={`px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-wider ${speedColor}`}>
                                 {mandal.status}
                               </span>
                             </div>
 
                             <div className="space-y-1">
                               <div className="flex justify-between text-[11px] font-black">
-                                <span className="text-slate-500">Progress</span>
-                                <span className="text-slate-900">{mandal.turnout}%</span>
+                                <span className="text-slate-400">Progress</span>
+                                <span className="text-white">{mandal.turnout}%</span>
                               </div>
-                              <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
                                 <div 
                                   className="h-full bg-yellow-400 transition-all duration-300" 
                                   style={{ width: `${mandal.turnout}%` }} 
@@ -3432,8 +3678,8 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                             </div>
 
                             <div className="flex justify-between text-[10px] font-bold text-slate-400 pt-1">
-                              <span>Queue: <strong className="text-slate-700">{mandal.avgQueue} in line</strong></span>
-                              <span>Sync OK</span>
+                              <span>Queue: <strong className="text-slate-200">{mandal.avgQueue} in line</strong></span>
+                              <span className="text-emerald-400">Sync OK</span>
                             </div>
                           </div>
                         );
@@ -3445,19 +3691,19 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   <div className="lg:col-span-7 space-y-6">
                     
                     {/* Authorized Field-level Polling Figures Update Form */}
-                    <form onSubmit={handleRegisterManualReport} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-                      <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-                        <Plus className="w-4 h-4 text-slate-500" />
-                        <h4 className="text-xs font-black text-slate-950 uppercase tracking-tight">Submit Booth-Level Polling Report</h4>
+                    <form onSubmit={handleRegisterManualReport} className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
+                      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+                        <Plus className="w-4 h-4 text-cyan-400" />
+                        <h4 className="text-xs font-black text-white uppercase tracking-tight">Submit Booth-Level Polling Report</h4>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-bold text-slate-700">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-bold text-slate-300">
                         <div className="flex flex-col gap-1">
                           <label className="text-[10px] text-slate-400 uppercase">Mandal Location</label>
                           <select
                             value={newManualReport.mandal}
                             onChange={(e) => setNewManualReport({ ...newManualReport, mandal: e.target.value })}
-                            className="w-full p-2 bg-slate-50 border border-slate-200 rounded font-bold text-slate-800 focus:outline-none"
+                            className="w-full p-2 bg-[#0B1120] border border-slate-700/80 rounded-xl font-bold text-white focus:outline-none focus:border-cyan-400"
                           >
                             {liveMandalStats.map(m => (
                               <option key={m.name} value={m.name}>{m.name}</option>
@@ -3473,7 +3719,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                             placeholder="e.g. Booth 224"
                             value={newManualReport.booth}
                             onChange={(e) => setNewManualReport({ ...newManualReport, booth: e.target.value })}
-                            className="w-full p-2 bg-slate-50 border border-slate-200 rounded font-bold text-slate-800 placeholder-slate-400 focus:outline-none"
+                            className="w-full p-2 bg-[#0B1120] border border-slate-700/80 rounded-xl font-bold text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                           />
                         </div>
 
@@ -3484,7 +3730,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                             placeholder="e.g. M. Srinivasa Rao"
                             value={newManualReport.submittedBy}
                             onChange={(e) => setNewManualReport({ ...newManualReport, submittedBy: e.target.value })}
-                            className="w-full p-2 bg-slate-50 border border-slate-200 rounded font-bold text-slate-800 placeholder-slate-400 focus:outline-none"
+                            className="w-full p-2 bg-[#0B1120] border border-slate-700/80 rounded-xl font-bold text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                           />
                         </div>
                       </div>
@@ -3493,87 +3739,87 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       <div className="space-y-2">
                         <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider block">Polled Vote Count Breakdown (Incremental Batch)</span>
                         <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
-                          <div className="flex flex-col gap-1 bg-yellow-50/30 p-2 border border-yellow-200/50 rounded-lg">
-                            <label className="text-[9px] text-yellow-800 uppercase font-extrabold">TDP</label>
+                          <div className="flex flex-col gap-1 bg-yellow-500/10 p-2 border border-yellow-500/30 rounded-xl">
+                            <label className="text-[9px] text-yellow-400 uppercase font-extrabold">TDP</label>
                             <input
                               type="number"
                               min="0"
                               value={newManualReport.TDP || ''}
                               onChange={(e) => setNewManualReport({ ...newManualReport, TDP: Math.max(0, parseInt(e.target.value) || 0) })}
-                              className="w-full p-1.5 bg-white border border-slate-200 rounded text-xs font-mono font-black focus:outline-none focus:ring-1 focus:ring-yellow-400"
+                              className="w-full p-1.5 bg-[#0B1120] border border-slate-700 rounded-lg text-xs font-mono font-black text-white focus:outline-none focus:ring-1 focus:ring-yellow-400"
                               placeholder="0"
                             />
                           </div>
 
-                          <div className="flex flex-col gap-1 bg-blue-50/30 p-2 border border-blue-200/50 rounded-lg">
-                            <label className="text-[9px] text-blue-700 uppercase font-extrabold">YSRCP</label>
+                          <div className="flex flex-col gap-1 bg-blue-500/10 p-2 border border-blue-500/30 rounded-xl">
+                            <label className="text-[9px] text-blue-400 uppercase font-extrabold">YSRCP</label>
                             <input
                               type="number"
                               min="0"
                               value={newManualReport.YSRCP || ''}
                               onChange={(e) => setNewManualReport({ ...newManualReport, YSRCP: Math.max(0, parseInt(e.target.value) || 0) })}
-                              className="w-full p-1.5 bg-white border border-slate-200 rounded text-xs font-mono font-black focus:outline-none focus:ring-1 focus:ring-blue-400"
+                              className="w-full p-1.5 bg-[#0B1120] border border-slate-700 rounded-lg text-xs font-mono font-black text-white focus:outline-none focus:ring-1 focus:ring-blue-400"
                               placeholder="0"
                             />
                           </div>
 
-                          <div className="flex flex-col gap-1 bg-rose-50/30 p-2 border border-rose-200/50 rounded-lg">
-                            <label className="text-[9px] text-rose-700 uppercase font-extrabold">JSP</label>
+                          <div className="flex flex-col gap-1 bg-rose-500/10 p-2 border border-rose-500/30 rounded-xl">
+                            <label className="text-[9px] text-rose-400 uppercase font-extrabold">JSP</label>
                             <input
                               type="number"
                               min="0"
                               value={newManualReport.JSP || ''}
                               onChange={(e) => setNewManualReport({ ...newManualReport, JSP: Math.max(0, parseInt(e.target.value) || 0) })}
-                              className="w-full p-1.5 bg-white border border-slate-200 rounded text-xs font-mono font-black focus:outline-none focus:ring-1 focus:ring-rose-400"
+                              className="w-full p-1.5 bg-[#0B1120] border border-slate-700 rounded-lg text-xs font-mono font-black text-white focus:outline-none focus:ring-1 focus:ring-rose-400"
                               placeholder="0"
                             />
                           </div>
 
-                          <div className="flex flex-col gap-1 bg-orange-50/30 p-2 border border-orange-200/50 rounded-lg">
-                            <label className="text-[9px] text-orange-700 uppercase font-extrabold">BJP</label>
+                          <div className="flex flex-col gap-1 bg-orange-500/10 p-2 border border-orange-500/30 rounded-xl">
+                            <label className="text-[9px] text-orange-400 uppercase font-extrabold">BJP</label>
                             <input
                               type="number"
                               min="0"
                               value={newManualReport.BJP || ''}
                               onChange={(e) => setNewManualReport({ ...newManualReport, BJP: Math.max(0, parseInt(e.target.value) || 0) })}
-                              className="w-full p-1.5 bg-white border border-slate-200 rounded text-xs font-mono font-black focus:outline-none focus:ring-1 focus:ring-orange-400"
+                              className="w-full p-1.5 bg-[#0B1120] border border-slate-700 rounded-lg text-xs font-mono font-black text-white focus:outline-none focus:ring-1 focus:ring-orange-400"
                               placeholder="0"
                             />
                           </div>
 
-                          <div className="flex flex-col gap-1 bg-emerald-50/30 p-2 border border-emerald-200/50 rounded-lg">
-                            <label className="text-[9px] text-emerald-700 uppercase font-extrabold">INC</label>
+                          <div className="flex flex-col gap-1 bg-emerald-500/10 p-2 border border-emerald-500/30 rounded-xl">
+                            <label className="text-[9px] text-emerald-400 uppercase font-extrabold">INC</label>
                             <input
                               type="number"
                               min="0"
                               value={newManualReport.INC || ''}
                               onChange={(e) => setNewManualReport({ ...newManualReport, INC: Math.max(0, parseInt(e.target.value) || 0) })}
-                              className="w-full p-1.5 bg-white border border-slate-200 rounded text-xs font-mono font-black focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                              className="w-full p-1.5 bg-[#0B1120] border border-slate-700 rounded-lg text-xs font-mono font-black text-white focus:outline-none focus:ring-1 focus:ring-emerald-400"
                               placeholder="0"
                             />
                           </div>
 
-                          <div className="flex flex-col gap-1 bg-slate-50 p-2 border border-slate-200 rounded-lg">
-                            <label className="text-[9px] text-slate-500 uppercase font-extrabold">Others</label>
+                          <div className="flex flex-col gap-1 bg-[#0B1120] p-2 border border-slate-700 rounded-xl">
+                            <label className="text-[9px] text-slate-400 uppercase font-extrabold">Others</label>
                             <input
                               type="number"
                               min="0"
                               value={newManualReport.Others || ''}
                               onChange={(e) => setNewManualReport({ ...newManualReport, Others: Math.max(0, parseInt(e.target.value) || 0) })}
-                              className="w-full p-1.5 bg-white border border-slate-200 rounded text-xs font-mono font-black focus:outline-none focus:ring-1 focus:ring-slate-400"
+                              className="w-full p-1.5 bg-[#131E33] border border-slate-700 rounded-lg text-xs font-mono font-black text-white focus:outline-none focus:ring-1 focus:ring-slate-400"
                               placeholder="0"
                             />
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex justify-between items-center border-t border-slate-100 pt-3">
+                      <div className="flex justify-between items-center border-t border-slate-800 pt-3">
                         <span className="text-[10px] text-slate-400 font-bold">
-                          Total in this report: <strong className="text-slate-700 font-black">{(Number(newManualReport.TDP) || 0) + (Number(newManualReport.YSRCP) || 0) + (Number(newManualReport.JSP) || 0) + (Number(newManualReport.BJP) || 0) + (Number(newManualReport.INC) || 0) + (Number(newManualReport.Others) || 0)} votes</strong>
+                          Total in this report: <strong className="text-yellow-400 font-black">{(Number(newManualReport.TDP) || 0) + (Number(newManualReport.YSRCP) || 0) + (Number(newManualReport.JSP) || 0) + (Number(newManualReport.BJP) || 0) + (Number(newManualReport.INC) || 0) + (Number(newManualReport.Others) || 0)} votes</strong>
                         </span>
                         <button
                           type="submit"
-                          className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer"
+                          className="px-4 py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black rounded-xl text-[10px] uppercase tracking-wider cursor-pointer shadow-md shadow-cyan-500/20"
                         >
                           Submit Polling Figures
                         </button>
@@ -3581,14 +3827,14 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                     </form>
 
                     {/* Authorized Polling Reports Feed */}
-                    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                         <div className="flex items-center gap-2">
-                          <Activity className="w-4 h-4 text-slate-500" />
-                          <h4 className="text-xs font-black text-slate-950 uppercase tracking-tight">Authorized Polling Reports Feed</h4>
+                          <Activity className="w-4 h-4 text-cyan-400" />
+                          <h4 className="text-xs font-black text-white uppercase tracking-tight">Authorized Polling Reports Feed</h4>
                         </div>
-                        <span className="text-[10px] bg-emerald-50 border border-emerald-200 text-emerald-800 font-black px-2.5 py-0.5 rounded uppercase tracking-wider animate-pulse flex items-center gap-1.5">
-                          <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                        <span className="text-[10px] bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider animate-pulse flex items-center gap-1.5">
+                          <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
                           Live Streaming
                         </span>
                       </div>
@@ -3601,12 +3847,12 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           placeholder="Search polling reports (mandal, booth, agent)..."
                           value={liveSearchQuery}
                           onChange={(e) => setLiveSearchQuery(e.target.value)}
-                          className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-none"
+                          className="w-full pl-9 pr-4 py-2 bg-[#0B1120] border border-slate-700/80 rounded-xl text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                         />
                       </div>
 
                       {/* Logs Container list */}
-                      <div className="divide-y divide-slate-100 overflow-y-auto max-h-[350px] pr-2 space-y-2">
+                      <div className="divide-y divide-slate-800/80 overflow-y-auto max-h-[350px] pr-2 space-y-2">
                         {pollingReports
                           .filter(r => 
                             (r.mandal || '').toLowerCase().includes((liveSearchQuery || '').toLowerCase()) ||
@@ -3614,47 +3860,47 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                             (r.submittedBy || '').toLowerCase().includes((liveSearchQuery || '').toLowerCase())
                           )
                           .map((report) => (
-                            <div key={report.id} className="pt-2.5 pb-2.5 flex flex-col justify-between text-xs hover:bg-slate-50/50 p-2 rounded transition-colors border border-slate-100 mb-2">
+                            <div key={report.id} className="pt-2.5 pb-2.5 flex flex-col justify-between text-xs hover:bg-slate-800/40 p-2.5 rounded-xl transition-colors border border-slate-800 mb-2 bg-[#0B1120]">
                               <div className="flex justify-between items-start">
                                 <div className="space-y-0.5">
-                                  <p className="font-extrabold text-slate-900 uppercase text-[11px] flex items-center gap-1.5">
-                                    <span className="w-1.5 h-1.5 bg-yellow-400 rounded-full" />
-                                    {report.mandal} &bull; <span className="text-slate-500 font-bold">{report.booth}</span>
+                                  <p className="font-extrabold text-white uppercase text-[11px] flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full" />
+                                    {report.mandal} &bull; <span className="text-slate-400 font-bold">{report.booth}</span>
                                   </p>
                                   <p className="text-[10px] text-slate-400 font-bold">Reported by: {report.submittedBy}</p>
                                 </div>
                                 <div className="text-right">
-                                  <span className="text-[9px] text-slate-400 font-mono block font-bold">{report.time}</span>
-                                  <span className="inline-block bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded text-[10px] font-black uppercase mt-1">
+                                  <span className="text-[9px] text-slate-500 font-mono block font-bold">{report.time}</span>
+                                  <span className="inline-block bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full text-[10px] font-black uppercase mt-1">
                                     +{report.totalVotes} votes
                                   </span>
                                 </div>
                               </div>
                               
-                              <div className="mt-2.5 pt-2 border-t border-slate-100/60 grid grid-cols-6 gap-1 text-[10px] text-center font-bold text-slate-600">
-                                <div className="bg-yellow-50/50 rounded py-0.5 border border-yellow-100/50">
-                                  <span className="block text-[8px] text-yellow-800 uppercase font-black">TDP</span>
-                                  <span className="font-mono text-slate-900">{report.breakdown.TDP}</span>
+                              <div className="mt-2.5 pt-2 border-t border-slate-800 grid grid-cols-6 gap-1 text-[10px] text-center font-bold text-slate-300">
+                                <div className="bg-yellow-500/10 rounded-lg py-1 border border-yellow-500/30">
+                                  <span className="block text-[8px] text-yellow-400 uppercase font-black">TDP</span>
+                                  <span className="font-mono text-white">{report.breakdown.TDP}</span>
                                 </div>
-                                <div className="bg-blue-50/50 rounded py-0.5 border border-blue-100/50">
-                                  <span className="block text-[8px] text-blue-800 uppercase font-black">YSR</span>
-                                  <span className="font-mono text-slate-900">{report.breakdown.YSRCP}</span>
+                                <div className="bg-blue-500/10 rounded-lg py-1 border border-blue-500/30">
+                                  <span className="block text-[8px] text-blue-400 uppercase font-black">YSR</span>
+                                  <span className="font-mono text-white">{report.breakdown.YSRCP}</span>
                                 </div>
-                                <div className="bg-rose-50/50 rounded py-0.5 border border-rose-100/50">
-                                  <span className="block text-[8px] text-rose-800 uppercase font-black">JSP</span>
-                                  <span className="font-mono text-slate-900">{report.breakdown.JSP}</span>
+                                <div className="bg-rose-500/10 rounded-lg py-1 border border-rose-500/30">
+                                  <span className="block text-[8px] text-rose-400 uppercase font-black">JSP</span>
+                                  <span className="font-mono text-white">{report.breakdown.JSP}</span>
                                 </div>
-                                <div className="bg-orange-50/50 rounded py-0.5 border border-orange-100/50">
-                                  <span className="block text-[8px] text-orange-800 uppercase font-black">BJP</span>
-                                  <span className="font-mono text-slate-900">{report.breakdown.BJP}</span>
+                                <div className="bg-orange-500/10 rounded-lg py-1 border border-orange-500/30">
+                                  <span className="block text-[8px] text-orange-400 uppercase font-black">BJP</span>
+                                  <span className="font-mono text-white">{report.breakdown.BJP}</span>
                                 </div>
-                                <div className="bg-emerald-50/50 rounded py-0.5 border border-emerald-100/50">
-                                  <span className="block text-[8px] text-emerald-800 uppercase font-black">INC</span>
-                                  <span className="font-mono text-slate-900">{report.breakdown.INC}</span>
+                                <div className="bg-emerald-500/10 rounded-lg py-1 border border-emerald-500/30">
+                                  <span className="block text-[8px] text-emerald-400 uppercase font-black">INC</span>
+                                  <span className="font-mono text-white">{report.breakdown.INC}</span>
                                 </div>
-                                <div className="bg-slate-50 rounded py-0.5 border border-slate-200/50">
-                                  <span className="block text-[8px] text-slate-500 uppercase font-black">OTH</span>
-                                  <span className="font-mono text-slate-900">{report.breakdown.Others}</span>
+                                <div className="bg-slate-800 rounded-lg py-1 border border-slate-700">
+                                  <span className="block text-[8px] text-slate-400 uppercase font-black">OTH</span>
+                                  <span className="font-mono text-white">{report.breakdown.Others}</span>
                                 </div>
                               </div>
                             </div>
@@ -3675,87 +3921,87 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
           {activeTab === 'migrated_voters' && (
             <div className="space-y-6 animate-fade-in" id="const-migrated-voters-tab">
               {/* Header card with metrics */}
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-4">
+              <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 gap-4">
                   <div>
-                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Migrated Voters Coordination Center</h3>
-                    <p className="text-xs text-slate-500">Track and facilitate return travel, postal ballots, or logistical coordination for out-of-station constituency voters.</p>
+                    <h3 className="text-xs font-black uppercase tracking-wider text-cyan-400">Migrated Voters Coordination Center</h3>
+                    <p className="text-xs text-slate-400">Track and facilitate return travel, postal ballots, or logistical coordination for out-of-station constituency voters.</p>
                   </div>
                   
-                  <div className="flex gap-2">
-                    <span className="text-[10px] bg-slate-50 border border-slate-200 text-slate-600 font-extrabold px-2.5 py-1 rounded">
+                  <div className="flex gap-2 flex-wrap">
+                    <span className="text-[10px] bg-slate-900 border border-slate-800 text-slate-300 font-extrabold px-2.5 py-1 rounded-lg">
                       Total Tracked: {migratedVotersList.length}
                     </span>
-                    <span className="text-[10px] bg-emerald-50 border border-emerald-200 text-emerald-700 font-extrabold px-2.5 py-1 rounded">
+                    <span className="text-[10px] bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-extrabold px-2.5 py-1 rounded-lg">
                       Travel Booked: {migratedVotersList.filter(v => v.travelStatus === 'TRAVEL_BOOKED').length}
                     </span>
-                    <span className="text-[10px] bg-yellow-50 border border-yellow-200 text-yellow-700 font-extrabold px-2.5 py-1 rounded">
+                    <span className="text-[10px] bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 font-extrabold px-2.5 py-1 rounded-lg">
                       Pending confirmation: {migratedVotersList.filter(v => v.travelStatus === 'PENDING_CONFIRMATION').length}
                     </span>
                   </div>
                 </div>
 
                 {/* Summary boxes */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex justify-between items-center">
+                <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                  <div className="bg-[#0B1120] border border-slate-800 rounded-2xl p-4 flex justify-between items-center">
                     <div>
                       <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Confirmed Arrivals</span>
-                      <span className="text-xl font-black text-slate-950 block mt-1">
+                      <span className="text-xl font-black text-white block mt-1">
                         {migratedVotersList.filter(v => v.travelStatus === 'CONFIRMED' || v.travelStatus === 'TRAVEL_BOOKED' || v.travelStatus === 'SELF_ARRANGEMENT').length}
                       </span>
                     </div>
-                    <span className="text-xs font-black text-emerald-600 bg-emerald-100/50 border border-emerald-200 px-2.5 py-1 rounded">Active Assist</span>
+                    <span className="text-xs font-black text-emerald-400 bg-emerald-500/20 border border-emerald-500/30 px-2.5 py-1 rounded-full">Active Assist</span>
                   </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex justify-between items-center">
+                  <div className="bg-[#0B1120] border border-slate-800 rounded-2xl p-4 flex justify-between items-center">
                     <div>
                       <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Assistance Booked</span>
-                      <span className="text-xl font-black text-blue-600 block mt-1">
+                      <span className="text-xl font-black text-sky-400 block mt-1">
                         {migratedVotersList.filter(v => v.assistanceRequired === 'TRANSPORT').length}
                       </span>
                     </div>
-                    <span className="text-xs font-black text-blue-600 bg-blue-100/50 border border-blue-200 px-2.5 py-1 rounded">Bus / Train booked</span>
+                    <span className="text-xs font-black text-sky-400 bg-sky-500/20 border border-sky-500/30 px-2.5 py-1 rounded-full">Bus / Train</span>
                   </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex justify-between items-center">
+                  <div className="bg-[#0B1120] border border-slate-800 rounded-2xl p-4 flex justify-between items-center">
                     <div>
                       <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Pending Reach Out</span>
-                      <span className="text-xl font-black text-amber-600 block mt-1">
+                      <span className="text-xl font-black text-cyan-400 block mt-1">
                         {migratedVotersList.filter(v => v.travelStatus === 'PENDING_CONFIRMATION').length}
                       </span>
                     </div>
-                    <span className="text-xs font-black text-amber-600 bg-amber-100/50 border border-amber-200 px-2.5 py-1 rounded">Follow-up needed</span>
+                    <span className="text-xs font-black text-cyan-400 bg-cyan-500/20 border border-cyan-500/30 px-2.5 py-1 rounded-full">Follow-up</span>
                   </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex justify-between items-center">
+                  <div className="bg-[#0B1120] border border-slate-800 rounded-2xl p-4 flex justify-between items-center">
                     <div>
                       <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Lost Contact</span>
-                      <span className="text-xl font-black text-rose-600 block mt-1">
+                      <span className="text-xl font-black text-rose-400 block mt-1">
                         {migratedVotersList.filter(v => v.travelStatus === 'UNREACHABLE').length}
                       </span>
                     </div>
-                    <span className="text-xs font-black text-rose-600 bg-rose-100/50 border border-rose-200 px-2.5 py-1 rounded">Retry contact</span>
+                    <span className="text-xs font-black text-rose-400 bg-rose-500/20 border border-rose-500/30 px-2.5 py-1 rounded-full">Retry</span>
                   </div>
                 </div>
               </div>
 
               {/* Main Directory Table and Add form */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
                 
                 {/* Left Side: Filter and Add Form (Lg: col-span-4) */}
                 <div className="lg:col-span-4 space-y-6">
                   
                   {/* Search and Filter card */}
-                  <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3.5">
-                    <h4 className="text-xs font-black text-slate-950 uppercase tracking-tight border-b border-slate-100 pb-2">Filter Directory</h4>
+                  <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3.5">
+                    <h4 className="text-xs font-black text-white uppercase tracking-tight border-b border-slate-800 pb-2">Filter Directory</h4>
                     
-                    <div className="space-y-3 font-bold text-xs text-slate-700">
+                    <div className="space-y-3 font-bold text-xs text-slate-300">
                       <div className="flex flex-col gap-1">
                         <label className="text-[9px] text-slate-400 uppercase">Mandal Area</label>
                         <select
                           value={migratedMandalFilter}
                           onChange={(e) => setMigratedMandalFilter(e.target.value)}
-                          className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-xs font-bold text-slate-800 focus:outline-none"
+                          className="w-full p-2 bg-[#0B1120] border border-slate-700/80 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-cyan-400"
                         >
                           <option value="ALL">ALL MANDALS</option>
                           <option value="Singarayakonda">Singarayakonda</option>
@@ -3772,7 +4018,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                         <select
                           value={migratedStatusFilter}
                           onChange={(e) => setMigratedStatusFilter(e.target.value)}
-                          className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-xs font-bold text-slate-800 focus:outline-none"
+                          className="w-full p-2 bg-[#0B1120] border border-slate-700/80 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-cyan-400"
                         >
                           <option value="ALL">ALL STATUSES</option>
                           <option value="CONFIRMED">CONFIRMED</option>
@@ -3786,10 +4032,10 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                   </div>
 
                   {/* Add Migrated Voter Card */}
-                  <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3.5">
-                    <h4 className="text-xs font-black text-slate-950 uppercase tracking-tight border-b border-slate-100 pb-2">Register Migrated Voter</h4>
+                  <div className="bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3.5">
+                    <h4 className="text-xs font-black text-white uppercase tracking-tight border-b border-slate-800 pb-2">Register Migrated Voter</h4>
                     
-                    <form onSubmit={handleAddMigratedVoter} className="space-y-3 text-xs font-bold text-slate-700">
+                    <form onSubmit={handleAddMigratedVoter} className="space-y-3 text-xs font-bold text-slate-300">
                       <div className="flex flex-col gap-1">
                         <label className="text-[10px] text-slate-400 uppercase">Voter Full Name</label>
                         <input
@@ -3798,7 +4044,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           placeholder="Enter voter name..."
                           value={newMigratedVoter.name}
                           onChange={(e) => setNewMigratedVoter({ ...newMigratedVoter, name: e.target.value })}
-                          className="w-full p-2 bg-slate-50 border border-slate-200 rounded font-bold text-slate-800 focus:outline-none"
+                          className="w-full p-2 bg-[#0B1120] border border-slate-700/80 rounded-xl font-bold text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                         />
                       </div>
 
@@ -3810,7 +4056,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           placeholder="e.g. KDP9482341"
                           value={newMigratedVoter.epic}
                           onChange={(e) => setNewMigratedVoter({ ...newMigratedVoter, epic: e.target.value })}
-                          className="w-full p-2 bg-slate-50 border border-slate-200 rounded font-bold text-slate-800 focus:outline-none"
+                          className="w-full p-2 bg-[#0B1120] border border-slate-700/80 rounded-xl font-bold text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                         />
                       </div>
 
@@ -3820,7 +4066,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           <select
                             value={newMigratedVoter.mandal}
                             onChange={(e) => setNewMigratedVoter({ ...newMigratedVoter, mandal: e.target.value })}
-                            className="w-full p-1.5 bg-slate-50 border border-slate-200 rounded text-xs font-bold focus:outline-none"
+                            className="w-full p-1.5 bg-[#0B1120] border border-slate-700 rounded-lg text-xs font-bold text-white focus:outline-none focus:border-cyan-400"
                           >
                             <option value="Singarayakonda">Singarayakonda</option>
                             <option value="Kondapi">Kondapi</option>
@@ -3839,7 +4085,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                             placeholder="Village name..."
                             value={newMigratedVoter.village}
                             onChange={(e) => setNewMigratedVoter({ ...newMigratedVoter, village: e.target.value })}
-                            className="w-full p-1.5 bg-slate-50 border border-slate-200 rounded font-bold text-slate-800 focus:outline-none"
+                            className="w-full p-1.5 bg-[#0B1120] border border-slate-700 rounded-lg font-bold text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                           />
                         </div>
                       </div>
@@ -3851,7 +4097,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           placeholder="e.g. Hyderabad, Bangalore"
                           value={newMigratedVoter.currentLocation}
                           onChange={(e) => setNewMigratedVoter({ ...newMigratedVoter, currentLocation: e.target.value })}
-                          className="w-full p-2 bg-slate-50 border border-slate-200 rounded font-bold text-slate-800 focus:outline-none"
+                          className="w-full p-2 bg-[#0B1120] border border-slate-700/80 rounded-xl font-bold text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                         />
                       </div>
 
@@ -3862,7 +4108,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           placeholder="Mobile number..."
                           value={newMigratedVoter.contactNumber}
                           onChange={(e) => setNewMigratedVoter({ ...newMigratedVoter, contactNumber: e.target.value })}
-                          className="w-full p-2 bg-slate-50 border border-slate-200 rounded font-bold text-slate-800 focus:outline-none"
+                          className="w-full p-2 bg-[#0B1120] border border-slate-700/80 rounded-xl font-bold text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                         />
                       </div>
 
@@ -3873,13 +4119,13 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           placeholder="Volunteer name..."
                           value={newMigratedVoter.assignedVolunteer}
                           onChange={(e) => setNewMigratedVoter({ ...newMigratedVoter, assignedVolunteer: e.target.value })}
-                          className="w-full p-2 bg-slate-50 border border-slate-200 rounded font-bold text-slate-800 focus:outline-none"
+                          className="w-full p-2 bg-[#0B1120] border border-slate-700/80 rounded-xl font-bold text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                         />
                       </div>
 
                       <button
                         type="submit"
-                        className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white rounded text-[10px] font-black uppercase tracking-wider cursor-pointer"
+                        className="w-full py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black rounded-xl text-[10px] uppercase tracking-wider cursor-pointer shadow-md shadow-cyan-500/20"
                       >
                         Register Migrated Voter
                       </button>
@@ -3889,10 +4135,10 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                 </div>
 
                 {/* Right Side: Search and directory Table (Lg: col-span-8) */}
-                <div className="lg:col-span-8 bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                    <h4 className="text-xs font-black text-slate-950 uppercase tracking-tight">Voters Directory</h4>
-                    <span className="text-[10px] bg-slate-50 border border-slate-200 text-slate-500 px-2 py-0.5 rounded font-black">
+                <div className="lg:col-span-8 bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <h4 className="text-xs font-black text-white uppercase tracking-tight">Voters Directory</h4>
+                    <span className="text-[10px] bg-slate-900 border border-slate-800 text-cyan-400 px-2 py-0.5 rounded-full font-black">
                       Matches: {migratedTotal}
                     </span>
                   </div>
@@ -3905,15 +4151,15 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                       placeholder="Search Migrated Voters by name, EPIC ID, current location, or volunteer..."
                       value={migratedSearch}
                       onChange={(e) => setMigratedSearch(e.target.value)}
-                      className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-none"
+                      className="w-full pl-9 pr-4 py-2 bg-[#0B1120] border border-slate-700/80 rounded-xl text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                     />
                   </div>
 
                   {/* Directory Table */}
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-xs">
+                  <div className="overflow-x-auto rounded-xl border border-slate-800 bg-[#0B1120]">
+                    <table className="w-full min-w-[750px] text-left border-collapse text-xs">
                       <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-black uppercase text-[9px] tracking-wider">
+                        <tr className="bg-[#131E33] border-b border-slate-800 text-slate-300 font-black uppercase text-[9px] tracking-wider">
                           <th className="py-3 px-4 text-center">S.No</th>
                           <th className="py-3 px-4">Voter Name</th>
                           <th className="py-3 px-4">EPIC</th>
@@ -3925,50 +4171,50 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           <th className="py-3 px-4 text-center">Actions</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
+                      <tbody className="divide-y divide-slate-800/80 font-bold text-slate-200">
                         {paginatedMigratedVoters.map((item, idx) => {
                           const statusColor = 
-                            item.travelStatus === 'CONFIRMED' ? 'bg-emerald-100 text-emerald-800' :
-                            item.travelStatus === 'TRAVEL_BOOKED' ? 'bg-green-100 text-green-800' :
-                            item.travelStatus === 'SELF_ARRANGEMENT' ? 'bg-blue-100 text-blue-800' :
-                            item.travelStatus === 'UNREACHABLE' ? 'bg-red-100 text-red-800 font-bold' :
-                            'bg-amber-100 text-amber-800';
+                            item.travelStatus === 'CONFIRMED' ? 'bg-emerald-500/20 text-emerald-400' :
+                            item.travelStatus === 'TRAVEL_BOOKED' ? 'bg-green-500/20 text-green-400' :
+                            item.travelStatus === 'SELF_ARRANGEMENT' ? 'bg-blue-500/20 text-blue-400' :
+                            item.travelStatus === 'UNREACHABLE' ? 'bg-red-500/20 text-red-400 font-bold' :
+                            'bg-cyan-500/20 text-cyan-400';
 
                           const assistBadge = 
-                            item.assistanceRequired === 'TRANSPORT' ? 'bg-indigo-50 border border-indigo-200 text-indigo-700 font-black' :
-                            item.assistanceRequired === 'POSTAL_BALLOT' ? 'bg-purple-50 border border-purple-200 text-purple-700 font-black' :
-                            'bg-slate-50 border border-slate-100 text-slate-400 font-bold';
+                            item.assistanceRequired === 'TRANSPORT' ? 'bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 font-black' :
+                            item.assistanceRequired === 'POSTAL_BALLOT' ? 'bg-purple-500/20 border border-purple-500/30 text-purple-300 font-black' :
+                            'bg-slate-800 border border-slate-700 text-slate-400 font-bold';
 
                           return (
-                            <tr key={item.id} className="hover:bg-slate-50">
-                              <td className="py-3 px-4 text-center text-slate-400">{(migratedPage - 1) * migratedPageSize + idx + 1}</td>
+                            <tr key={item.id} className="hover:bg-slate-800/40">
+                              <td className="py-3 px-4 text-center text-slate-500">{(migratedPage - 1) * migratedPageSize + idx + 1}</td>
                               <td className="py-3 px-4">
-                                <span className="block font-black text-slate-950 uppercase">{item.name}</span>
+                                <span className="block font-black text-white uppercase">{item.name}</span>
                                 <span className="text-[10px] text-slate-400 block font-mono">{item.contactNumber}</span>
                               </td>
-                              <td className="py-3 px-4 font-mono text-slate-500">{item.epic}</td>
-                              <td className="py-3 px-4 text-slate-500 uppercase">
+                              <td className="py-3 px-4 font-mono text-cyan-400">{item.epic}</td>
+                              <td className="py-3 px-4 text-slate-400 uppercase">
                                 {item.mandal} &bull; {item.village}
                               </td>
-                              <td className="py-3 px-4 text-slate-900 font-black uppercase text-[11px]">{item.currentLocation}</td>
+                              <td className="py-3 px-4 text-white font-black uppercase text-[11px]">{item.currentLocation}</td>
                               <td className="py-3 px-4">
-                                <span className={`px-2 py-0.5 rounded text-[9px] font-black tracking-wider uppercase block text-center ${statusColor}`}>
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase block text-center ${statusColor}`}>
                                   {item.travelStatus.replace('_', ' ')}
                                 </span>
                               </td>
                               <td className="py-3 px-4">
-                                <span className={`px-1.5 py-0.5 rounded text-[9px] tracking-wider uppercase block text-center ${assistBadge}`}>
+                                <span className={`px-1.5 py-0.5 rounded-full text-[9px] tracking-wider uppercase block text-center ${assistBadge}`}>
                                   {item.assistanceRequired}
                                 </span>
                               </td>
-                              <td className="py-3 px-4 font-bold text-slate-800 text-[11px]">{item.assignedVolunteer || 'Unassigned'}</td>
+                              <td className="py-3 px-4 font-bold text-slate-300 text-[11px]">{item.assignedVolunteer || 'Unassigned'}</td>
                               <td className="py-3 px-4 text-center">
                                 <button
                                   type="button"
                                   onClick={() => setEditingMigratedVoter(item)}
-                                  className="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded text-[9px] font-black uppercase tracking-wider cursor-pointer"
+                                  className="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-cyan-400 border border-slate-800 rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer"
                                 >
-                                  Update Coordinator
+                                  Update
                                 </button>
                               </td>
                             </tr>
@@ -3989,7 +4235,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                     }}
                     pageSizeOptions={[10, 15, 25, 50]}
                     itemName="migrated voters"
-                    accentColor="amber"
+                    accentColor="blue"
                   />
                 </div>
 
@@ -3997,27 +4243,27 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
               {/* Editing Migrated Voter Status Modal */}
               {editingMigratedVoter && (
-                <div className="fixed inset-0 bg-slate-950/60 flex items-center justify-center p-4 z-50 animate-fade-in">
-                  <form onSubmit={handleUpdateMigratedVoter} className="bg-white rounded-xl border border-slate-200 max-w-md w-full p-6 space-y-4 shadow-xl">
-                    <div className="flex items-start justify-between border-b border-slate-100 pb-3">
+                <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+                  <form onSubmit={handleUpdateMigratedVoter} className="bg-[#0F172A] rounded-2xl border border-slate-700 max-w-md w-full p-6 space-y-4 shadow-2xl">
+                    <div className="flex items-start justify-between border-b border-slate-800 pb-3">
                       <div>
-                        <h4 className="text-base font-black text-slate-950 uppercase">Update Coordination Status</h4>
-                        <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Voter EPIC: {editingMigratedVoter.epic}</p>
+                        <h4 className="text-base font-black text-white uppercase">Update Coordination Status</h4>
+                        <p className="text-[10px] text-cyan-400 font-semibold mt-0.5">Voter EPIC: {editingMigratedVoter.epic}</p>
                       </div>
                       <button 
                         type="button"
                         onClick={() => setEditingMigratedVoter(null)}
-                        className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600 cursor-pointer"
+                        className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white cursor-pointer"
                       >
                         <X className="w-5 h-5" />
                       </button>
                     </div>
 
-                    <div className="space-y-3 text-xs font-bold text-slate-700">
+                    <div className="space-y-3 text-xs font-bold text-slate-300">
                       <div>
                         <p className="text-[10px] text-slate-400 uppercase">Voter profile:</p>
-                        <p className="text-slate-950 text-sm font-black mt-0.5">{editingMigratedVoter.name}</p>
-                        <p className="text-slate-500 text-[11px] uppercase mt-0.5">Location: {editingMigratedVoter.mandal} &bull; {editingMigratedVoter.village}</p>
+                        <p className="text-white text-sm font-black mt-0.5">{editingMigratedVoter.name}</p>
+                        <p className="text-slate-400 text-[11px] uppercase mt-0.5">Location: {editingMigratedVoter.mandal} &bull; {editingMigratedVoter.village}</p>
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
@@ -4026,7 +4272,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           <select
                             value={editingMigratedVoter.travelStatus}
                             onChange={(e) => setEditingMigratedVoter({ ...editingMigratedVoter, travelStatus: e.target.value as any })}
-                            className="w-full bg-slate-50 border border-slate-200 rounded p-2 text-slate-800 font-extrabold focus:outline-none"
+                            className="w-full bg-[#0B1120] border border-slate-700 rounded-xl p-2 text-white font-extrabold focus:outline-none focus:border-cyan-400"
                           >
                             <option value="PENDING_CONFIRMATION">PENDING CONFIRMATION</option>
                             <option value="CONFIRMED">CONFIRMED ARRIVAL</option>
@@ -4041,7 +4287,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           <select
                             value={editingMigratedVoter.assistanceRequired}
                             onChange={(e) => setEditingMigratedVoter({ ...editingMigratedVoter, assistanceRequired: e.target.value as any })}
-                            className="w-full bg-slate-50 border border-slate-200 rounded p-2 text-slate-800 font-extrabold focus:outline-none"
+                            className="w-full bg-[#0B1120] border border-slate-700 rounded-xl p-2 text-white font-extrabold focus:outline-none focus:border-cyan-400"
                           >
                             <option value="NONE">NONE / SELF SUFFICIENT</option>
                             <option value="TRANSPORT">TRANSPORT ASSISTANCE</option>
@@ -4057,7 +4303,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           type="text"
                           value={editingMigratedVoter.assignedVolunteer}
                           onChange={(e) => setEditingMigratedVoter({ ...editingMigratedVoter, assignedVolunteer: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded p-2 text-slate-800 font-bold"
+                          className="w-full bg-[#0B1120] border border-slate-700 rounded-xl p-2 text-white font-bold placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                         />
                       </div>
 
@@ -4067,22 +4313,22 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
                           rows={2}
                           value={editingMigratedVoter.notes}
                           onChange={(e) => setEditingMigratedVoter({ ...editingMigratedVoter, notes: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded p-2 text-slate-800 font-medium"
+                          className="w-full bg-[#0B1120] border border-slate-700 rounded-xl p-2 text-white font-medium placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                         />
                       </div>
                     </div>
 
-                    <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+                    <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800">
                       <button
                         type="button"
                         onClick={() => setEditingMigratedVoter(null)}
-                        className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black rounded-lg text-[10px] uppercase cursor-pointer"
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-black rounded-xl text-[10px] uppercase cursor-pointer"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg text-[10px] uppercase cursor-pointer"
+                        className="px-4 py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black rounded-xl text-[10px] uppercase cursor-pointer shadow-md shadow-cyan-500/20"
                       >
                         Save updates
                       </button>
@@ -4096,6 +4342,58 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
 
 
+          </div>
+
+          {/* Pinned Mobile App Bottom Navigation Bar */}
+          <nav className="fixed bottom-0 inset-x-0 z-40 bg-[#0C0E17]/95 backdrop-blur-xl border-t border-white/[0.08] px-3 py-2 flex items-center justify-around shadow-2xl max-w-3xl xl:max-w-4xl mx-auto">
+            <button
+              onClick={() => setActiveTab('dashboard')}
+              className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition cursor-pointer ${
+                activeTab === 'dashboard' ? 'text-cyan-400 font-black' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Home className="w-5 h-5" />
+              <span className="text-[10px] tracking-tight">Overview</span>
+              {activeTab === 'dashboard' && <span className="w-1 h-1 rounded-full bg-cyan-400 shadow-xs shadow-cyan-400" />}
+            </button>
+            <button
+              onClick={() => setActiveTab('electoral_roll')}
+              className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition cursor-pointer ${
+                activeTab === 'electoral_roll' ? 'text-cyan-400 font-black' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Database className="w-5 h-5" />
+              <span className="text-[10px] tracking-tight">Voters</span>
+              {activeTab === 'electoral_roll' && <span className="w-1 h-1 rounded-full bg-cyan-400 shadow-xs shadow-cyan-400" />}
+            </button>
+            <button
+              onClick={() => setActiveTab('mandal_list')}
+              className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition cursor-pointer ${
+                activeTab === 'mandal_list' || activeTab === 'village_list' ? 'text-cyan-400 font-black' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Layers className="w-5 h-5" />
+              <span className="text-[10px] tracking-tight">Mandals</span>
+              {(activeTab === 'mandal_list' || activeTab === 'village_list') && <span className="w-1 h-1 rounded-full bg-cyan-400 shadow-xs shadow-cyan-400" />}
+            </button>
+            <button
+              onClick={() => setActiveTab('live_voter_tracking')}
+              className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition cursor-pointer ${
+                activeTab === 'live_voter_tracking' || activeTab === 'caste_analytics' ? 'text-cyan-400 font-black' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Activity className="w-5 h-5" />
+              <span className="text-[10px] tracking-tight">Turnout</span>
+              {(activeTab === 'live_voter_tracking' || activeTab === 'caste_analytics') && <span className="w-1 h-1 rounded-full bg-cyan-400 shadow-xs shadow-cyan-400" />}
+            </button>
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition cursor-pointer text-slate-400 hover:text-cyan-400"
+            >
+              <Menu className="w-5 h-5" />
+              <span className="text-[10px] tracking-tight">All Tabs</span>
+            </button>
+          </nav>
         </div>
       </main>
 
