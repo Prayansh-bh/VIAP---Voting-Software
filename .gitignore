@@ -22,6 +22,7 @@ out/
 .env.production.local
 .env.*
 !.env.example
+!.env.production
 
 # Prisma generated client
 backend/node_modules/
