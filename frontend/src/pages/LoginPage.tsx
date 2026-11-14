@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -104,9 +104,42 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
     }
   };
 
-  const primaryColor = config.primaryColor || '#FF6600';
-  const partyTitle = config.organisationName || config.headerTitle || 'Political Command Station';
-  const stateLabel = config.stateName || 'Statewide';
+  // Check if an explicit tenant was requested via URL query params (?app=..., ?tenant=..., ?applicationId=...)
+  const isExplicitTenant = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const params = new URLSearchParams(window.location.search || window.location.hash.split('?')[1] || '');
+      const tenant = params.get('app') || params.get('tenant') || params.get('applicationId');
+      return Boolean(tenant && tenant.toLowerCase() !== 'default');
+    } catch {
+      return false;
+    }
+  }, []);
+
+  // Set tab/document title: strictly neutral on public /login unless explicitly scoped to a tenant
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      if (!isExplicitTenant) {
+        document.title = 'Political Connect — Command Station Login';
+      } else {
+        document.title = `${config.organisationName || 'Political Connect'} — Station Login`;
+      }
+    }
+  }, [isExplicitTenant, config.organisationName]);
+
+  const primaryColor = isExplicitTenant ? (config.primaryColor || '#0284c7') : '#0284c7';
+  const partyTitle = isExplicitTenant
+    ? (config.organisationName || config.headerTitle || 'Political Command Station')
+    : 'POLITICAL CONNECT';
+  const crestCode = isExplicitTenant
+    ? ((config.activePartyCode || config.organisationName || 'VIAP').slice(0, 3).toUpperCase())
+    : 'VIAP';
+  const stateLabel = isExplicitTenant
+    ? `${config.stateName || 'Statewide'} • Official Operational Workspace`
+    : 'Unified Multi-Tenant Operational Infrastructure';
+  const sloganText = isExplicitTenant && config.slogan
+    ? config.slogan
+    : 'Authoritative voter management, real-time live vote tracking, booth defense, and multi-tier organizational command.';
 
   return (
     <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-amber-400 selection:text-slate-950 relative overflow-x-hidden font-sans">
@@ -149,14 +182,14 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
                   className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-black text-sm shadow-xs"
                   style={{ backgroundColor: primaryColor }}
                 >
-                  {(config.activePartyCode || 'VIAP').slice(0, 3)}
+                  {crestCode}
                 </div>
                 <div>
                   <div className="text-xs font-black tracking-wider text-slate-200 uppercase">
                     {partyTitle}
                   </div>
                   <div className="text-[11px] text-slate-400 font-medium">
-                    {stateLabel} • Official Operational Workspace
+                    {stateLabel}
                   </div>
                 </div>
               </div>
@@ -167,8 +200,7 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
                   Unified Political Command &amp; Field Telemetry
                 </h1>
                 <p className="text-base text-slate-400 font-normal leading-relaxed max-w-xl">
-                  {config.slogan ||
-                    'Authoritative voter management, real-time live vote tracking, booth defense, and multi-tier organizational command.'}
+                  {sloganText}
                 </p>
               </div>
 

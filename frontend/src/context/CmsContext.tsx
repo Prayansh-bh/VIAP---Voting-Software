@@ -82,7 +82,16 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
           saved = localStorage.getItem(cacheKey);
         }
       } else if (!tenant && !session?.configKey && !session?.applicationId && !session?.organisationId) {
-        saved = localStorage.getItem('kdp_cms_config_default');
+        // Only load if explicitly neutral to prevent cross-tenant brand leakage on unauthenticated pages
+        const defaultRaw = localStorage.getItem('kdp_cms_config_default');
+        if (defaultRaw) {
+          try {
+            const check = JSON.parse(defaultRaw);
+            if (!check.activePartyCode || check.activePartyCode === 'VIAP') {
+              saved = defaultRaw;
+            }
+          } catch {}
+        }
       }
     } catch {}
     if (saved) {
@@ -186,7 +195,17 @@ export function CmsProvider({ children }: { children: React.ReactNode }) {
   // Update document title, favicon, and CSS variables when config changes
   useEffect(() => {
     if (typeof document !== 'undefined') {
-      document.title = config.organisationName || 'Political Connect Platform';
+      const isLoginPage = typeof window !== 'undefined' && window.location.pathname.includes('/login');
+      const urlParams = typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search || window.location.hash.split('?')[1] || '')
+        : new URLSearchParams();
+      const hasExplicitTenant = Boolean(urlParams.get('app') || urlParams.get('tenant') || urlParams.get('applicationId'));
+
+      if (isLoginPage && !hasExplicitTenant) {
+        document.title = 'Political Connect — Command Station Login';
+      } else {
+        document.title = config.organisationName || 'Political Connect Platform';
+      }
       applyThemeVariables(config.primaryColor, config.secondaryColor, config.accentColor);
       if (config.faviconUrl && !config.faviconUrl.startsWith('data:')) {
         let favicon = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
