@@ -20,7 +20,7 @@ import { UserSession } from '../types';
 
 interface LoginPageProps {
   onLoginSuccess: (session: UserSession, token: string) => void;
-  onBackToLanding: () => void;
+  onBackToLanding?: () => void;
 }
 
 export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPageProps) {
@@ -152,13 +152,21 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
 
       {/* Top Utility Bar */}
       <header className="w-full px-6 py-4 flex items-center justify-between border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-md z-20">
-        <button
-          onClick={onBackToLanding}
-          className="inline-flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-white transition-colors cursor-pointer group"
-        >
-          <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-1" />
-          <span>Return to Overview</span>
-        </button>
+        {onBackToLanding ? (
+          <button
+            onClick={onBackToLanding}
+            className="inline-flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-white transition-colors cursor-pointer group"
+          >
+            <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-1" />
+            <span>Return to Overview</span>
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider">
+              VIAP Security Gateway
+            </span>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -176,23 +184,25 @@ export default function LoginPage({ onLoginSuccess, onBackToLanding }: LoginPage
           {/* ========================================================= */}
           <div className="hidden lg:flex lg:col-span-7 flex-col justify-between space-y-8 pr-4">
             <div className="space-y-6">
-              {/* Active Workspace Crest */}
-              <div className="inline-flex items-center gap-3 px-4 py-2 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-md">
-                <div
-                  className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-black text-sm shadow-xs"
-                  style={{ backgroundColor: primaryColor }}
-                >
-                  {crestCode}
-                </div>
-                <div>
-                  <div className="text-xs font-black tracking-wider text-slate-200 uppercase">
-                    {partyTitle}
+              {/* Active Workspace Crest - only visible if dedicated tenant was requested */}
+              {isExplicitTenant && (
+                <div className="inline-flex items-center gap-3 px-4 py-2 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-md">
+                  <div
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-black text-sm shadow-xs"
+                    style={{ backgroundColor: primaryColor }}
+                  >
+                    {crestCode}
                   </div>
-                  <div className="text-[11px] text-slate-400 font-medium">
-                    {stateLabel}
+                  <div>
+                    <div className="text-xs font-black tracking-wider text-slate-200 uppercase">
+                      {partyTitle}
+                    </div>
+                    <div className="text-[11px] text-slate-400 font-medium">
+                      {stateLabel}
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
               {/* Main Headline */}
               <div className="space-y-3">

@@ -11,7 +11,6 @@ import Header from './components/Header';
 import Footer from './components/Footer';
 import RoleQuickSwitcher from './components/RoleQuickSwitcher';
 import AdminPanelHandoff from './components/AdminPanelHandoff';
-import LandingPage from './components/landing/LandingPage';
 import NotFoundPage from './pages/NotFoundPage';
 import { RoleType, UserSession } from './types';
 
@@ -227,8 +226,8 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
   }, [config.activeHierarchyLevels]);
 
   const currentPath = location.pathname;
-  const isLandingRoute = currentPath === '/' || currentPath === '/landing';
-  const isLoginRoute = currentPath === '/login' || currentPath === '/auth/login';
+  const isLoginRoute = currentPath === '/' || currentPath === '/login' || currentPath === '/auth/login' || currentPath === '/landing';
+  const isLandingRoute = false;
   const isCmsRoute =
     currentPath === '/cms' ||
     currentPath === '/admin' ||
@@ -245,7 +244,7 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
     clearAuthToken();
     setIsPartyCreated(false);
     setActiveSession(null);
-    navigate('/');
+    navigate('/login');
   };
 
   useEffect(() => {
@@ -451,17 +450,15 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
             }
           >
             <Routes>
-              {/* Landing Route */}
+              {/* Direct Root Entry: Starts at Login (or Dashboard if already authenticated) */}
               <Route
                 path="/"
                 element={
-                  <LandingPage
-                    isPartyCreated={isPartyCreated}
-                    onResetParty={handleResetParty}
-                    onEnterApp={() => navigate('/login')}
-                    onOpenLogin={() => navigate('/login')}
-                    onGetStarted={() => navigate('/login')}
-                  />
+                  activeSession ? (
+                    <Navigate to={ROUTE_BY_ROLE[activeSession.role] || '/state'} replace />
+                  ) : (
+                    <LoginPage onLoginSuccess={handleLoginSuccess} />
+                  )
                 }
               />
               <Route path="/landing" element={<Navigate to="/" replace />} />
@@ -473,14 +470,11 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
                   activeSession ? (
                     <Navigate to={ROUTE_BY_ROLE[activeSession.role] || '/state'} replace />
                   ) : (
-                    <LoginPage
-                      onLoginSuccess={handleLoginSuccess}
-                      onBackToLanding={() => navigate('/')}
-                    />
+                    <LoginPage onLoginSuccess={handleLoginSuccess} />
                   )
                 }
               />
-              <Route path="/auth/login" element={<Navigate to="/login" replace />} />
+              <Route path="/auth/login" element={<Navigate to="/" replace />} />
 
               {/* Platform Admin & CMS Handoff */}
               <Route
