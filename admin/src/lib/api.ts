@@ -3,7 +3,8 @@ import { getAdminToken, setAdminToken, clearAdminToken, setAdminSession, getAdmi
 
 const getApiBase = () => {
   const envUrl = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || '').trim();
-  if (envUrl) {
+  // Exclude legacy dead Railway endpoints; fallback to active Render backend
+  if (envUrl && !envUrl.includes('railway.app')) {
     const cleaned = envUrl.replace(/\/+$/, '');
     return cleaned.endsWith('/api') ? cleaned : `${cleaned}/api`;
   }
@@ -28,11 +29,12 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   let url: string;
   if (endpoint.startsWith('http')) {
-    url = endpoint;
+    url = endpoint.replace(/https?:\/\/[a-zA-Z0-9_.-]*railway\.app/g, 'https://viap-backend.onrender.com');
   } else {
+    const base = getApiBase();
     const pathWithoutApi = endpoint.replace(/^\/?api\/?/, '/');
     const cleanPath = pathWithoutApi.startsWith('/') ? pathWithoutApi : `/${pathWithoutApi}`;
-    url = `${API_BASE}${cleanPath}`;
+    url = `${base}${cleanPath}`;
   }
 
   const res = await fetch(url, {

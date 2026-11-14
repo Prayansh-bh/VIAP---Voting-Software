@@ -4,8 +4,8 @@ import { getAuthToken } from '../authStorage';
 
 export const getApiBase = (): string => {
   if (typeof import.meta !== 'undefined') {
-    const envUrl = import.meta.env?.VITE_API_BASE_URL || import.meta.env?.VITE_API_URL;
-    if (envUrl) {
+    const envUrl = (import.meta.env?.VITE_API_BASE_URL || import.meta.env?.VITE_API_URL || '').trim();
+    if (envUrl && !envUrl.includes('railway.app')) {
       return envUrl.replace(/\/+$/, '');
     }
   }
@@ -21,10 +21,11 @@ export const getApiBase = (): string => {
 };
 
 export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}): Promise<T> {
-  const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const sanitizedEndpoint = endpoint.replace(/https?:\/\/[a-zA-Z0-9_.-]*railway\.app/g, 'https://viap-backend.onrender.com');
+  const normalizedEndpoint = sanitizedEndpoint.startsWith('/') ? sanitizedEndpoint : `/${sanitizedEndpoint}`;
   const apiBase = getApiBase();
-  const primaryUrl = endpoint.startsWith('http') ? endpoint : `${apiBase}${normalizedEndpoint}`;
-  const fallbackUrl = endpoint.startsWith('http') ? endpoint : normalizedEndpoint;
+  const primaryUrl = sanitizedEndpoint.startsWith('http') ? sanitizedEndpoint : `${apiBase}${normalizedEndpoint}`;
+  const fallbackUrl = sanitizedEndpoint.startsWith('http') ? sanitizedEndpoint : normalizedEndpoint;
 
   const headers = new Headers(init.headers);
   const token = getAuthToken();

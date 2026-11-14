@@ -4,7 +4,10 @@
 
 export const getAdminUrl = (): string => {
   if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_URL) {
-    return (import.meta.env.VITE_ADMIN_URL as string).replace(/\/+$/, '');
+    const raw = (import.meta.env.VITE_ADMIN_URL as string).trim();
+    if (raw && !raw.includes('railway.app')) {
+      return raw.replace(/\/+$/, '');
+    }
   }
   if (typeof window !== 'undefined') {
     if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
@@ -17,9 +20,9 @@ export const getAdminUrl = (): string => {
 
 export const getApiUrl = (): string => {
   if (typeof import.meta !== 'undefined') {
-    const raw = import.meta.env?.VITE_API_BASE_URL || import.meta.env?.VITE_API_URL;
-    if (raw) {
-      return (raw as string).replace(/\/+$/, '');
+    const raw = (import.meta.env?.VITE_API_BASE_URL || import.meta.env?.VITE_API_URL || '').trim();
+    if (raw && !raw.includes('railway.app')) {
+      return raw.replace(/\/+$/, '');
     }
   }
   if (typeof window !== 'undefined') {

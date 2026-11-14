@@ -14,7 +14,7 @@ export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}
 
   let url: string;
   if (endpoint.startsWith('http')) {
-    url = endpoint;
+    url = endpoint.replace(/https?:\/\/[a-zA-Z0-9_.-]*railway\.app/g, 'https://viap-backend.onrender.com');
   } else {
     // getApiUrl() guarantees no trailing slash and ends with '/api'
     const base = getApiUrl();
@@ -47,6 +47,9 @@ export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}
 
 export const resolveAssetUrl = (url?: string | null): string => {
   if (!url) return '';
+  if (url.includes('railway.app')) {
+    url = url.replace(/https?:\/\/[a-zA-Z0-9_.-]*railway\.app/g, 'https://viap-backend.onrender.com');
+  }
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
     return url;
   }

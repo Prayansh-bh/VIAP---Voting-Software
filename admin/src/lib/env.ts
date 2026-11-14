@@ -4,7 +4,10 @@
 
 export const getAppUrl = (): string => {
   if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_APP_URL) {
-    return (import.meta.env.VITE_APP_URL as string).replace(/\/+$/, '');
+    const raw = (import.meta.env.VITE_APP_URL as string).trim();
+    if (raw && !raw.includes('railway.app')) {
+      return raw.replace(/\/+$/, '');
+    }
   }
   if (typeof window !== 'undefined') {
     if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
@@ -18,7 +21,8 @@ export const getAppUrl = (): string => {
 export const getApiUrl = (): string => {
   if (typeof import.meta !== 'undefined') {
     const raw = (import.meta.env?.VITE_API_URL || import.meta.env?.VITE_API_BASE_URL || '').trim();
-    if (raw) {
+    // Exclude legacy dead Railway endpoints; fallback to active Render backend
+    if (raw && !raw.includes('railway.app')) {
       const cleaned = raw.replace(/\/+$/, '');
       return cleaned.endsWith('/api') ? cleaned : `${cleaned}/api`;
     }
