@@ -250,26 +250,13 @@ export class OtpService {
       throw error;
     }
 
-    // 4. Timing-safe cryptographic comparison (primary authoritative path)
+    // 4. Authoritative timing-safe cryptographic verification of the real dispatched OTP
     let isValid = verifyOtpHash(otpCode, record.mobileNumber, record.otpCode);
 
-    // Fallback: Check if the entered code matches the cadre assigned security passcode (passwordHash)
-    if (!isValid && record.userId) {
-      const userRecord = record.user || (await prisma.user.findUnique({
-        where: { id: record.userId },
-        select: { passwordHash: true },
-      }));
-      if (userRecord?.passwordHash && bcrypt.compareSync(otpCode, userRecord.passwordHash)) {
-        isValid = true;
-      }
-    }
-
-    // Development/testing explicit opt-in mock OTP / initial passcode verification (strictly non-production, fails closed)
-    if (!isValid && OtpService.isDevMockOtpAllowed()) {
-      const staticCode = env.OTP_STATIC_CODE || '123456';
-      if (otpCode === staticCode || otpCode === '123456') {
-        isValid = true;
-      } else if (record.user?.passwordHash && bcrypt.compareSync(otpCode, record.user.passwordHash)) {
+    // Strictly for automated test runner (NODE_ENV === 'test') with explicit opt-in mock flag
+    if (!isValid && process.env.NODE_ENV === 'test' && OtpService.isDevMockOtpAllowed()) {
+      const staticCode = env.OTP_STATIC_CODE;
+      if (staticCode && otpCode === staticCode) {
         isValid = true;
       }
     }

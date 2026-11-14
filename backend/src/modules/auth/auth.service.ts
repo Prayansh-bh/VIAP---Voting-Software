@@ -225,18 +225,14 @@ export class AuthService {
     }
 
     if (!smsResult.success) {
-      const nodeEnv = (process.env.NODE_ENV || env.NODE_ENV || '').trim().toLowerCase();
-      const isExplicitDevOrTest = nodeEnv === 'development' || nodeEnv === 'test';
-
-      // Gateway failure can only be bypassed in explicit non-production environment if mock OTP is explicitly enabled
-      if (isExplicitDevOrTest && OtpService.isDevMockOtpAllowed()) {
-        console.warn(`[Dev OTP Active] Gateway dispatch bypassed in dev mode for +91${cleanMobile.slice(-4)}.`);
+      if (process.env.NODE_ENV === 'test' && OtpService.isDevMockOtpAllowed()) {
+        console.warn(`[Test OTP Active] Gateway dispatch bypassed in test runner for +91${cleanMobile.slice(-4)}.`);
         await AuthService.enforceTimingFloor(startTime);
         return {
           requestId: record.id,
           expiresAt: record.expiresAt,
           cooldownSeconds: 5,
-          provider: `${smsProvider.name} (Dev Mode)`,
+          provider: `${smsProvider.name} (Test Runner)`,
           channel,
           message: 'OTP verification code dispatched. Enter the 6-digit code to verify.',
         };
@@ -378,10 +374,7 @@ export class AuthService {
     }
 
     if (!dispatchResult.success) {
-      const nodeEnv = (process.env.NODE_ENV || env.NODE_ENV || '').trim().toLowerCase();
-      const isExplicitDevOrTest = nodeEnv === 'development' || nodeEnv === 'test';
-
-      if (isExplicitDevOrTest && OtpService.isDevMockOtpAllowed()) {
+      if (process.env.NODE_ENV === 'test' && OtpService.isDevMockOtpAllowed()) {
         console.warn(`[Dev Register OTP] Gateway failure bypassed in dev/test for +91${cleanMobile.slice(-4)}.`);
         return {
           requestId: record.id,
@@ -943,17 +936,7 @@ export class AuthService {
       isValid = await bcrypt.compare(rawPass, user.passwordHash);
     }
 
-    // Initial allocated passcode support (default '123456' or static dev code)
-    if (!isValid && (rawPass === '123456' || rawPass === env.OTP_STATIC_CODE)) {
-      isValid = true;
-      if (!user.passwordHash) {
-        const initialHash = await bcrypt.hash('123456', 10);
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { passwordHash: initialHash },
-        });
-      }
-    }
+    // Real bcrypt password comparison only (no hardcoded bypass)
 
     if (!isValid) {
       const error: any = new Error('Incorrect security passcode. Please verify your 6-digit passcode or request WhatsApp OTP.');
@@ -1164,7 +1147,7 @@ export class AuthService {
 
     // Authoritative credential verification: Compare raw passcode against persisted bcrypt passwordHash
     let isHashMatch = user.passwordHash ? await bcrypt.compare(rawPass, user.passwordHash) : false;
-    if (!isHashMatch && OtpService.isDevMockOtpAllowed() && (rawPass === '123456' || rawPass === env.OTP_STATIC_CODE)) {
+    if (!isHashMatch && process.env.NODE_ENV === 'test' && OtpService.isDevMockOtpAllowed() && rawPass === env.OTP_STATIC_CODE) {
       isHashMatch = true;
     }
 
