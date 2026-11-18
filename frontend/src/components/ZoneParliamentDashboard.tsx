@@ -196,6 +196,7 @@ export default function ZoneParliamentDashboard({ session, onLogout }: ZoneParli
         if (!isMounted) return;
         setTotalVotersCount(summary.snapshot.summary.totalVoters ?? 0);
         setFakeVotersCount(summary.snapshot.summary.fakeVoters ?? 0);
+        setPartyPreference(summary.snapshot.politicalPreference || {});
       } catch {
         try {
           const state = await fetchStateAnalytics();

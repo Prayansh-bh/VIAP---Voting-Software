@@ -322,21 +322,22 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
     let active = true;
 
     Promise.all([
-      fetchHierarchySummaryByUser(session.userId),
+      fetchHierarchySummaryByUser(session.userId).catch(() => null),
       fetchReportsForUnit(session.unitId).catch(() => null),
       fetchTasksForUnit(session.unitId).catch(() => null),
       fetchTrainingVideos(session.unitId).catch(() => null),
       fetchTrainingProgress(session.userId).catch(() => null),
       fetchVotersForUnit(session.unitId).catch(() => null),
       fetchCadreNetwork(session.unitId).catch(() => null),
-      fetchBoothAnalytics(session.unitId).catch(() => null),
     ])
       .then(([payload, reportsPayload, tasksPayload, videosPayload, progressItems, voterItems, cadrePayload]) => {
         if (!active) {
           return;
         }
 
-        setBackendSummary(payload);
+        if (payload) {
+          setBackendSummary(payload);
+        }
 
         if (reportsPayload) {
           setReports(reportsPayload);
@@ -391,7 +392,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   const partyStats = useMemo(() => {
     if (backendSummary?.snapshot?.politicalPreference) {
       const pref = backendSummary.snapshot.politicalPreference;
-      return {
+      const merged: Record<string, number> = {
         TDP: pref['TDP'] || 0,
         YSRCP: pref['YSRCP'] || 0,
         JSP: pref['JSP'] || 0,
@@ -399,7 +400,13 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
         INC: pref['INC'] || 0,
         Neutral: pref['Neutral'] || pref['NEUTRAL'] || 0,
         OTH: pref['OTH'] || pref['OTHER'] || 0,
-      } as Record<VoterPreference, number>;
+      };
+      Object.entries(pref).forEach(([k, v]) => {
+        if (k.toUpperCase() !== 'NEUTRAL' && merged[k] === undefined) {
+          merged[k] = Number(v || 0);
+        }
+      });
+      return merged as Record<VoterPreference, number>;
     }
     const stats: Record<VoterPreference, number> = {
       TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0
@@ -417,7 +424,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   }, [partyStats]);
 
   const fakeCount = backendSummary?.snapshot?.summary?.fakeVoters ?? voters.filter(v => v.voterStatus === 'Fake').length;
-  const doubtfulCount = voters.filter(v => v.voterStatus === 'Doubtful').length;
+  const doubtfulCount = backendSummary?.analytics?.summary?.doubtfulVoters ?? voters.filter(v => v.voterStatus === 'Doubtful').length;
 
   // Dynamic competitive leading party forecast calculation across any parties
   const forecast = useMemo(() => {

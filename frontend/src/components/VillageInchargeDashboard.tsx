@@ -296,8 +296,8 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
     const hydrateLiveScope = async () => {
       try {
         const [summaryPayload, eventItems, reports, tasks, videos, progressItems, voterItems, cadrePayload] = await Promise.all([
-          fetchHierarchySummaryByUser(session.userId),
-          fetchLiveVoteEventsByUser(session.userId, 8),
+          fetchHierarchySummaryByUser(session.userId).catch(() => null),
+          fetchLiveVoteEventsByUser(session.userId, 8).catch(() => []),
           fetchReportsForUnit(session.unitId).catch(() => null),
           fetchTasksForUnit(session.unitId).catch(() => null),
           fetchTrainingVideos(session.unitId).catch(() => null),
@@ -310,7 +310,9 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
           return;
         }
 
-        setBackendSummary(summaryPayload);
+        if (summaryPayload) {
+          setBackendSummary(summaryPayload);
+        }
 
         if (eventItems.length > 0) {
           setRecentVoteDoneActivity(
@@ -393,6 +395,9 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
     void fetchVotersForUnit(session.unitId)
       .then(setVoters)
       .catch(() => {});
+    void fetchHierarchySummaryByUser(session.userId)
+      .then(setBackendSummary)
+      .catch(() => {});
   };
 
   // Metric Computations (Dynamic and authoritative)
@@ -405,7 +410,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
   const partyStats = useMemo(() => {
     if (backendSummary?.snapshot?.politicalPreference) {
       const pref = backendSummary.snapshot.politicalPreference;
-      return {
+      const merged: Record<string, number> = {
         TDP: pref['TDP'] || 0,
         YSRCP: pref['YSRCP'] || 0,
         JSP: pref['JSP'] || 0,
@@ -413,7 +418,13 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
         INC: pref['INC'] || 0,
         Neutral: pref['Neutral'] || pref['NEUTRAL'] || 0,
         OTH: pref['OTH'] || pref['OTHER'] || 0,
-      } as Record<VoterPreference, number>;
+      };
+      Object.entries(pref).forEach(([k, v]) => {
+        if (k.toUpperCase() !== 'NEUTRAL' && merged[k] === undefined) {
+          merged[k] = Number(v || 0);
+        }
+      });
+      return merged as Record<VoterPreference, number>;
     }
     const stats: Record<VoterPreference, number> = {
       TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: 0, OTH: 0

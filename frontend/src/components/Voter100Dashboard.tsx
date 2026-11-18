@@ -200,7 +200,6 @@ export default function Voter100Dashboard({ session, onLogout }: Voter100Dashboa
           fetchReportsForUser(session.userId).catch(() => null),
           fetchTrainingVideos().catch(() => null),
           fetchTrainingProgress(session.userId).catch(() => null),
-          fetchVoterGroupAnalytics(session.unitId).catch(() => null),
         ]);
         if (!isActive) {
           return;

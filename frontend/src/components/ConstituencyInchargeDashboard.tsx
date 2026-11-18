@@ -282,20 +282,21 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
     let active = true;
 
     Promise.all([
-      fetchHierarchySummaryByUser(session.userId),
+      fetchHierarchySummaryByUser(session.userId).catch(() => null),
       fetchTasksForUnit(session.unitId).catch(() => null),
       fetchCadreNetwork(session.unitId).catch(() => null),
       fetchTrainingProgressForUnit(session.unitId).catch(() => null),
       fetchVotersForUnit(session.unitId).catch(() => null),
       fetchLiveVoteEvents(session.unitId).catch(() => []),
-      fetchConstituencyAnalytics(session.unitId).catch(() => null),
     ])
       .then(([payload, tasks, cadre, training, voters, events]) => {
         if (!active) {
           return;
         }
 
-        setBackendSummary(payload);
+        if (payload) {
+          setBackendSummary(payload);
+        }
         if (Array.isArray(events)) {
           setLiveEvents(events);
         }
@@ -340,7 +341,7 @@ export default function ConstituencyInchargeDashboard({ session, onLogout }: Con
 
             const villagePayloads = await Promise.all(
               mandalItems.map((mandal: any) =>
-                fetchChildrenAnalytics(mandal.unitId)
+                fetchChildrenAnalytics(mandal.unitId, 'mandal')
                   .then((villagePayload) => ({ mandal, villagePayload }))
                   .catch(() => ({ mandal, villagePayload: [] }))
               )

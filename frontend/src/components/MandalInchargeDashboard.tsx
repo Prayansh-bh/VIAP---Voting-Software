@@ -59,6 +59,10 @@ import {
   fetchHierarchyVillages,
   fetchHierarchyBooths,
   fetchMandalAnalytics,
+  fetchMyScopeAnalytics,
+  fetchScopeDemographics,
+  type HierarchyAnalyticsResponse,
+  type ScopeDemographicsResponse,
   type HierarchyVillage,
   type HierarchyBooth,
   syncVoter,
@@ -334,6 +338,9 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   // Live updates states
   const [recentVoteDoneActivity, setRecentVoteDoneActivity] = useState<{ voterName: string, boothName: string, time: string }[]>([]);
   const [backendSummary, setBackendSummary] = useState<HierarchySummaryPayload | null>(null);
+  const [mandalAnalytics, setMandalAnalytics] = useState<HierarchyAnalyticsResponse | null>(null);
+  const [scopeDemographics, setScopeDemographics] = useState<ScopeDemographicsResponse | null>(null);
+  const [activeCasteDemographics, setActiveCasteDemographics] = useState<ScopeDemographicsResponse | null>(null);
   const [hierarchyVillages, setHierarchyVillages] = useState<HierarchyVillage[]>([]);
   const [hierarchyBooths, setHierarchyBooths] = useState<HierarchyBooth[]>([]);
   const [isVillagesLoading, setIsVillagesLoading] = useState(false);
@@ -507,7 +514,10 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         const boothIdentifier = `Booth ${boothNumStr}`;
         const villageName = hb.village?.name || 'Authorized Mandal';
 
-        // Find voters in this booth
+        // Find server-aggregated booth rollup first (full DB counts, never 50-row slice)
+        const serverBoothRollup = mandalAnalytics?.boothRollups?.find(
+          (br) => br.id === hb.id || br.unitId === hb.id || (br.code && hb.code && br.code === hb.code)
+        );
         const bVoters = voters.filter(v => {
           if (!v.boothNumber) return false;
           const vBooth = v.boothNumber.trim();
@@ -519,14 +529,24 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
           );
         });
 
-        const tdp = bVoters.filter(v => v.politicalPreference === 'TDP').length;
-        const ysrcp = bVoters.filter(v => v.politicalPreference === 'YSRCP').length;
-        const neutral = bVoters.filter(v => v.politicalPreference === 'Neutral').length;
+        const serverPrefs = serverBoothRollup?.partyPreference || null;
+        const primaryCode = (mandalAnalytics?.projections?.primaryPartyCode || config.activePartyCode || parties?.[0]?.code || 'TDP').toUpperCase();
+        const tdp = serverPrefs ? Number(serverPrefs[primaryCode] ?? serverPrefs.TDP ?? 0) : bVoters.filter(v => v.politicalPreference === 'TDP').length;
+        const ysrcp = serverBoothRollup
+          ? Number(serverBoothRollup.topOpponentVotes ?? serverPrefs?.YSRCP ?? 0)
+          : bVoters.filter(v => v.politicalPreference === 'YSRCP').length;
+        const neutral = serverPrefs
+          ? Number((serverPrefs.NEUTRAL ?? 0) + (serverPrefs.OTH ?? 0))
+          : bVoters.filter(v => v.politicalPreference === 'Neutral').length;
 
-        const totalVoters = hb.totalVoters > 0 ? hb.totalVoters : bVoters.length;
-        const classifiedVoters = tdp + ysrcp + neutral;
-        const margin = tdp - ysrcp;
-        const status = classifiedVoters === 0 ? 'UNSURVEYED' : (margin > 0 ? 'WINNING' : (margin < 0 ? 'TRAILING' : 'TIE'));
+        const totalVoters = serverBoothRollup?.totalVoters ?? (hb.totalVoters > 0 ? hb.totalVoters : bVoters.length);
+        const classifiedVoters = serverPrefs
+          ? Math.max(0, totalVoters - neutral)
+          : (tdp + ysrcp + neutral);
+        const margin = serverBoothRollup ? serverBoothRollup.margin : (tdp - ysrcp);
+        const status = serverBoothRollup
+          ? serverBoothRollup.status
+          : (classifiedVoters === 0 ? 'UNSURVEYED' : (margin > 0 ? 'WINNING' : (margin < 0 ? 'TRAILING' : 'TIE')));
 
         const fullBoothLabel = hb.pollingStation
           ? `${boothIdentifier} (${hb.pollingStation})`
@@ -541,9 +561,17 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
           village: villageName,
           booth: fullBoothLabel,
           votersCount: totalVoters,
-          leadingParty: (tdp >= ysrcp ? 'TDP' : 'YSRCP') as VoterPreference,
+          leadingParty: (serverBoothRollup?.leadingParty || (tdp >= ysrcp ? primaryCode : 'YSRCP')) as VoterPreference,
           lead: Math.abs(margin),
-          pStats: { TDP: tdp, YSRCP: ysrcp, JSP: 0, BJP: 0, INC: 0, Neutral: neutral, OTH: 0 },
+          pStats: {
+            TDP: Number(serverPrefs?.TDP ?? tdp),
+            YSRCP: Number(serverPrefs?.YSRCP ?? ysrcp),
+            JSP: Number(serverPrefs?.JSP ?? 0),
+            BJP: Number(serverPrefs?.BJP ?? 0),
+            INC: Number(serverPrefs?.INC ?? 0),
+            Neutral: neutral,
+            OTH: Number(serverPrefs?.OTH ?? 0),
+          },
           tdp,
           ysrcp,
           neutral,
@@ -584,7 +612,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         isUnassigned: !b.name || b.name === 'UNASSIGNED' || b.name === 'Not Assigned'
       };
     });
-  }, [hierarchyBooths, cadreItems, boothInchargeOverrides, voters, boothIncharges]);
+  }, [hierarchyBooths, cadreItems, boothInchargeOverrides, voters, boothIncharges, mandalAnalytics, config.activePartyCode, parties]);
 
   // Compute winning/trailing counts for the filter tabs
   const { winningCount, trailingCount } = useMemo(() => {
@@ -656,7 +684,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       setTrainingError(null);
 
       try {
-        const [summaryPayload, eventItems, reports, tasks, videos, progressItems, voterItems, cadre, villagesData, boothsData] = await Promise.all([
+        const [summaryPayload, eventItems, reports, tasks, videos, progressItems, voterItems, cadre, villagesData, boothsData, mandalAnalyticsPayload] = await Promise.all([
           fetchHierarchySummaryByUser(session.userId).catch(() => null),
           fetchLiveVoteEventsByUser(session.userId, 8).catch(() => []),
           fetchReportsForUnit(session.unitId).catch(() => null),
@@ -672,15 +700,51 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
           fetchCadreNetwork(session.unitId).catch(() => null),
           fetchHierarchyVillages(session.unitId).catch(() => []),
           fetchHierarchyBooths(session.unitId).catch(() => []),
-          fetchMandalAnalytics(session.unitId).catch(() => null),
+          (session.unitId ? fetchMandalAnalytics(session.unitId) : fetchMyScopeAnalytics()).catch(() => null),
         ]);
 
         if (!active) {
           return;
         }
 
+        const resolvedAnalytics = mandalAnalyticsPayload || summaryPayload?.analytics || null;
+        if (resolvedAnalytics) {
+          setMandalAnalytics(resolvedAnalytics);
+        }
+
         if (summaryPayload) {
           setBackendSummary(summaryPayload);
+        } else if (resolvedAnalytics) {
+          setBackendSummary({
+            user: {
+              userCode: resolvedAnalytics.unit?.code || session.unitId || '',
+              name: session.userName || 'In-Charge',
+              role: session.role,
+              unitId: resolvedAnalytics.unit?.id || session.unitId || '',
+              unitName: resolvedAnalytics.unit?.name || session.assignedMandal || 'Mandal',
+              unitLevel: resolvedAnalytics.unit?.level || 'MANDAL',
+            },
+            snapshot: {
+              summary: {
+                totalVoters: resolvedAnalytics.summary.totalVoters,
+                voted: resolvedAnalytics.summary.voted,
+                remaining: resolvedAnalytics.summary.notVoted,
+                surveyed: resolvedAnalytics.summary.surveyed ?? 0,
+                pendingSurvey: resolvedAnalytics.summary.pendingSurvey ?? resolvedAnalytics.summary.totalVoters,
+                surveyCompletionPct: resolvedAnalytics.summary.surveyCompletionPct ?? 0,
+                fakeVoters: resolvedAnalytics.summary.fakeVoters,
+                migrated: resolvedAnalytics.summary.migratedVoters,
+                local: resolvedAnalytics.summary.localVoters,
+              },
+              hierarchyCounts: resolvedAnalytics.hierarchyCounts || {},
+              performance: {
+                winningChildren: resolvedAnalytics.projections?.winningAreasCount ?? 0,
+                trailingChildren: resolvedAnalytics.projections?.trailingAreasCount ?? 0,
+              },
+              politicalPreference: resolvedAnalytics.partyPreference || {},
+            },
+            analytics: resolvedAnalytics,
+          });
         }
 
         if (villagesData && Array.isArray(villagesData)) {
@@ -747,6 +811,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
 
   useEffect(() => {
     const socket = createRealtimeSocket({ userId: session.userId, unitId: session.unitId });
+    let refreshTimer: number | null = null;
 
     socket.on('vote:event', (event: RealtimeVoteEvent) => {
       setRecentVoteDoneActivity((prev) => [
@@ -757,25 +822,91 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         },
         ...prev,
       ].slice(0, 5));
+
+      if (refreshTimer) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        void fetchHierarchySummaryByUser(session.userId)
+          .then((payload) => {
+            setBackendSummary(payload);
+            if (payload?.analytics) setMandalAnalytics(payload.analytics);
+          })
+          .catch(() => {});
+      }, 600);
     });
 
     return () => {
+      if (refreshTimer) window.clearTimeout(refreshTimer);
       socket.disconnect();
     };
   }, [session.unitId, session.userId]);
+
+  // Load server-side SQL demographics when Caste Analytics filters change
+  useEffect(() => {
+    let active = true;
+    void fetchScopeDemographics({
+      village: casteFilterVillage,
+      caste: casteFilterCaste,
+      gender: casteFilterGender,
+      ageGroup: casteFilterAgeGroup,
+      profession: casteFilterProfession,
+    })
+      .then((res) => {
+        if (active) setScopeDemographics(res);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [casteFilterVillage, casteFilterCaste, casteFilterGender, casteFilterAgeGroup, casteFilterProfession, session.userId, session.unitId]);
+
+  // Load full DB caste breakdown when drilling into a specific caste
+  useEffect(() => {
+    if (!activeCasteDetail) {
+      setActiveCasteDemographics(null);
+      return;
+    }
+    let active = true;
+    void fetchScopeDemographics({ caste: activeCasteDetail })
+      .then((res) => {
+        if (active) setActiveCasteDemographics(res);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [activeCasteDetail]);
 
   // Sync / Refresh data
   const refreshVoters = () => {
     void fetchVotersForUnit(session.unitId)
       .then(setVoters)
       .catch(() => { });
+    void fetchHierarchySummaryByUser(session.userId)
+      .then((payload) => {
+        setBackendSummary(payload);
+        if (payload?.analytics) setMandalAnalytics(payload.analytics);
+      })
+      .catch(() => {});
   };
 
-  // Metric Computations (Dynamic and fully synchronous)
-  const TOTAL_MANDAL_REGISTERED_VOTERS = backendSummary?.snapshot?.summary?.totalVoters ?? voters.length;
-  const surveyedVotersCount = voters.filter(v => v.surveyStatus === 'Surveyed').length;
-  const pendingSurveyCount = Math.max(0, TOTAL_MANDAL_REGISTERED_VOTERS - surveyedVotersCount);
-  const surveyCompletionPct = TOTAL_MANDAL_REGISTERED_VOTERS > 0 && surveyedVotersCount > 0 ? ((surveyedVotersCount / TOTAL_MANDAL_REGISTERED_VOTERS) * 100).toFixed(1) : '0.0';
+  // Metric Computations (100% PostgreSQL server-aggregated, never limited to 50-row page)
+  const TOTAL_MANDAL_REGISTERED_VOTERS =
+    mandalAnalytics?.summary?.totalVoters ??
+    backendSummary?.snapshot?.summary?.totalVoters ??
+    voters.length;
+  const surveyedVotersCount =
+    mandalAnalytics?.summary?.surveyed ??
+    backendSummary?.snapshot?.summary?.surveyed ??
+    voters.filter(v => v.surveyStatus === 'Surveyed').length;
+  const pendingSurveyCount =
+    mandalAnalytics?.summary?.pendingSurvey ??
+    Math.max(0, TOTAL_MANDAL_REGISTERED_VOTERS - surveyedVotersCount);
+  const surveyCompletionPct =
+    mandalAnalytics?.summary?.surveyCompletionPct !== undefined
+      ? mandalAnalytics.summary.surveyCompletionPct.toFixed(1)
+      : (TOTAL_MANDAL_REGISTERED_VOTERS > 0 && surveyedVotersCount > 0
+          ? ((surveyedVotersCount / TOTAL_MANDAL_REGISTERED_VOTERS) * 100).toFixed(1)
+          : '0.0');
 
   const totalVotersCount = TOTAL_MANDAL_REGISTERED_VOTERS;
 
@@ -802,20 +933,29 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   }, [session.assignedConstituency, hierarchyVillages]);
 
   const villagesSource = useMemo(() => {
+    const serverChildren = mandalAnalytics?.children || [];
+    const primaryCode = (mandalAnalytics?.projections?.primaryPartyCode || config.activePartyCode || parties?.[0]?.code || 'TDP').toUpperCase();
+
     if (hierarchyVillages.length > 0) {
       return hierarchyVillages.map((hv, idx) => {
+        const rollup = serverChildren.find(
+          (c) => c.id === hv.id || c.unitId === hv.id || c.name.trim().toLowerCase() === hv.name.trim().toLowerCase()
+        );
+        const sp = rollup?.partyPreference || null;
         const vList = voters.filter(v => (v.village || '').trim().toLowerCase() === hv.name.trim().toLowerCase());
-        const tdp = vList.filter(v => v.politicalPreference === 'TDP').length;
-        const ysrcp = vList.filter(v => v.politicalPreference === 'YSRCP').length;
-        const jsp = vList.filter(v => v.politicalPreference === 'JSP').length;
-        const bjp = vList.filter(v => v.politicalPreference === 'BJP').length;
-        const inc = vList.filter(v => v.politicalPreference === 'INC').length;
-        const neutral = vList.filter(v => v.politicalPreference === 'Neutral').length;
-        const oth = vList.filter(v => v.politicalPreference === 'OTH').length;
-        const leadingParty: VoterPreference = tdp >= ysrcp ? 'TDP' : 'YSRCP';
 
-        const totalVoters = vList.length > 0 ? vList.length : (hv.totalVoters || 0);
-        const hasVoters = vList.length > 0 || (hv.totalVoters || 0) > 0;
+        const tdp = sp ? Number(sp.TDP ?? sp[primaryCode] ?? 0) : vList.filter(v => v.politicalPreference === 'TDP').length;
+        const ysrcp = sp ? Number(sp.YSRCP ?? rollup?.topOpponentVotes ?? 0) : vList.filter(v => v.politicalPreference === 'YSRCP').length;
+        const jsp = sp ? Number(sp.JSP ?? 0) : vList.filter(v => v.politicalPreference === 'JSP').length;
+        const bjp = sp ? Number(sp.BJP ?? 0) : vList.filter(v => v.politicalPreference === 'BJP').length;
+        const inc = sp ? Number(sp.INC ?? 0) : vList.filter(v => v.politicalPreference === 'INC').length;
+        const neutral = sp ? Number(sp.NEUTRAL ?? 0) : vList.filter(v => v.politicalPreference === 'Neutral').length;
+        const oth = sp ? Number(sp.OTH ?? 0) : vList.filter(v => v.politicalPreference === 'OTH').length;
+        const leadingParty = (rollup?.leadingParty || (tdp >= ysrcp ? primaryCode : 'YSRCP')) as VoterPreference;
+
+        // Always prioritize exact PostgreSQL rollup or DB village count; never overwrite with partial 50-row slice
+        const totalVoters = rollup?.totalVoters ?? (hv.totalVoters || vList.length);
+        const hasVoters = totalVoters > 0;
         const totalBooths = hv.booths && hv.booths.length > 0
           ? hv.booths.length
           : new Set(vList.map(v => v.boothNumber).filter(Boolean)).size;
@@ -827,11 +967,41 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
           totalVoters,
           hasVoters,
           totalBooths,
-          localVoters: vList.filter(v => v.voterLocationStatus === 'Local').length,
-          migratedVoters: vList.filter(v => v.voterLocationStatus === 'Migrated').length,
-          pStats: { TDP: tdp, YSRCP: ysrcp, JSP: jsp, BJP: bjp, INC: inc, Neutral: neutral, OTH: oth },
+          localVoters: rollup?.local ?? vList.filter(v => v.voterLocationStatus === 'Local').length,
+          migratedVoters: rollup?.migrated ?? vList.filter(v => v.voterLocationStatus === 'Migrated').length,
+          pStats: { TDP: tdp, YSRCP: ysrcp, JSP: jsp, BJP: bjp, INC: inc, Neutral: neutral, OTH: oth, ...(sp || {}) },
           leadingParty,
-          lead: Math.abs(tdp - ysrcp),
+          lead: rollup ? rollup.lead : Math.abs(tdp - ysrcp),
+          status: rollup?.status || 'UNSURVEYED',
+        };
+      });
+    }
+
+    if (serverChildren.length > 0) {
+      return serverChildren.map((rollup, idx) => {
+        const sp = rollup.partyPreference || {};
+        return {
+          id: rollup.id || rollup.unitId,
+          sNo: `#${String(idx + 1).padStart(2, '0')}`,
+          name: rollup.name,
+          totalVoters: rollup.totalVoters,
+          hasVoters: rollup.totalVoters > 0,
+          totalBooths: 0,
+          localVoters: rollup.local,
+          migratedVoters: rollup.migrated,
+          pStats: {
+            TDP: Number(sp.TDP ?? 0),
+            YSRCP: Number(sp.YSRCP ?? 0),
+            JSP: Number(sp.JSP ?? 0),
+            BJP: Number(sp.BJP ?? 0),
+            INC: Number(sp.INC ?? 0),
+            Neutral: Number(sp.NEUTRAL ?? 0),
+            OTH: Number(sp.OTH ?? 0),
+            ...sp,
+          },
+          leadingParty: rollup.leadingParty as VoterPreference,
+          lead: rollup.lead,
+          status: rollup.status,
         };
       });
     }
@@ -860,22 +1030,29 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         pStats: { TDP: tdp, YSRCP: ysrcp, JSP: jsp, BJP: bjp, INC: inc, Neutral: neutral, OTH: oth },
         leadingParty,
         lead: Math.abs(tdp - ysrcp),
+        status: 'UNSURVEYED' as const,
       };
     });
-  }, [hierarchyVillages, voters]);
+  }, [hierarchyVillages, voters, mandalAnalytics, config.activePartyCode, parties]);
 
   const liveMandalStats = useMemo(() => {
     const snapshot = backendSummary?.snapshot;
+    const summary = mandalAnalytics?.summary;
+    const hCounts = mandalAnalytics?.hierarchyCounts || snapshot?.hierarchyCounts || {};
+    const totalVoters = summary?.totalVoters ?? snapshot?.summary.totalVoters ?? voters.length;
+    const voted = summary?.voted ?? snapshot?.summary.voted ?? 0;
+    const remaining = summary?.notVoted ?? snapshot?.summary.remaining ?? Math.max(0, totalVoters - voted);
+
     return {
-      totalVoters: snapshot?.summary.totalVoters ?? voters.length,
-      totalVillages: snapshot?.hierarchyCounts.VILLAGE ?? villagesSource.length,
-      totalBooths: snapshot?.hierarchyCounts.BOOTH ?? (hierarchyBooths.length || analyzedBooths.length || boothIncharges.length),
-      voted: snapshot?.summary.voted ?? 0,
-      remaining: snapshot?.summary.remaining ?? 0,
-      winning: snapshot?.performance.winningChildren ?? 0,
-      trailing: snapshot?.performance.trailingChildren ?? 0,
+      totalVoters,
+      totalVillages: (hCounts.VILLAGE && hCounts.VILLAGE > 0 ? hCounts.VILLAGE : undefined) ?? villagesSource.length,
+      totalBooths: (hCounts.BOOTH && hCounts.BOOTH > 0 ? hCounts.BOOTH : undefined) ?? (hierarchyBooths.length || analyzedBooths.length || boothIncharges.length),
+      voted,
+      remaining,
+      winning: mandalAnalytics?.projections?.winningAreasCount ?? snapshot?.performance.winningChildren ?? 0,
+      trailing: mandalAnalytics?.projections?.trailingAreasCount ?? snapshot?.performance.trailingChildren ?? 0,
     };
-  }, [backendSummary, hierarchyBooths.length, analyzedBooths.length, boothIncharges.length, villagesSource.length, voters.length]);
+  }, [backendSummary, mandalAnalytics, hierarchyBooths.length, analyzedBooths.length, boothIncharges.length, villagesSource.length, voters.length]);
 
   // Voters filtered by active (excluding deceased)
   const activeVoters = useMemo(() => voters.filter(v => !v.voterStatus || v.voterStatus === 'Active' || v.voterStatus === 'Shifted'), [voters]);
@@ -909,21 +1086,78 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
   }, [activeVoters, casteFilterVillage, casteFilterCaste, casteFilterGender, casteFilterAgeGroup, casteFilterProfession]);
 
   const availableVillages = useMemo(() => {
+    if (scopeDemographics?.availableFilters?.villages?.length) {
+      return scopeDemographics.availableFilters.villages.map((v) => v.name);
+    }
+    if (villagesSource.length > 0) {
+      return villagesSource.map((v) => v.name).sort();
+    }
     return Array.from(new Set(activeVoters.map(v => v.village))).filter(Boolean).sort();
-  }, [activeVoters]);
+  }, [scopeDemographics, villagesSource, activeVoters]);
 
   const availableCastes = useMemo(() => {
+    if (scopeDemographics?.availableFilters?.castes?.length) {
+      return scopeDemographics.availableFilters.castes;
+    }
+    if (mandalAnalytics?.demographics?.caste && Object.keys(mandalAnalytics.demographics.caste).length > 0) {
+      return Object.keys(mandalAnalytics.demographics.caste).sort();
+    }
     return Array.from(new Set(activeVoters.map(v => v.caste))).filter(Boolean).sort();
-  }, [activeVoters]);
+  }, [scopeDemographics, mandalAnalytics, activeVoters]);
 
   const availableProfessions = useMemo(() => {
+    if (scopeDemographics?.availableFilters?.professions?.length) {
+      return scopeDemographics.availableFilters.professions;
+    }
+    if (mandalAnalytics?.demographics?.profession && Object.keys(mandalAnalytics.demographics.profession).length > 0) {
+      return Object.keys(mandalAnalytics.demographics.profession).sort();
+    }
     return Array.from(new Set(activeVoters.map(v => v.profession))).filter(Boolean).sort();
-  }, [activeVoters]);
+  }, [scopeDemographics, mandalAnalytics, activeVoters]);
 
   const casteDetailData = useMemo(() => {
     if (!activeCasteDetail) return null;
 
-    // Filter active voters of this caste in Singarayakonda Mandal
+    if (activeCasteDemographics && activeCasteDemographics.totalVoters > 0) {
+      const sp = activeCasteDemographics.partyPreference || {};
+      const partyCounts: Record<VoterPreference, number> = {
+        TDP: Number(sp.TDP || 0),
+        YSRCP: Number(sp.YSRCP || 0),
+        JSP: Number(sp.JSP || 0),
+        BJP: Number(sp.BJP || 0),
+        INC: Number(sp.INC || 0),
+        Neutral: Number(sp.NEUTRAL ?? sp.Neutral ?? 0),
+        OTH: Number(sp.OTH || 0),
+      };
+      return {
+        casteName: activeCasteDetail,
+        totalVoters: activeCasteDemographics.totalVoters,
+        gender: {
+          male: activeCasteDemographics.gender.Male || 0,
+          female: activeCasteDemographics.gender.Female || 0,
+          other: activeCasteDemographics.gender.Other || 0,
+        },
+        age: {
+          age18_25: activeCasteDemographics.age['18-25'] || 0,
+          age26_40: activeCasteDemographics.age['26-40'] || 0,
+          age41_60: activeCasteDemographics.age['41-60'] || 0,
+          age60Plus: activeCasteDemographics.age['60+'] || 0,
+        },
+        professions: Object.entries(activeCasteDemographics.profession || {})
+          .map(([name, count]) => ({ name, count }))
+          .sort((a, b) => b.count - a.count),
+        party: partyCounts,
+        villages: (activeCasteDemographics.villageBreakdown || []).map((vb) => ({
+          villageName: vb.name,
+          total: vb.count,
+          tdp: 0,
+          ysrcp: 0,
+          neutral: vb.count,
+          leadingParty: 'Neutral' as const,
+        })),
+      };
+    }
+
     const casteVoters = activeVoters.filter(v => (v.caste || '').toUpperCase() === activeCasteDetail.toUpperCase());
 
     const totalVoters = casteVoters.length;
@@ -986,10 +1220,10 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       party: partyCounts,
       villages: villageBreakdown
     };
-  }, [activeVoters, activeCasteDetail]);
+  }, [activeVoters, activeCasteDetail, activeCasteDemographics, villagesSource]);
 
 
-  // Party support breakdown (Dynamically supporting all configured CMS parties)
+  // Party support breakdown (Server-aggregated across 100% of Mandal DB voters)
   const partyStats = useMemo(() => {
     const stats: Record<string, number> = {
       TDP: 0,
@@ -1007,6 +1241,23 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
         }
       });
     }
+
+    const serverPartyPref = mandalAnalytics?.partyPreference || backendSummary?.snapshot?.politicalPreference;
+    if (serverPartyPref && Object.keys(serverPartyPref).length > 0) {
+      Object.entries(serverPartyPref).forEach(([rawKey, rawVal]) => {
+        const val = Number(rawVal || 0);
+        const upperKey = rawKey.toUpperCase();
+        if (upperKey === 'NEUTRAL') {
+          stats.Neutral = (stats.Neutral || 0) + val;
+          return;
+        }
+        const matchedCms = parties?.find((p) => p.code.toUpperCase() === upperKey);
+        const targetKey = matchedCms?.code || rawKey;
+        stats[targetKey] = (stats[targetKey] || 0) + val;
+      });
+      return stats as Record<VoterPreference, number>;
+    }
+
     voters.forEach(v => {
       const pref = v.politicalPreference || 'Neutral';
       if (stats[pref] !== undefined) {
@@ -1016,42 +1267,65 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       }
     });
     return stats as Record<VoterPreference, number>;
-  }, [parties, voters]);
+  }, [parties, voters, mandalAnalytics, backendSummary]);
 
-  // Fake votes count (Fake, Duplicate, Doubtful)
+  // Fake votes count (Full DB count from backend summary, never limited to 50 rows)
   const fakeVotesCount = useMemo(() => {
+    if (mandalAnalytics?.summary) {
+      return (mandalAnalytics.summary.fakeVoters || 0) + (mandalAnalytics.summary.doubtfulVoters || 0);
+    }
+    if (backendSummary?.snapshot?.summary) {
+      return backendSummary.snapshot.summary.fakeVoters || 0;
+    }
     return voters.filter(v => v.voterStatus === 'Fake' || v.voterStatus === 'Duplicate' || v.voterStatus === 'Doubtful').length;
-  }, [voters]);
+  }, [mandalAnalytics, backendSummary, voters]);
 
-  // Dynamic Election Forecast computation
+  // Dynamic Election Forecast computation (Multi-tenant aware, server-aggregated)
   const forecastData = useMemo(() => {
-    const candidates: [VoterPreference, number][] = [
-      ['TDP', partyStats.TDP],
-      ['YSRCP', partyStats.YSRCP],
-      ['JSP', partyStats.JSP],
-      ['BJP', partyStats.BJP],
-      ['INC', partyStats.INC],
-      ['OTH', partyStats.OTH],
-    ];
+    const activePartyCodes = (parties && parties.length > 0)
+      ? parties.filter((p) => p.isActive).map((p) => p.code)
+      : Object.keys(partyStats).filter((k) => k.toUpperCase() !== 'NEUTRAL' && k.toUpperCase() !== 'OTH');
+
+    const candidates: [string, number][] = Array.from(new Set(activePartyCodes)).map((code) => [
+      code,
+      Number((partyStats as any)[code] || (partyStats as any)[code.toUpperCase()] || 0),
+    ]);
     candidates.sort((a, b) => b[1] - a[1]);
-    const leader = candidates[0] || ['Neutral' as VoterPreference, 0];
-    const runnerUp = candidates[1] || ['Neutral' as VoterPreference, 0];
-    const leadCount = Math.max(0, leader[1] - runnerUp[1]);
-    const totalVotes = voters.length;
+
+    const primaryPartyCode =
+      mandalAnalytics?.projections?.primaryPartyCode ||
+      config.activePartyCode ||
+      parties?.find((p) => p.isActive)?.code ||
+      candidates[0]?.[0] ||
+      'PRIMARY';
+    const secondPartyFallback =
+      (mandalAnalytics?.projections?.topOpponentCode && mandalAnalytics.projections.topOpponentCode !== 'OPPONENT'
+        ? mandalAnalytics.projections.topOpponentCode
+        : null) ||
+      parties?.filter((p) => p.isActive).find((p) => p.code.toUpperCase() !== primaryPartyCode.toUpperCase())?.code ||
+      candidates.find((c) => c[0].toUpperCase() !== primaryPartyCode.toUpperCase())?.[0] ||
+      'OPPONENT';
+
+    const leader = candidates[0] || [primaryPartyCode, 0];
+    const runnerUp = candidates[1] || [secondPartyFallback, 0];
+    const leadCount = mandalAnalytics?.projections?.lead ?? Math.max(0, leader[1] - runnerUp[1]);
+    const totalVotes = TOTAL_MANDAL_REGISTERED_VOTERS;
     const leadPercentage = totalVotes > 0 && leader[1] > 0 ? ((leadCount / totalVotes) * 100).toFixed(1) : '0.0';
 
     return {
-      leadingParty: leader[1] > 0 ? leader[0] : ('Neutral' as VoterPreference),
-      secondParty: runnerUp[1] > 0 ? runnerUp[0] : ('Neutral' as VoterPreference),
+      primaryPartyLabel: primaryPartyCode,
+      opponentPartyLabel: secondPartyFallback,
+      leadingParty: leader[1] > 0 ? (leader[0] as VoterPreference) : ('Neutral' as VoterPreference),
+      secondParty: runnerUp[1] > 0 ? (runnerUp[0] as VoterPreference) : (secondPartyFallback as VoterPreference),
       leadCount,
       leadCountStr: leadCount.toLocaleString(),
       leaderCount: leader[1],
-      runnerUpParty: runnerUp[1] > 0 ? runnerUp[0] : ('Neutral' as VoterPreference),
+      runnerUpParty: runnerUp[1] > 0 ? (runnerUp[0] as VoterPreference) : (secondPartyFallback as VoterPreference),
       runnerUpCount: runnerUp[1],
       leadPercentage,
       isFullSurveyAvailable: totalVotes > 0
     };
-  }, [partyStats, voters]);
+  }, [partyStats, parties, mandalAnalytics, config.activePartyCode, TOTAL_MANDAL_REGISTERED_VOTERS]);
 
   // Donut chart calculations (Dynamically mapped from active CMS parties)
   const donutChartData = useMemo(() => {
@@ -1109,9 +1383,44 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     return incharge?.mobileNumber || "";
   }, [cadreItems]);
 
-  const getVillageMetrics = useCallback((vName: string, _totalVoters: number) => {
+  const getVillageMetrics = useCallback((vName: string, fallbackTotalVoters: number) => {
+    const rollup = mandalAnalytics?.children?.find(
+      (c) => c.name.trim().toLowerCase() === vName.trim().toLowerCase()
+    );
+    if (rollup) {
+      const sp = rollup.partyPreference || {};
+      const total = rollup.totalVoters || fallbackTotalVoters;
+      const surveyed = rollup.surveyed || 0;
+      const tdp = Number(sp.TDP ?? rollup.primaryPartyVotes ?? 0);
+      const ysrcp = Number(sp.YSRCP ?? rollup.topOpponentVotes ?? 0);
+      const jsp = Number(sp.JSP ?? 0);
+      const bjp = Number(sp.BJP ?? 0);
+      const congress = Number(sp.INC ?? 0);
+      const neutral = Number(sp.NEUTRAL ?? 0);
+      const undecided = Number(sp.OTH ?? 0);
+      const fake = rollup.fakeVoters || 0;
+      const lead = rollup.lead || 0;
+      const leadingParty = (rollup.leadingParty || 'Neutral') as VoterPreference;
+      const isCloseContest = rollup.status === 'CLOSE_CONTEST';
+      return {
+        surveyed,
+        surveyProgressPct: total > 0 ? ((surveyed / total) * 100).toFixed(1) : '0.0',
+        tdp,
+        ysrcp,
+        jsp,
+        bjp,
+        congress,
+        neutral,
+        undecided,
+        fake,
+        leadingParty,
+        lead,
+        isCloseContest,
+      };
+    }
+
     const vVoters = voters.filter(v => (v.village || '').trim().toLowerCase() === vName.trim().toLowerCase());
-    const total = vVoters.length;
+    const total = fallbackTotalVoters > 0 ? fallbackTotalVoters : vVoters.length;
     const surveyed = vVoters.filter(v => v.surveyStatus === 'Surveyed').length;
     const tdp = vVoters.filter(v => v.politicalPreference === 'TDP').length;
     const ysrcp = vVoters.filter(v => v.politicalPreference === 'YSRCP').length;
@@ -1140,14 +1449,18 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       lead,
       isCloseContest
     };
-  }, [voters]);
+  }, [voters, mandalAnalytics]);
 
   const villageCounts = useMemo(() => {
     let winning = 0;
     let trailing = 0;
     villagesSource.forEach(v => {
-      if ((v.totalVoters > 0 || v.hasVoters) && v.lead > 0) {
-        if (v.leadingParty === 'TDP') {
+      if ((v as any).status === 'WINNING') {
+        winning++;
+      } else if ((v as any).status === 'TRAILING') {
+        trailing++;
+      } else if ((v.totalVoters > 0 || v.hasVoters) && v.lead > 0) {
+        if (v.leadingParty === forecastData.primaryPartyLabel || v.leadingParty === 'TDP') {
           winning++;
         } else {
           trailing++;
@@ -1159,7 +1472,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       winning,
       trailing
     };
-  }, [villagesSource]);
+  }, [villagesSource, forecastData.primaryPartyLabel]);
 
   const filteredVillages = useMemo(() => {
     return villagesSource.filter(v => {
@@ -1553,9 +1866,37 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
     return fakeVotersList.slice(start, start + fakeVotersPageSize);
   }, [fakeVotersList, fakeVotersPage, fakeVotersPageSize]);
 
-  // Caste / Demographics Analytics Datasets
+  // Caste / Demographics Analytics Datasets (Server-aggregated across 100% of Mandal DB voters)
   const casteChartsData = useMemo(() => {
-    // 1. Caste Support Breakdown
+    if (scopeDemographics && scopeDemographics.totalVoters > 0) {
+      const emptyPrefs = (count: number): Record<VoterPreference, number> => ({
+        TDP: 0, YSRCP: 0, JSP: 0, BJP: 0, INC: 0, Neutral: count, OTH: 0,
+      });
+      const toRows = (rec: Record<string, number>, maxRows: number) =>
+        Object.entries(rec || {})
+          .map(([name, count]) => ({ name, total: Number(count || 0), prefs: emptyPrefs(Number(count || 0)) }))
+          .filter((item) => item.total > 0)
+          .sort((a, b) => b.total - a.total)
+          .slice(0, maxRows);
+
+      return {
+        caste: toRows(scopeDemographics.caste, 20),
+        profession: toRows(scopeDemographics.profession, 12),
+        age: [
+          { name: '18–25', total: scopeDemographics.age['18-25'] || 0, prefs: emptyPrefs(scopeDemographics.age['18-25'] || 0) },
+          { name: '26–40', total: scopeDemographics.age['26-40'] || 0, prefs: emptyPrefs(scopeDemographics.age['26-40'] || 0) },
+          { name: '41–60', total: scopeDemographics.age['41-60'] || 0, prefs: emptyPrefs(scopeDemographics.age['41-60'] || 0) },
+          { name: '60+', total: scopeDemographics.age['60+'] || 0, prefs: emptyPrefs(scopeDemographics.age['60+'] || 0) },
+        ].filter((item) => item.total > 0),
+        gender: [
+          { name: 'Male', total: scopeDemographics.gender.Male || 0, prefs: emptyPrefs(scopeDemographics.gender.Male || 0) },
+          { name: 'Female', total: scopeDemographics.gender.Female || 0, prefs: emptyPrefs(scopeDemographics.gender.Female || 0) },
+          { name: 'Other', total: scopeDemographics.gender.Other || 0, prefs: emptyPrefs(scopeDemographics.gender.Other || 0) },
+        ].filter((item) => item.total > 0),
+      };
+    }
+
+    // Fallback when demographics endpoint is unavailable
     const casteSupport: Record<string, Record<VoterPreference, number>> = {};
     const professionSupport: Record<string, Record<VoterPreference, number>> = {};
     const ageSupport: Record<string, Record<VoterPreference, number>> = {
@@ -1625,7 +1966,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
       age: formatChartData(ageSupport, 4),
       gender: formatChartData(genderSupport, 3)
     };
-  }, [filteredVotersForCasteAnalytics]);
+  }, [filteredVotersForCasteAnalytics, scopeDemographics]);
 
   // Cadre Network computations
   const cadreNetworkList = useMemo(() => {
@@ -1937,7 +2278,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                       <div className="space-y-1">
                         <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mandal Political Position</h4>
                         <h3 className="text-2xl md:text-3xl font-black text-slate-900 leading-none tracking-tight uppercase">
-                          TDP LEAD: <span className="text-yellow-600 font-extrabold">{forecastData.leadCountStr}</span>
+                          {forecastData.leadingParty !== 'Neutral' ? forecastData.leadingParty : forecastData.primaryPartyLabel} LEAD: <span className="text-yellow-600 font-extrabold">{forecastData.leadCountStr}</span>
                         </h3>
                         <p className="text-xs font-bold text-slate-500">
                           Label: <span className="text-yellow-600 font-black uppercase underline">Current Projection</span> (Not Official Result / Not Verified Survey Result)
@@ -1952,11 +2293,11 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                         <div className="space-y-1">
                           <p className="text-xs font-black text-emerald-700 flex items-center gap-1.5">
                             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                            TDP Winning Villages: <span className="text-sm font-black underline">{liveMandalStats.winning}</span>
+                            {forecastData.primaryPartyLabel} Winning Villages: <span className="text-sm font-black underline">{liveMandalStats.winning}</span>
                           </p>
                           <p className="text-xs font-black text-orange-700 flex items-center gap-1.5">
                             <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                            YSRCP Winning Villages: <span className="text-sm font-black underline">{liveMandalStats.trailing}</span>
+                            {forecastData.opponentPartyLabel} Winning Villages: <span className="text-sm font-black underline">{liveMandalStats.trailing}</span>
                           </p>
                         </div>
                       </div>
@@ -3625,7 +3966,7 @@ export default function MandalInchargeDashboard({ session, onLogout }: MandalInc
                   <div className="bg-yellow-50/50 border border-yellow-100 rounded-2xl p-4 text-right min-w-[180px]">
                     <span className="block text-[9px] font-black uppercase text-yellow-700 tracking-widest">ANALYZED RECORDS</span>
                     <span className="text-2xl font-black text-yellow-800 block mt-0.5">
-                      {filteredVotersForCasteAnalytics.length.toLocaleString()}
+                      {(scopeDemographics?.totalVoters ?? filteredVotersForCasteAnalytics.length).toLocaleString()}
                     </span>
                   </div>
                 </div>
