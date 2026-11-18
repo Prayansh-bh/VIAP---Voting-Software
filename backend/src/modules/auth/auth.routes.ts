@@ -257,6 +257,13 @@ export async function authRoutes(fastify: FastifyInstance) {
     },
     AuthController.requestWhatsAppPairingCode
   );
+  fastify.post(
+    '/whatsapp/reset',
+    {
+      preHandler: [optionalAuthenticate],
+    },
+    AuthController.resetWhatsAppSession
+  );
   fastify.get(
     '/whatsapp/test',
     {

@@ -2,6 +2,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
   Browsers,
+  fetchLatestBaileysVersion,
   type WASocket,
   type ConnectionState,
 } from '@whiskeysockets/baileys';
@@ -27,6 +28,9 @@ export class BaileysWhatsAppProvider implements SmsProvider {
   private initPromise: Promise<WASocket> | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
+  private consecutiveFailedHandshakes = 0;
+  private lastDisconnectCode: number | null = null;
+  private cachedWaVersion: [number, number, number] | null = null;
   private isSessionOwner = false;
   private saveCredsQueue: Promise<void> = Promise.resolve();
   private readonly authDir: string;
@@ -223,14 +227,33 @@ export class BaileysWhatsAppProvider implements SmsProvider {
           level: (process.env.BAILEYS_LOG_LEVEL || 'silent') as any,
         });
 
+        // Resolve latest WhatsApp Web protocol version (cached, 5s timeout safety)
+        if (!this.cachedWaVersion) {
+          try {
+            const versionResult = await Promise.race([
+              fetchLatestBaileysVersion(),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+            ]);
+            if (versionResult && Array.isArray(versionResult.version)) {
+              this.cachedWaVersion = versionResult.version;
+              console.log(`[WHATSAPP BAILEYS] Using WA Web version ${this.cachedWaVersion.join('.')}`);
+            }
+          } catch (verErr: any) {
+            console.warn('[WHATSAPP BAILEYS] Could not fetch latest WA version, using default:', verErr?.message);
+          }
+        }
+
         const sock = makeWASocket({
+          ...(this.cachedWaVersion ? { version: this.cachedWaVersion } : {}),
           auth: state,
           logger,
           printQRInTerminal: false,
           browser: Browsers.ubuntu('Chrome'),
           syncFullHistory: false,
-          connectTimeoutMs: 60000,
-          defaultQueryTimeoutMs: 60000,
+          markOnlineOnConnect: false,
+          keepAliveIntervalMs: 25000,
+          connectTimeoutMs: 25000,
+          defaultQueryTimeoutMs: 30000,
         });
 
         this.sock = sock;
@@ -254,6 +277,7 @@ export class BaileysWhatsAppProvider implements SmsProvider {
 
           if (qr) {
             this.currentQr = qr;
+            this.consecutiveFailedHandshakes = 0;
             this.printTerminalQr(qr);
           }
 
@@ -262,6 +286,8 @@ export class BaileysWhatsAppProvider implements SmsProvider {
             this.currentQr = null;
             this.isInitializing = false;
             this.reconnectAttempts = 0;
+            this.consecutiveFailedHandshakes = 0;
+            this.lastDisconnectCode = null;
             if (this.reconnectTimer) {
               clearTimeout(this.reconnectTimer);
               this.reconnectTimer = null;
@@ -276,32 +302,50 @@ export class BaileysWhatsAppProvider implements SmsProvider {
           }
 
           if (connection === 'close') {
+            const wasConnected = this.isConnected;
             this.isConnected = false;
             this.currentQr = null;
             this.isInitializing = false;
             this.sock = null;
 
-            const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            const statusCode = (lastDisconnect?.error as any)?.output?.statusCode as number | undefined;
+            this.lastDisconnectCode = statusCode ?? null;
+
+            if (!wasConnected) {
+              this.consecutiveFailedHandshakes += 1;
+            } else {
+              this.consecutiveFailedHandshakes = 0;
+            }
+
+            const hasLocalCreds = fs.existsSync(path.join(this.authDir, 'creds.json'));
+            const isDefinitiveLogout =
+              statusCode === DisconnectReason.loggedOut ||
+              statusCode === 401 ||
+              statusCode === 403 ||
+              statusCode === 405;
+            const isStaleCredsLoop =
+              !wasConnected &&
+              hasLocalCreds &&
+              statusCode !== DisconnectReason.connectionReplaced &&
+              this.consecutiveFailedHandshakes >= 3;
 
             console.warn(
-              `[WHATSAPP BAILEYS] Connection closed (statusCode: ${statusCode || 'unknown'}, reconnectable: ${shouldReconnect})`
+              `[WHATSAPP BAILEYS] Connection closed (statusCode: ${statusCode || 'unknown'}, failedHandshakes: ${this.consecutiveFailedHandshakes}, clearCreds: ${isDefinitiveLogout || isStaleCredsLoop})`
             );
 
-            if (shouldReconnect) {
-              this.scheduleReconnect();
-            } else {
-              console.warn('[WHATSAPP BAILEYS] WhatsApp device logged out. Clearing stored credentials to present fresh QR...');
+            if (isDefinitiveLogout || isStaleCredsLoop) {
+              console.warn('[WHATSAPP BAILEYS] Clearing stale/logged-out credentials to present a fresh QR code...');
               this.reconnectAttempts = 0;
-              try {
-                if (fs.existsSync(this.authDir)) {
-                  fs.rmSync(this.authDir, { recursive: true, force: true });
-                }
-              } catch (cleanupErr) {
-                console.error('[WHATSAPP BAILEYS] Failed to remove credentials directory:', cleanupErr);
-              }
-              this.clearAuthStateFromDb().catch(() => {});
-              this.scheduleReconnect(3000);
+              this.consecutiveFailedHandshakes = 0;
+              this.cachedWaVersion = null;
+              this.wipeCredentials()
+                .catch(() => {})
+                .finally(() => this.scheduleReconnect(2000));
+            } else if (statusCode === DisconnectReason.connectionReplaced) {
+              // Another instance connected with the same session; back off to avoid 440 thrashing
+              this.scheduleReconnect(8000);
+            } else {
+              this.scheduleReconnect();
             }
           }
         });
@@ -344,6 +388,70 @@ export class BaileysWhatsAppProvider implements SmsProvider {
     }, delay);
   }
 
+  private async wipeCredentials(): Promise<void> {
+    try {
+      if (fs.existsSync(this.authDir)) {
+        fs.rmSync(this.authDir, { recursive: true, force: true });
+      }
+    } catch (cleanupErr) {
+      console.error('[WHATSAPP BAILEYS] Failed to remove credentials directory:', cleanupErr);
+    }
+    await this.clearAuthStateFromDb();
+  }
+
+  /**
+   * Forces a clean session reset: disconnects current socket, clears disk + DB credentials,
+   * and starts a fresh socket so a new QR code is immediately available.
+   */
+  async resetSession(): Promise<void> {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.sock) {
+      try {
+        this.sock.ev.removeAllListeners('connection.update');
+        this.sock.ev.removeAllListeners('creds.update');
+        this.sock.end(undefined);
+      } catch {}
+      this.sock = null;
+    }
+    this.isConnected = false;
+    this.currentQr = null;
+    this.isInitializing = false;
+    this.initPromise = null;
+    this.reconnectAttempts = 0;
+    this.consecutiveFailedHandshakes = 0;
+    this.lastDisconnectCode = null;
+    await this.wipeCredentials();
+    if (process.env.NODE_ENV !== 'test') {
+      this.initialize().catch((err) => {
+        console.error('[WHATSAPP BAILEYS] Reset re-initialization error:', err?.message);
+      });
+    }
+  }
+
+  /**
+   * Waits briefly for an in-flight connection/reconnection to reach 'open' (e.g. Render cold start).
+   * Exits early as soon as connected OR if a QR code is emitted (meaning device needs linking).
+   */
+  private async waitUntilConnected(timeoutMs = 12000): Promise<boolean> {
+    if (this.sock && this.isConnected) return true;
+    if (process.env.NODE_ENV === 'test') return false;
+
+    if (!this.sock && !this.isInitializing) {
+      this.initialize().catch(() => {});
+    }
+
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (this.sock && this.isConnected) return true;
+      if (this.currentQr) return false;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    return Boolean(this.sock && this.isConnected);
+  }
+
   /**
    * Dispatches an OTP verification message to the given mobile number over WhatsApp.
    */
@@ -353,6 +461,10 @@ export class BaileysWhatsAppProvider implements SmsProvider {
       ? cleanNumber
       : (cleanNumber.length === 10 ? `91${cleanNumber}` : cleanNumber);
     let jid = `${recipientDigits}@s.whatsapp.net`;
+
+    if (!this.sock || !this.isConnected) {
+      await this.waitUntilConnected(12000);
+    }
 
     if (!this.sock || !this.isConnected) {
       if (!this.sock && !this.isInitializing && process.env.NODE_ENV !== 'test') {
@@ -428,6 +540,10 @@ export class BaileysWhatsAppProvider implements SmsProvider {
       ? cleanNumber
       : (cleanNumber.length === 10 ? `91${cleanNumber}` : cleanNumber);
     const jid = `${recipientDigits}@s.whatsapp.net`;
+
+    if (!this.sock || !this.isConnected) {
+      await this.waitUntilConnected(10000);
+    }
 
     if (!this.sock || !this.isConnected) {
       if (!this.sock && !this.isInitializing && process.env.NODE_ENV !== 'test') {
@@ -519,10 +635,12 @@ export class BaileysWhatsAppProvider implements SmsProvider {
     return {
       provider: this.name,
       isConnected: this.isConnected,
+      isInitializing: this.isInitializing,
       hasQr: Boolean(this.currentQr),
       user: this.sock?.user?.id || null,
       isOwner: this.isSessionOwner,
       reconnectAttempts: this.reconnectAttempts,
+      lastDisconnectCode: this.lastDisconnectCode,
     };
   }
 
