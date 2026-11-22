@@ -26,4 +26,6 @@ export async function cadreRoutes(fastify: FastifyInstance) {
   );
   fastify.post('/provision-roster/:constituencyId', CadreController.provisionRoster);
   fastify.get('/roster-export/:constituencyId', CadreController.exportRoster);
+  fastify.delete('/roster-slot/:constituencyId/:slotIdentifier', CadreController.unassignRosterSlot);
+  fastify.post('/roster-unassign/:constituencyId', CadreController.unassignRosterSlotPost);
 }

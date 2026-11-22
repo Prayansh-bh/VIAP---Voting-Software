@@ -918,6 +918,15 @@ export async function submitManualInchargeRoster(
   });
 }
 
+export async function unassignInchargeSlot(
+  constituencyId: string,
+  slotIdentifier: string
+): Promise<any> {
+  return request(`/cadre/roster-slot/${encodeURIComponent(constituencyId)}/${encodeURIComponent(slotIdentifier)}`, {
+    method: 'DELETE',
+  });
+}
+
 // ── Granular CMS Sub-Resource Endpoints ──
 export async function fetchCmsBranding(): Promise<any> {
   return request('/cms/branding');

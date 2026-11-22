@@ -2,22 +2,32 @@
 
 import { getAuthToken } from '../authStorage';
 
+export const isMobileClient = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.location.protocol === 'capacitor:' ||
+    window.location.protocol === 'ionic:' ||
+    Boolean((window as any).Capacitor?.isNativePlatform?.()) ||
+    (window.location.hostname === 'localhost' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent))
+  );
+};
+
 export const getApiBase = (): string => {
   if (typeof import.meta !== 'undefined') {
     const envUrl = (import.meta.env?.VITE_API_BASE_URL || import.meta.env?.VITE_API_URL || '').trim();
-    if (envUrl && !envUrl.includes('railway.app')) {
+    if (envUrl && !envUrl.includes('railway.app') && !envUrl.includes('ngrok')) {
       return envUrl.replace(/\/+$/, '');
     }
   }
-  // In production (e.g. Vercel deployment), point directly to production Render backend
+  // Mobile app (Capacitor) or Production Web (Vercel) -> Always use production Render backend
   if (typeof window !== 'undefined') {
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    if (isMobileClient() || (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')) {
       return 'https://viap-backend.onrender.com';
     }
     // Local dev: use relative URL so Vite proxy handles requests
     return '';
   }
-  return 'http://localhost:4000';
+  return 'https://viap-backend.onrender.com';
 };
 
 export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}): Promise<T> {
@@ -72,35 +82,44 @@ export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}
       credentials: 'include',
     });
   } catch (_err) {
-    // If primary URL failed (e.g. cross-port block on mobile/network), try relative fallback via Vite proxy
-    try {
-      res = await fetch(fallbackUrl, {
-        ...init,
-        headers,
-        credentials: 'include',
-      });
-    } catch (secondErr: any) {
-      throw new Error(secondErr?.message || 'Failed to communicate with API server. Please check your backend connection.');
+    // Only attempt relative fallback on desktop local dev, NEVER on mobile
+    if (!isMobileClient() && fallbackUrl !== primaryUrl && !fallbackUrl.startsWith('http')) {
+      try {
+        res = await fetch(fallbackUrl, {
+          ...init,
+          headers,
+          credentials: 'include',
+        });
+      } catch (secondErr: any) {
+        throw new Error(secondErr?.message || 'Failed to communicate with API server. Please check your backend connection.');
+      }
+    } else {
+      throw new Error('Unable to connect to the cloud server. Please check your internet connection and try again.');
     }
+  }
+
+  const rawText = await res.text();
+  let json: any = null;
+  try {
+    json = rawText ? JSON.parse(rawText) : {};
+  } catch {
+    if (rawText.trim().startsWith('<') || rawText.includes('<!DOCTYPE') || rawText.includes('<!doctype')) {
+      throw new Error('Cloud backend is waking up or initializing. Please retry in 10-15 seconds.');
+    }
+    throw new Error('Unexpected response format received from server.');
   }
 
   if (!res.ok) {
     let errMessage = `HTTP ${res.status}: ${res.statusText}`;
-    let errJson: any = null;
-    try {
-      errJson = await res.json();
-      errMessage = errJson?.error?.message || errJson?.message || errMessage;
-    } catch {
-      // ignore
-    }
+    errMessage = json?.error?.message || json?.message || errMessage;
     const err: any = new Error(errMessage);
     err.status = res.status;
     err.statusCode = res.status;
-    err.code = errJson?.error?.code || errJson?.code;
-    err.data = errJson?.data;
+    err.code = json?.error?.code || json?.code;
+    err.data = json?.data;
     const retryHeader = res.headers.get('retry-after');
     const headerRetry = retryHeader ? parseInt(retryHeader, 10) : NaN;
-    const bodyRetry = errJson?.data?.retryAfter ?? errJson?.retryAfter;
+    const bodyRetry = json?.data?.retryAfter ?? json?.retryAfter;
     if (!isNaN(headerRetry) && headerRetry > 0) {
       err.retryAfter = headerRetry;
     } else if (typeof bodyRetry === 'number' && bodyRetry > 0) {
@@ -109,7 +128,6 @@ export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}
     throw err;
   }
 
-  const json = await res.json();
   if (json && typeof json === 'object' && json.data !== undefined) {
     if (json.meta !== undefined && typeof json.data === 'object' && json.data !== null) {
       try {
@@ -130,10 +148,11 @@ export async function apiFetchWithMeta<T = any>(
   endpoint: string,
   init: RequestInit = {}
 ): Promise<{ data: T; meta?: any }> {
-  const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const sanitizedEndpoint = endpoint.replace(/https?:\/\/[a-zA-Z0-9_.-]*railway\.app/g, 'https://viap-backend.onrender.com');
+  const normalizedEndpoint = sanitizedEndpoint.startsWith('/') ? sanitizedEndpoint : `/${sanitizedEndpoint}`;
   const apiBase = getApiBase();
-  const primaryUrl = endpoint.startsWith('http') ? endpoint : `${apiBase}${normalizedEndpoint}`;
-  const fallbackUrl = endpoint.startsWith('http') ? endpoint : normalizedEndpoint;
+  const primaryUrl = sanitizedEndpoint.startsWith('http') ? sanitizedEndpoint : `${apiBase}${normalizedEndpoint}`;
+  const fallbackUrl = sanitizedEndpoint.startsWith('http') ? sanitizedEndpoint : normalizedEndpoint;
 
   const headers = new Headers(init.headers);
   const token = getAuthToken();
@@ -179,33 +198,43 @@ export async function apiFetchWithMeta<T = any>(
       credentials: 'include',
     });
   } catch (_err) {
-    try {
-      res = await fetch(fallbackUrl, {
-        ...init,
-        headers,
-        credentials: 'include',
-      });
-    } catch (secondErr: any) {
-      throw new Error(secondErr?.message || 'Failed to communicate with API server. Please check your backend connection.');
+    if (!isMobileClient() && fallbackUrl !== primaryUrl && !fallbackUrl.startsWith('http')) {
+      try {
+        res = await fetch(fallbackUrl, {
+          ...init,
+          headers,
+          credentials: 'include',
+        });
+      } catch (secondErr: any) {
+        throw new Error(secondErr?.message || 'Failed to communicate with API server. Please check your backend connection.');
+      }
+    } else {
+      throw new Error('Unable to connect to the cloud server. Please check your internet connection and try again.');
     }
+  }
+
+  const rawText = await res.text();
+  let json: any = null;
+  try {
+    json = rawText ? JSON.parse(rawText) : {};
+  } catch {
+    if (rawText.trim().startsWith('<') || rawText.includes('<!DOCTYPE') || rawText.includes('<!doctype')) {
+      throw new Error('Cloud backend is waking up or initializing. Please retry in 10-15 seconds.');
+    }
+    throw new Error('Unexpected response format received from server.');
   }
 
   if (!res.ok) {
     let errMessage = `HTTP ${res.status}: ${res.statusText}`;
-    let errJson: any = null;
-    try {
-      errJson = await res.json();
-      errMessage = errJson?.error?.message || errJson?.message || errMessage;
-    } catch {}
+    errMessage = json?.error?.message || json?.message || errMessage;
     const err: any = new Error(errMessage);
     err.status = res.status;
     err.statusCode = res.status;
-    err.code = errJson?.error?.code || errJson?.code;
-    err.data = errJson?.data;
+    err.code = json?.error?.code || json?.code;
+    err.data = json?.data;
     throw err;
   }
 
-  const json = await res.json();
   return {
     data: json?.data !== undefined ? json.data : json,
     meta: json?.meta,

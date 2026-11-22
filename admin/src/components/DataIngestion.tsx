@@ -26,6 +26,7 @@ import {
   Layers,
   ShieldAlert,
   FileText,
+  Trash2,
 } from 'lucide-react';
 import { AppInstance, ApplicationSummary, InchargeRecord } from '../types';
 import { useNotification } from '../context/NotificationContext';
@@ -44,6 +45,7 @@ import {
   downloadInchargeRosterTemplate,
   uploadInchargeRosterSpreadsheet,
   submitManualInchargeRoster,
+  unassignInchargeSlot,
   fetchIncharges,
   assignExecutiveIncharge,
   CadreRosterSlotsResponse,
@@ -392,7 +394,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
   const [isUploadingRoster, setIsUploadingRoster] = useState(false);
   const [rosterUploadSuccess, setRosterUploadSuccess] = useState<string | null>(null);
   const [rosterUploadError, setRosterUploadError] = useState<string | null>(null);
-  const [rosterPasscode, setRosterPasscode] = useState('123456');
+  const [removingSlotCode, setRemovingSlotCode] = useState<string | null>(null);
 
   // Column Mapping & Pre-Commit Preview Modal States
   const [isMappingModalOpen, setIsMappingModalOpen] = useState(false);
@@ -539,8 +541,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
       const res = await uploadInchargeRosterSpreadsheet(
         cId,
         rosterSpreadsheetFile,
-        currentApp?.partyCode || currentApp?.name,
-        rosterPasscode
+        currentApp?.partyCode || currentApp?.name
       );
       const s = res?.summary;
       setRosterUploadSuccess(
@@ -554,6 +555,34 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
       setRosterUploadError(err?.message || 'Failed to upload and register roster spreadsheet');
     } finally {
       setIsUploadingRoster(false);
+    }
+  };
+
+  const handleRemoveSlotIncharge = async (slotCode: string, slotTitle: string) => {
+    const cId = selectedConstituencyId || summary?.constituencyId;
+    if (!cId) return;
+
+    const confirmed = window.confirm(
+      `Are you sure you want to remove the assigned incharge from slot "${slotCode}" (${slotTitle})?\n\nThis will unassign the number and record from the database, allowing you to add a new incharge.`
+    );
+    if (!confirmed) return;
+
+    setRemovingSlotCode(slotCode);
+    setManualSubmitError(null);
+    setManualSubmitMessage(null);
+    try {
+      const res = await unassignInchargeSlot(cId, slotCode);
+      setManualSubmitMessage(res?.message || `Successfully removed incharge from slot ${slotCode}.`);
+      setManualInputs((prev) => {
+        const next = { ...prev };
+        delete next[slotCode];
+        return next;
+      });
+      await loadLiveData(cId);
+    } catch (err: any) {
+      setManualSubmitError(err?.message || `Failed to remove incharge from slot ${slotCode}`);
+    } finally {
+      setRemovingSlotCode(null);
     }
   };
 
@@ -615,8 +644,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
       await submitManualInchargeRoster(
         cId,
         entriesToSubmit,
-        currentApp?.partyCode || currentApp?.name,
-        rosterPasscode
+        currentApp?.partyCode || currentApp?.name
       );
       setManualSubmitMessage(
         `Successfully registered ${entriesToSubmit.length} real mobile numbers for ${activeCadreTab} into PostgreSQL database!`
@@ -1911,7 +1939,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
                 <div>
                   <div className="font-bold text-amber-300">Anti-Mock Protection Active: Real 10-Digit Mobile Numbers Required</div>
                   <div className="text-slate-400 mt-0.5">
-                    Field incharges authenticate directly via Mobile OTP or mobile + passcode. Synthetic dummy ranges (<code className="text-amber-400">9101...</code>, <code className="text-amber-400">9104...</code>) are strictly blocked. Feed real numbers via Option A (Spreadsheet) or Option B (Manual Grid).
+                    Field incharges authenticate directly via WhatsApp / SMS Mobile OTP. Synthetic dummy ranges (<code className="text-amber-400">9101...</code>, <code className="text-amber-400">9104...</code>) are strictly blocked. Feed real numbers via Option A (Spreadsheet) or Option B (Manual Grid).
                   </div>
                 </div>
               </div>
@@ -2021,19 +2049,6 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
                   <Layers className="w-4 h-4" />
                   <span>Option B: Section-wise Manual Number Input Grid</span>
                 </button>
-              </div>
-
-              {/* Default Passcode Configuration */}
-              <div className="flex items-center gap-2 bg-slate-950/80 px-3.5 py-1.5 rounded-xl border border-slate-800 text-xs">
-                <Key className="w-3.5 h-3.5 text-amber-400" />
-                <span className="text-slate-400 font-semibold">Initial Passcode:</span>
-                <input
-                  type="text"
-                  value={rosterPasscode}
-                  onChange={(e) => setRosterPasscode(e.target.value)}
-                  placeholder="123456"
-                  className="w-20 bg-slate-900 border border-slate-700 text-emerald-400 font-mono font-bold text-xs rounded-lg px-2 py-0.5 text-center focus:outline-none focus:border-cyan-400"
-                />
               </div>
             </div>
 
@@ -2227,9 +2242,25 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
                               )}
                             </div>
                             {isAssignedInDb && (
-                              <div className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1.5 pt-0.5">
-                                <Check className="w-3.5 h-3.5" />
-                                <span>Assigned in DB: <strong>{slot.assignedUser?.name}</strong> (+91 {slot.assignedUser?.mobileNumber})</span>
+                              <div className="flex items-center justify-between gap-2 pt-0.5 flex-wrap">
+                                <div className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1.5 truncate">
+                                  <Check className="w-3.5 h-3.5 shrink-0" />
+                                  <span className="truncate">Assigned in DB: <strong>{slot.assignedUser?.name}</strong> (+91 {slot.assignedUser?.mobileNumber})</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveSlotIncharge(slot.slotCode, slot.title)}
+                                  disabled={removingSlotCode === slot.slotCode}
+                                  title={`Remove and unassign incharge from slot ${slot.slotCode}`}
+                                  className="px-2.5 py-1 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-300 hover:text-red-200 border border-red-500/30 text-[11px] font-semibold transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
+                                >
+                                  {removingSlotCode === slot.slotCode ? (
+                                    <RefreshCw className="w-3 h-3 animate-spin text-red-400" />
+                                  ) : (
+                                    <Trash2 className="w-3 h-3 text-red-400" />
+                                  )}
+                                  <span>Remove / Clear</span>
+                                </button>
                               </div>
                             )}
                           </div>

@@ -1478,7 +1478,6 @@ export class InchargeProvisioningService {
       'Voter Count': slot.voterCount,
       'Incharge Name': slot.assignedUser?.name || '',
       'Mobile Number (10 Digits)': slot.assignedUser?.mobileNumber || '',
-      'Default Passcode': '123456',
     }));
 
     const worksheet = xlsx.utils.json_to_sheet(rows);
@@ -1779,26 +1778,143 @@ export class InchargeProvisioningService {
       const userCode = partyPrefix ? `${partyPrefix}-${targetSlot.slotCode}` : targetSlot.slotCode;
       const userName = entry.inchargeName?.trim() || `${targetSlot.jurisdictionName} Incharge`;
 
-      // 1. Idempotent User upsert by mobile or userCode
-      let user = await prisma.user.findFirst({
+      // 1. Build slot hierarchy filter
+      const slotFilter: any = {};
+      if (targetSlot.level === '100_VOTER_GROUP' && targetSlot.groupId) {
+        slotFilter.voterGroupId = targetSlot.groupId;
+      } else if (targetSlot.level === 'BOOTH' && targetSlot.boothId) {
+        slotFilter.boothId = targetSlot.boothId;
+        slotFilter.roleType = { in: [RoleType.BOOTH_PRESIDENT, RoleType.BOOTH_INCHARGE] };
+      } else if (targetSlot.level === 'POLLING_STATION') {
+        if (targetSlot.pollingStationId) {
+          slotFilter.pollingStationId = targetSlot.pollingStationId;
+        } else if (targetSlot.villageId) {
+          slotFilter.villageId = targetSlot.villageId;
+        }
+        slotFilter.roleType = RoleType.VILLAGE_INCHARGE;
+      } else if (targetSlot.level === 'MANDAL' && targetSlot.mandalId) {
+        slotFilter.mandalId = targetSlot.mandalId;
+        slotFilter.roleType = RoleType.MANDAL_INCHARGE;
+      }
+
+      // Check if user already exists with this mobile number across any formatting
+      const rawDigits = cleanMobile.replace(/\D/g, '').slice(-10);
+      const userByMobile = await prisma.user.findFirst({
         where: {
           OR: [
             { mobileNumber: cleanMobile },
-            { userCode },
+            { mobileNumber: `+91${rawDigits}` },
+            { mobileNumber: rawDigits },
+            { mobileNumber: { endsWith: rawDigits } },
           ],
         },
       });
 
-      if (user) {
+      // Check who currently holds userCode or is assigned to this slot
+      const existingSlotAssignments = Object.keys(slotFilter).length > 0
+        ? await prisma.userHierarchyAssignment.findMany({
+            where: { ...slotFilter, isActive: true },
+            include: { user: true },
+          })
+        : [];
+
+      const usersHoldingSlotCode = await prisma.user.findMany({
+        where: {
+          OR: [
+            { userCode },
+            { userCode: targetSlot.slotCode },
+            ...(partyPrefix ? [{ userCode: `${partyPrefix}-${targetSlot.slotCode}` }] : []),
+            ...(targetSlot.canonicalCode ? [{ userCode: targetSlot.canonicalCode }] : []),
+          ],
+        },
+      });
+
+      // Vacate / free up previous user(s) on this slot if different from incoming user
+      const incomingUserId = userByMobile?.id;
+      const prevUsersToDetach = [
+        ...existingSlotAssignments.map((a) => a.user),
+        ...usersHoldingSlotCode,
+      ].filter((u): u is NonNullable<typeof u> => Boolean(u && u.id !== incomingUserId));
+
+      const uniquePrevUsers = Array.from(new Map(prevUsersToDetach.map((u) => [u.id, u])).values());
+
+      for (const prevUser of uniquePrevUsers) {
+        // Remove their assignment on this slot
+        if (Object.keys(slotFilter).length > 0) {
+          await prisma.userHierarchyAssignment.deleteMany({
+            where: {
+              ...slotFilter,
+              userId: prevUser.id,
+            },
+          }).catch(() => {});
+        }
+
+        // Unlink from VoterGroup & Voters if 100-voter group
+        if (targetSlot.level === '100_VOTER_GROUP' && targetSlot.groupId) {
+          await prisma.voterGroup.updateMany({
+            where: { id: targetSlot.groupId, assignedInchargeId: prevUser.id },
+            data: { assignedInchargeId: null },
+          }).catch(() => {});
+
+          await prisma.voter.updateMany({
+            where: { voterGroupId: targetSlot.groupId, assignedInchargeId: prevUser.id },
+            data: { assignedInchargeId: null },
+          }).catch(() => {});
+        }
+
+        // Free up slot userCode from prevUser so it never collides
+        const holdsCode =
+          prevUser.userCode === userCode ||
+          prevUser.userCode === targetSlot.slotCode ||
+          (partyPrefix && prevUser.userCode === `${partyPrefix}-${targetSlot.slotCode}`) ||
+          (targetSlot.canonicalCode && prevUser.userCode === targetSlot.canonicalCode);
+
+        if (holdsCode) {
+          const isMock =
+            prevUser.name.startsWith('Mock ') ||
+            prevUser.mobileNumber.startsWith('+919700') ||
+            prevUser.mobileNumber.startsWith('9700') ||
+            prevUser.mobileNumber.startsWith('+919101') ||
+            prevUser.mobileNumber.startsWith('9101');
+
+          let deleted = false;
+          if (isMock) {
+            const otherCount = await prisma.userHierarchyAssignment.count({
+              where: { userId: prevUser.id },
+            }).catch(() => 1);
+            if (otherCount === 0) {
+              try {
+                await prisma.user.delete({ where: { id: prevUser.id } });
+                deleted = true;
+              } catch {
+                deleted = false;
+              }
+            }
+          }
+
+          if (!deleted) {
+            await prisma.user.update({
+              where: { id: prevUser.id },
+              data: {
+                userCode: `${prevUser.userCode}_REPLACED_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                accountStatus: isMock ? AccountStatus.DEACTIVATED : prevUser.accountStatus,
+              },
+            }).catch(() => {});
+          }
+        }
+      }
+
+      // Idempotent User upsert with zero constraint collisions
+      let user: any;
+      if (userByMobile) {
         user = await prisma.user.update({
-          where: { id: user.id },
+          where: { id: userByMobile.id },
           data: {
             userCode,
-            mobileNumber: cleanMobile,
-            name: userName,
+            name: entry.inchargeName?.trim() || userByMobile.name || userName,
             role: targetSlot.roleRequired,
             accountStatus: AccountStatus.ACTIVE,
-            organisationId: orgId || user.organisationId,
+            organisationId: orgId || userByMobile.organisationId,
             passwordHash,
           },
         });
@@ -1822,6 +1938,9 @@ export class InchargeProvisioningService {
           userId: user.id,
           roleType: targetSlot.roleRequired,
           constituencyId: constituency.id,
+          ...(targetSlot.groupId ? { voterGroupId: targetSlot.groupId } : {}),
+          ...(targetSlot.boothId ? { boothId: targetSlot.boothId } : {}),
+          ...(targetSlot.mandalId ? { mandalId: targetSlot.mandalId } : {}),
         },
       });
 
@@ -1879,7 +1998,7 @@ export class InchargeProvisioningService {
         role: targetSlot.roleRequired,
         userCode,
         name: userName,
-        mobileNumber: cleanMobile,
+        mobileNumber: user.mobileNumber || cleanMobile,
         jurisdictionName: targetSlot.jurisdictionName,
         passcode,
         status: 'ASSIGNED',
@@ -1898,6 +2017,187 @@ export class InchargeProvisioningService {
         defaultPasscode,
       },
       roster,
+    };
+  }
+
+  /**
+   * Completely unassigns and removes an incharge record from a specific roster slot.
+   * Works across all 4 tiers (Mandals, Polling Stations, Booths, 100-Voter Groups).
+   * Unlinks VoterGroups/Voters, deletes UserHierarchyAssignments, and frees user accounts.
+   */
+  static async unassignRosterSlot(opts: {
+    constituencyId: string;
+    slotIdentifier: string;
+    actorId?: string;
+    organisationId?: string;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    slotCode: string;
+    clearedUser?: { id: string; name: string; mobileNumber: string } | null;
+  }> {
+    const { constituencyId, slotIdentifier } = opts;
+    const slotsResp = await this.getRequiredRosterSlots(constituencyId);
+
+    const lookupKey = (slotIdentifier || '').trim().toUpperCase();
+    let targetSlot = slotsResp.allSlots.find(
+      (s) =>
+        s.slotCode.toUpperCase() === lookupKey ||
+        s.unitKey.toUpperCase() === lookupKey ||
+        (s.canonicalCode && s.canonicalCode.toUpperCase() === lookupKey)
+    );
+
+    if (!targetSlot) {
+      if (lookupKey.startsWith('MDL-')) {
+        const mandalQuery = lookupKey.replace(/^MDL-/, '').replace(/\W/g, '');
+        targetSlot = slotsResp.sections.mandals.find((m) =>
+          m.slotCode.replace(/\W/g, '').includes(mandalQuery) ||
+          mandalQuery.includes(m.slotCode.replace(/^MDL-/, '').replace(/\W/g, '')) ||
+          m.jurisdictionName.replace(/\W/g, '').toUpperCase().includes(mandalQuery)
+        );
+      } else if (lookupKey.startsWith('BTH-')) {
+        const boothNum = parseInt(lookupKey.replace(/\D/g, ''), 10);
+        if (!isNaN(boothNum)) {
+          targetSlot = slotsResp.sections.booths.find((b) =>
+            parseInt(String(b.boothNumber).replace(/\D/g, ''), 10) === boothNum
+          );
+        }
+      } else if (/^B\d+-V\d+$/i.test(lookupKey)) {
+        const match = lookupKey.match(/^B(\d+)-V(\d+)$/i);
+        if (match) {
+          const bNum = parseInt(match[1], 10);
+          const vNum = parseInt(match[2], 10);
+          const normalizedCanonical = `B${bNum}-V${vNum}`;
+          targetSlot = slotsResp.allSlots.find((s) => s.canonicalCode?.toUpperCase() === normalizedCanonical);
+        }
+      } else if (lookupKey.startsWith('VIL-') || lookupKey.startsWith('PS-')) {
+        const psNum = parseInt(lookupKey.replace(/\D/g, ''), 10);
+        if (!isNaN(psNum)) {
+          targetSlot = slotsResp.sections.pollingStations[psNum - 1];
+        }
+      }
+    }
+
+    if (!targetSlot) {
+      const err: any = new Error(`Slot "${slotIdentifier}" not found in constituency.`);
+      err.statusCode = 404;
+      err.code = 'SLOT_NOT_FOUND';
+      throw err;
+    }
+
+    // Identify slot filter
+    const slotFilter: any = {};
+    if (targetSlot.level === '100_VOTER_GROUP' && targetSlot.groupId) {
+      slotFilter.voterGroupId = targetSlot.groupId;
+    } else if (targetSlot.level === 'BOOTH' && targetSlot.boothId) {
+      slotFilter.boothId = targetSlot.boothId;
+      slotFilter.roleType = { in: [RoleType.BOOTH_PRESIDENT, RoleType.BOOTH_INCHARGE] };
+    } else if (targetSlot.level === 'POLLING_STATION') {
+      if (targetSlot.pollingStationId) {
+        slotFilter.pollingStationId = targetSlot.pollingStationId;
+      } else if (targetSlot.villageId) {
+        slotFilter.villageId = targetSlot.villageId;
+      }
+      slotFilter.roleType = RoleType.VILLAGE_INCHARGE;
+    } else if (targetSlot.level === 'MANDAL' && targetSlot.mandalId) {
+      slotFilter.mandalId = targetSlot.mandalId;
+      slotFilter.roleType = RoleType.MANDAL_INCHARGE;
+    }
+
+    const assignments = Object.keys(slotFilter).length > 0
+      ? await prisma.userHierarchyAssignment.findMany({
+          where: slotFilter,
+          include: { user: true },
+        })
+      : [];
+
+    const usersHoldingSlotCode = await prisma.user.findMany({
+      where: {
+        OR: [
+          { userCode: targetSlot.slotCode },
+          { userCode: { endsWith: `-${targetSlot.slotCode}` } },
+          ...(targetSlot.canonicalCode ? [{ userCode: targetSlot.canonicalCode }] : []),
+        ],
+      },
+    });
+
+    const candidateUsers = [
+      ...assignments.map((a) => a.user),
+      ...usersHoldingSlotCode,
+      ...(targetSlot.assignedUser ? [targetSlot.assignedUser] : []),
+    ].filter((u): u is NonNullable<typeof u> => Boolean(u));
+
+    const uniqueUsers = Array.from(new Map(candidateUsers.map((u) => [u.id, u])).values());
+
+    // 1. Unlink VoterGroup & Voters
+    if (targetSlot.level === '100_VOTER_GROUP' && targetSlot.groupId) {
+      await prisma.voterGroup.update({
+        where: { id: targetSlot.groupId },
+        data: { assignedInchargeId: null },
+      }).catch(() => {});
+
+      await prisma.voter.updateMany({
+        where: { voterGroupId: targetSlot.groupId },
+        data: { assignedInchargeId: null },
+      }).catch(() => {});
+    }
+
+    // 2. Delete all hierarchy assignments for this slot
+    if (Object.keys(slotFilter).length > 0) {
+      await prisma.userHierarchyAssignment.deleteMany({
+        where: slotFilter,
+      }).catch(() => {});
+    }
+
+    let clearedUser: { id: string; name: string; mobileNumber: string } | null = null;
+
+    // 3. Clean up the users
+    for (const u of uniqueUsers) {
+      clearedUser = { id: u.id, name: u.name, mobileNumber: u.mobileNumber };
+      const otherAssignments = await prisma.userHierarchyAssignment.count({
+        where: { userId: u.id },
+      }).catch(() => 0);
+
+      const isMock =
+        u.name.startsWith('Mock ') ||
+        u.mobileNumber.startsWith('+919700') ||
+        u.mobileNumber.startsWith('9700') ||
+        u.mobileNumber.startsWith('+919101') ||
+        u.mobileNumber.startsWith('9101');
+
+      if (otherAssignments === 0) {
+        if (isMock) {
+          try {
+            await prisma.user.delete({ where: { id: u.id } });
+            continue;
+          } catch {
+            // fallback to clearing code
+          }
+        }
+        await prisma.user.update({
+          where: { id: u.id },
+          data: {
+            userCode: `${u.userCode}_UNASSIGNED_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            accountStatus: AccountStatus.DEACTIVATED,
+          },
+        }).catch(() => {});
+      } else {
+        if (u.userCode === targetSlot.slotCode || (targetSlot.canonicalCode && u.userCode === targetSlot.canonicalCode)) {
+          await prisma.user.update({
+            where: { id: u.id },
+            data: {
+              userCode: `${u.userCode}_DETACHED_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            },
+          }).catch(() => {});
+        }
+      }
+    }
+
+    return {
+      success: true,
+      message: `Incharge record removed successfully from slot "${targetSlot.slotCode}" (${targetSlot.jurisdictionName}).`,
+      slotCode: targetSlot.slotCode,
+      clearedUser,
     };
   }
 }

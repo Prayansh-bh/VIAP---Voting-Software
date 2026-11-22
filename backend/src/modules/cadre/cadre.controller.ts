@@ -310,4 +310,65 @@ export class CadreController {
     reply.header('Content-Disposition', `attachment; filename="incharge_roster_${constituencyId}.csv"`);
     return reply.send(csv);
   }
+
+  static async unassignRosterSlot(
+    req: FastifyRequest<{ Params: { constituencyId: string; slotIdentifier: string } }>,
+    reply: FastifyReply
+  ) {
+    const { constituencyId, slotIdentifier } = req.params;
+    if (!constituencyId || !slotIdentifier) {
+      return reply.status(400).send(errorResponse('constituencyId and slotIdentifier are required', 'VALIDATION_ERROR'));
+    }
+
+    if (req.hierarchyScope && !req.hierarchyScope.isGlobalScope) {
+      if (!req.hierarchyScope.accessibleConstituencyIds.has(constituencyId)) {
+        return reply.status(403).send(errorResponse('Access denied to this constituency roster', 'FORBIDDEN_SCOPE'));
+      }
+    }
+
+    try {
+      const result = await InchargeProvisioningService.unassignRosterSlot({
+        constituencyId,
+        slotIdentifier,
+        actorId: req.user?.userId,
+        organisationId: req.user?.organisationId ?? undefined,
+      });
+
+      return reply.send(successResponse(result, result.message));
+    } catch (err: any) {
+      const statusCode = err.statusCode || 400;
+      return reply.status(statusCode).send(errorResponse(err.message, err.code || 'UNASSIGN_SLOT_FAILED'));
+    }
+  }
+
+  static async unassignRosterSlotPost(
+    req: FastifyRequest<{ Params: { constituencyId: string }; Body: { slotIdentifier: string } }>,
+    reply: FastifyReply
+  ) {
+    const { constituencyId } = req.params;
+    const slotIdentifier = req.body?.slotIdentifier || (req.query as any)?.slotIdentifier;
+    if (!constituencyId || !slotIdentifier) {
+      return reply.status(400).send(errorResponse('constituencyId and slotIdentifier are required', 'VALIDATION_ERROR'));
+    }
+
+    if (req.hierarchyScope && !req.hierarchyScope.isGlobalScope) {
+      if (!req.hierarchyScope.accessibleConstituencyIds.has(constituencyId)) {
+        return reply.status(403).send(errorResponse('Access denied to this constituency roster', 'FORBIDDEN_SCOPE'));
+      }
+    }
+
+    try {
+      const result = await InchargeProvisioningService.unassignRosterSlot({
+        constituencyId,
+        slotIdentifier,
+        actorId: req.user?.userId,
+        organisationId: req.user?.organisationId ?? undefined,
+      });
+
+      return reply.send(successResponse(result, result.message));
+    } catch (err: any) {
+      const statusCode = err.statusCode || 400;
+      return reply.status(statusCode).send(errorResponse(err.message, err.code || 'UNASSIGN_SLOT_FAILED'));
+    }
+  }
 }

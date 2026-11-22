@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "workspaces": [
     "frontend",
+    "frontend-mobile",
     "backend",
     "admin"
   ],
@@ -19,6 +20,7 @@
     "build": "npm --prefix backend run prisma:generate && npm --prefix backend run build && npm --prefix frontend run build && node scripts/prepare_dist.mjs",
     "build:backend": "npm --prefix backend run prisma:generate && npm --prefix backend run build",
     "build:frontend": "npm --prefix frontend run build",
+    "build:mobile": "npm --prefix frontend-mobile run build",
     "build:admin": "npm --prefix admin run build",
     "vercel-build": "npm --prefix frontend run build && node scripts/prepare_dist.mjs",
     "install:all": "npm install --workspaces",
