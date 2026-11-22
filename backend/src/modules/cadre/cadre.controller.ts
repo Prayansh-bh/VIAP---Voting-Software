@@ -312,10 +312,11 @@ export class CadreController {
   }
 
   static async unassignRosterSlot(
-    req: FastifyRequest<{ Params: { constituencyId: string; slotIdentifier: string } }>,
+    req: FastifyRequest<{ Params: { constituencyId: string; slotIdentifier: string }; Querystring: { mobileNumber?: string } }>,
     reply: FastifyReply
   ) {
     const { constituencyId, slotIdentifier } = req.params;
+    const mobileNumber = req.query?.mobileNumber || (req.body as any)?.mobileNumber;
     if (!constituencyId || !slotIdentifier) {
       return reply.status(400).send(errorResponse('constituencyId and slotIdentifier are required', 'VALIDATION_ERROR'));
     }
@@ -330,6 +331,7 @@ export class CadreController {
       const result = await InchargeProvisioningService.unassignRosterSlot({
         constituencyId,
         slotIdentifier,
+        mobileNumber,
         actorId: req.user?.userId,
         organisationId: req.user?.organisationId ?? undefined,
       });
@@ -342,11 +344,12 @@ export class CadreController {
   }
 
   static async unassignRosterSlotPost(
-    req: FastifyRequest<{ Params: { constituencyId: string }; Body: { slotIdentifier: string } }>,
+    req: FastifyRequest<{ Params: { constituencyId: string }; Body: { slotIdentifier: string; mobileNumber?: string } }>,
     reply: FastifyReply
   ) {
     const { constituencyId } = req.params;
     const slotIdentifier = req.body?.slotIdentifier || (req.query as any)?.slotIdentifier;
+    const mobileNumber = req.body?.mobileNumber || (req.query as any)?.mobileNumber;
     if (!constituencyId || !slotIdentifier) {
       return reply.status(400).send(errorResponse('constituencyId and slotIdentifier are required', 'VALIDATION_ERROR'));
     }
@@ -361,6 +364,7 @@ export class CadreController {
       const result = await InchargeProvisioningService.unassignRosterSlot({
         constituencyId,
         slotIdentifier,
+        mobileNumber,
         actorId: req.user?.userId,
         organisationId: req.user?.organisationId ?? undefined,
       });

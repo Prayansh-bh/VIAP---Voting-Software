@@ -2,6 +2,7 @@ import { RoleType, AccountStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import xlsx from 'xlsx';
 import { prisma } from '../../lib/prisma.js';
+import { OtpService } from '../auth/services/otp.service.js';
 
 export interface CadreSlotItem {
   unitKey: string;
@@ -1884,7 +1885,7 @@ export class InchargeProvisioningService {
             }).catch(() => 1);
             if (otherCount === 0) {
               try {
-                await prisma.user.delete({ where: { id: prevUser.id } });
+                await this.permanentlyDeleteUser(prevUser.id);
                 deleted = true;
               } catch {
                 deleted = false;
@@ -2021,24 +2022,156 @@ export class InchargeProvisioningService {
   }
 
   /**
-   * Completely unassigns and removes an incharge record from a specific roster slot.
+   * Completely and permanently deletes a user record from the database.
+   * Cleans all foreign-key tables (sessions, devices, OTPs, hierarchy assignments,
+   * cadre profile, voter links, reports, tasks, audit logs) and deletes the user row.
+   * Revokes any active JWT sessions and prevents further logins.
+   */
+  static async permanentlyDeleteUser(userId: string): Promise<boolean> {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return false;
+    // Safety: never delete platform super admin
+    if (user.role === RoleType.SUPER_ADMIN) return false;
+
+    const rawMobile = user.mobileNumber.replace(/\D/g, '').slice(-10);
+
+    // 1. Invalidate and delete all active sessions & device authorization tokens
+    await prisma.loginSession.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.userDevice.deleteMany({ where: { userId } }).catch(() => {});
+
+    // 2. Delete all OTP verification records for this user and mobile number
+    await prisma.oTPVerification.deleteMany({
+      where: {
+        OR: [
+          { userId },
+          { mobileNumber: user.mobileNumber },
+          ...(rawMobile ? [
+            { mobileNumber: rawMobile },
+            { mobileNumber: `+91${rawMobile}` },
+          ] : []),
+        ],
+      },
+    }).catch(() => {});
+
+    // 3. Clear in-memory OTP rate-limiting / cooldowns
+    if (rawMobile) {
+      try {
+        OtpService.clearCooldown(rawMobile);
+      } catch {}
+    }
+
+    // 4. Delete all hierarchy assignments across all tiers
+    await prisma.userHierarchyAssignment.deleteMany({ where: { userId } }).catch(() => {});
+
+    // 5. Unlink from all VoterGroups and individual Voters
+    await prisma.voterGroup.updateMany({
+      where: { assignedInchargeId: userId },
+      data: { assignedInchargeId: null },
+    }).catch(() => {});
+
+    await prisma.voter.updateMany({
+      where: { assignedInchargeId: userId },
+      data: { assignedInchargeId: null },
+    }).catch(() => {});
+
+    await prisma.voter.updateMany({
+      where: { updatedById: userId },
+      data: { updatedById: null },
+    }).catch(() => {});
+
+    // 6. Delete cadre profile and assignments
+    await prisma.cadreAssignment.deleteMany({
+      where: { OR: [{ assigneeUserId: userId }, { assignedById: userId }] },
+    }).catch(() => {});
+    await prisma.cadre.deleteMany({ where: { userId } }).catch(() => {});
+
+    // 7. Delete task assignments and unassign direct/created tasks
+    await prisma.taskAssignment.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.task.updateMany({
+      where: { assigneeId: userId },
+      data: { assigneeId: null },
+    }).catch(() => {});
+    await prisma.task.updateMany({
+      where: { createdById: userId },
+      data: { createdById: null },
+    }).catch(() => {});
+
+    // 8. Delete training progress records
+    await prisma.trainingProgress.deleteMany({
+      where: { OR: [{ userId }, { assignedById: userId }] },
+    }).catch(() => {});
+
+    // 9. Delete notifications and audit logs
+    await prisma.notification.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.auditLog.deleteMany({ where: { userId } }).catch(() => {});
+
+    // 10. Delete live vote events and vote trackings
+    await prisma.liveVoteEvent.deleteMany({ where: { inchargeId: userId } }).catch(() => {});
+    await prisma.voteTracking.deleteMany({ where: { markedById: userId } }).catch(() => {});
+
+    // 11. Delete flags, reports, and poll votes
+    await prisma.fakeVoterFlag.deleteMany({
+      where: { OR: [{ flaggedById: userId }, { resolvedById: userId }] },
+    }).catch(() => {});
+    await prisma.pollingReport.deleteMany({ where: { createdById: userId } }).catch(() => {});
+    await prisma.groundReport.deleteMany({ where: { createdById: userId } }).catch(() => {});
+    await prisma.pollVote.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.poll.updateMany({
+      where: { createdById: userId },
+      data: { createdById: null },
+    }).catch(() => {});
+    await prisma.dataImport.updateMany({
+      where: { uploadedById: userId },
+      data: { uploadedById: null },
+    }).catch(() => {});
+    await prisma.importJob.deleteMany({ where: { createdById: userId } }).catch(() => {});
+
+    // 12. PERMANENTLY DELETE THE USER ROW FROM THE DATABASE
+    await prisma.user.delete({ where: { id: userId } });
+    return true;
+  }
+
+  /**
+   * Completely unassigns a roster slot AND permanently deletes the assigned incharge user from the database.
    * Works across all 4 tiers (Mandals, Polling Stations, Booths, 100-Voter Groups).
-   * Unlinks VoterGroups/Voters, deletes UserHierarchyAssignments, and frees user accounts.
+   * Unlinks VoterGroups/Voters, deletes UserHierarchyAssignments, and permanently removes the User record.
    */
   static async unassignRosterSlot(opts: {
     constituencyId: string;
     slotIdentifier: string;
+    mobileNumber?: string;
     actorId?: string;
     organisationId?: string;
   }): Promise<{
     success: boolean;
     message: string;
     slotCode: string;
-    clearedUser?: { id: string; name: string; mobileNumber: string } | null;
+    deletedUsers: Array<{ id: string; name: string; mobileNumber: string }>;
   }> {
-    const { constituencyId, slotIdentifier } = opts;
-    const slotsResp = await this.getRequiredRosterSlots(constituencyId);
+    const { constituencyId, slotIdentifier, mobileNumber } = opts;
+    const userIdsToDelete = new Set<string>();
 
+    // 1. If an explicit mobile number was passed, find that user
+    if (mobileNumber && String(mobileNumber).trim()) {
+      const rawMob = String(mobileNumber).replace(/\D/g, '').slice(-10);
+      if (rawMob.length === 10) {
+        const usersByMob = await prisma.user.findMany({
+          where: {
+            OR: [
+              { mobileNumber: String(mobileNumber).trim() },
+              { mobileNumber: rawMob },
+              { mobileNumber: `+91${rawMob}` },
+              { mobileNumber: { endsWith: rawMob } },
+            ],
+          },
+          select: { id: true },
+        });
+        for (const u of usersByMob) userIdsToDelete.add(u.id);
+      }
+    }
+
+    // 2. Identify the slot
+    const slotsResp = await this.getRequiredRosterSlots(constituencyId);
     const lookupKey = (slotIdentifier || '').trim().toUpperCase();
     let targetSlot = slotsResp.allSlots.find(
       (s) =>
@@ -2078,126 +2211,143 @@ export class InchargeProvisioningService {
       }
     }
 
-    if (!targetSlot) {
-      const err: any = new Error(`Slot "${slotIdentifier}" not found in constituency.`);
+    // 3. Collect slot assignments and user IDs
+    let slotFilter: any = null;
+    if (targetSlot) {
+      if (targetSlot.assignedUser?.id) {
+        userIdsToDelete.add(targetSlot.assignedUser.id);
+      }
+      if (targetSlot.assignedUser?.mobileNumber) {
+        const rawSlotMob = targetSlot.assignedUser.mobileNumber.replace(/\D/g, '').slice(-10);
+        if (rawSlotMob.length === 10) {
+          const slotMobUsers = await prisma.user.findMany({
+            where: { mobileNumber: { endsWith: rawSlotMob } },
+            select: { id: true },
+          });
+          for (const u of slotMobUsers) userIdsToDelete.add(u.id);
+        }
+      }
+
+      slotFilter = {};
+      if (targetSlot.level === '100_VOTER_GROUP' && targetSlot.groupId) {
+        slotFilter.voterGroupId = targetSlot.groupId;
+      } else if (targetSlot.level === 'BOOTH' && targetSlot.boothId) {
+        slotFilter.boothId = targetSlot.boothId;
+        slotFilter.roleType = { in: [RoleType.BOOTH_PRESIDENT, RoleType.BOOTH_INCHARGE] };
+      } else if (targetSlot.level === 'POLLING_STATION') {
+        if (targetSlot.pollingStationId) {
+          slotFilter.pollingStationId = targetSlot.pollingStationId;
+        } else if (targetSlot.villageId) {
+          slotFilter.villageId = targetSlot.villageId;
+        }
+        slotFilter.roleType = RoleType.VILLAGE_INCHARGE;
+      } else if (targetSlot.level === 'MANDAL' && targetSlot.mandalId) {
+        slotFilter.mandalId = targetSlot.mandalId;
+        slotFilter.roleType = RoleType.MANDAL_INCHARGE;
+      }
+
+      // Check VoterGroup assignedInchargeId
+      if (targetSlot.level === '100_VOTER_GROUP' && targetSlot.groupId) {
+        const vg = await prisma.voterGroup.findUnique({
+          where: { id: targetSlot.groupId },
+          select: { assignedInchargeId: true },
+        });
+        if (vg?.assignedInchargeId) userIdsToDelete.add(vg.assignedInchargeId);
+
+        // Unlink voter group & voters
+        await prisma.voterGroup.update({
+          where: { id: targetSlot.groupId },
+          data: { assignedInchargeId: null },
+        }).catch(() => {});
+
+        await prisma.voter.updateMany({
+          where: { voterGroupId: targetSlot.groupId },
+          data: { assignedInchargeId: null },
+        }).catch(() => {});
+      }
+
+      // Find all hierarchy assignments for this slot
+      if (slotFilter && Object.keys(slotFilter).length > 0) {
+        const assigns = await prisma.userHierarchyAssignment.findMany({
+          where: slotFilter,
+          select: { userId: true },
+        });
+        for (const a of assigns) {
+          if (a.userId) userIdsToDelete.add(a.userId);
+        }
+
+        // Delete all hierarchy assignments for this slot
+        await prisma.userHierarchyAssignment.deleteMany({
+          where: slotFilter,
+        }).catch(() => {});
+      }
+
+      // Find users holding slotCode
+      const usersHoldingSlotCode = await prisma.user.findMany({
+        where: {
+          OR: [
+            { userCode: targetSlot.slotCode },
+            { userCode: { endsWith: `-${targetSlot.slotCode}` } },
+            ...(targetSlot.canonicalCode ? [{ userCode: targetSlot.canonicalCode }] : []),
+          ],
+        },
+        select: { id: true },
+      });
+      for (const u of usersHoldingSlotCode) userIdsToDelete.add(u.id);
+    } else {
+      // Check if slotIdentifier is directly a 10-digit mobile number or UUID
+      const rawSlotMob = slotIdentifier.replace(/\D/g, '').slice(-10);
+      if (rawSlotMob.length === 10) {
+        const uList = await prisma.user.findMany({
+          where: { mobileNumber: { endsWith: rawSlotMob } },
+          select: { id: true },
+        });
+        for (const u of uList) userIdsToDelete.add(u.id);
+      }
+      const directUser = await prisma.user.findUnique({
+        where: { id: slotIdentifier },
+        select: { id: true },
+      }).catch(() => null);
+      if (directUser) userIdsToDelete.add(directUser.id);
+    }
+
+    if (!targetSlot && userIdsToDelete.size === 0) {
+      const err: any = new Error(`Slot or user "${slotIdentifier}" not found in constituency.`);
       err.statusCode = 404;
       err.code = 'SLOT_NOT_FOUND';
       throw err;
     }
 
-    // Identify slot filter
-    const slotFilter: any = {};
-    if (targetSlot.level === '100_VOTER_GROUP' && targetSlot.groupId) {
-      slotFilter.voterGroupId = targetSlot.groupId;
-    } else if (targetSlot.level === 'BOOTH' && targetSlot.boothId) {
-      slotFilter.boothId = targetSlot.boothId;
-      slotFilter.roleType = { in: [RoleType.BOOTH_PRESIDENT, RoleType.BOOTH_INCHARGE] };
-    } else if (targetSlot.level === 'POLLING_STATION') {
-      if (targetSlot.pollingStationId) {
-        slotFilter.pollingStationId = targetSlot.pollingStationId;
-      } else if (targetSlot.villageId) {
-        slotFilter.villageId = targetSlot.villageId;
-      }
-      slotFilter.roleType = RoleType.VILLAGE_INCHARGE;
-    } else if (targetSlot.level === 'MANDAL' && targetSlot.mandalId) {
-      slotFilter.mandalId = targetSlot.mandalId;
-      slotFilter.roleType = RoleType.MANDAL_INCHARGE;
-    }
+    // 4. PERMANENTLY DELETE ALL IDENTIFIED INCHARGE USERS FROM THE DATABASE
+    const deletedUsers: Array<{ id: string; name: string; mobileNumber: string }> = [];
 
-    const assignments = Object.keys(slotFilter).length > 0
-      ? await prisma.userHierarchyAssignment.findMany({
-          where: slotFilter,
-          include: { user: true },
-        })
-      : [];
-
-    const usersHoldingSlotCode = await prisma.user.findMany({
-      where: {
-        OR: [
-          { userCode: targetSlot.slotCode },
-          { userCode: { endsWith: `-${targetSlot.slotCode}` } },
-          ...(targetSlot.canonicalCode ? [{ userCode: targetSlot.canonicalCode }] : []),
-        ],
-      },
-    });
-
-    const candidateUsers = [
-      ...assignments.map((a) => a.user),
-      ...usersHoldingSlotCode,
-      ...(targetSlot.assignedUser ? [targetSlot.assignedUser] : []),
-    ].filter((u): u is NonNullable<typeof u> => Boolean(u));
-
-    const uniqueUsers = Array.from(new Map(candidateUsers.map((u) => [u.id, u])).values());
-
-    // 1. Unlink VoterGroup & Voters
-    if (targetSlot.level === '100_VOTER_GROUP' && targetSlot.groupId) {
-      await prisma.voterGroup.update({
-        where: { id: targetSlot.groupId },
-        data: { assignedInchargeId: null },
-      }).catch(() => {});
-
-      await prisma.voter.updateMany({
-        where: { voterGroupId: targetSlot.groupId },
-        data: { assignedInchargeId: null },
-      }).catch(() => {});
-    }
-
-    // 2. Delete all hierarchy assignments for this slot
-    if (Object.keys(slotFilter).length > 0) {
-      await prisma.userHierarchyAssignment.deleteMany({
-        where: slotFilter,
-      }).catch(() => {});
-    }
-
-    let clearedUser: { id: string; name: string; mobileNumber: string } | null = null;
-
-    // 3. Clean up the users
-    for (const u of uniqueUsers) {
-      clearedUser = { id: u.id, name: u.name, mobileNumber: u.mobileNumber };
-      const otherAssignments = await prisma.userHierarchyAssignment.count({
-        where: { userId: u.id },
-      }).catch(() => 0);
-
-      const isMock =
-        u.name.startsWith('Mock ') ||
-        u.mobileNumber.startsWith('+919700') ||
-        u.mobileNumber.startsWith('9700') ||
-        u.mobileNumber.startsWith('+919101') ||
-        u.mobileNumber.startsWith('9101');
-
-      if (otherAssignments === 0) {
-        if (isMock) {
-          try {
-            await prisma.user.delete({ where: { id: u.id } });
-            continue;
-          } catch {
-            // fallback to clearing code
-          }
-        }
-        await prisma.user.update({
-          where: { id: u.id },
-          data: {
-            userCode: `${u.userCode}_UNASSIGNED_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-            accountStatus: AccountStatus.DEACTIVATED,
-          },
-        }).catch(() => {});
-      } else {
-        if (u.userCode === targetSlot.slotCode || (targetSlot.canonicalCode && u.userCode === targetSlot.canonicalCode)) {
-          await prisma.user.update({
-            where: { id: u.id },
-            data: {
-              userCode: `${u.userCode}_DETACHED_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-            },
+    for (const uId of userIdsToDelete) {
+      const user = await prisma.user.findUnique({ where: { id: uId } });
+      if (!user) continue;
+      if (user.role === RoleType.SUPER_ADMIN) {
+        // Never delete super admins; simply ensure slot unassigned
+        if (slotFilter && Object.keys(slotFilter).length > 0) {
+          await prisma.userHierarchyAssignment.deleteMany({
+            where: { userId: uId, ...slotFilter },
           }).catch(() => {});
         }
+        continue;
+      }
+
+      const deleted = await this.permanentlyDeleteUser(uId);
+      if (deleted) {
+        deletedUsers.push({ id: user.id, name: user.name, mobileNumber: user.mobileNumber });
       }
     }
 
+    const slotLabel = targetSlot?.slotCode || slotIdentifier;
     return {
       success: true,
-      message: `Incharge record removed successfully from slot "${targetSlot.slotCode}" (${targetSlot.jurisdictionName}).`,
-      slotCode: targetSlot.slotCode,
-      clearedUser,
+      message: deletedUsers.length > 0
+        ? `Permanently deleted incharge user (${deletedUsers.map((u) => `${u.name} / +91 ${u.mobileNumber}`).join(', ')}) from database. Login access completely revoked.`
+        : `Slot "${slotLabel}" has been unassigned and cleared from the database.`,
+      slotCode: slotLabel,
+      deletedUsers,
     };
   }
 }

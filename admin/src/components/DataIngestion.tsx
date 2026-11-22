@@ -558,12 +558,12 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
     }
   };
 
-  const handleRemoveSlotIncharge = async (slotCode: string, slotTitle: string) => {
+  const handleRemoveSlotIncharge = async (slotCode: string, slotTitle: string, userMobile?: string) => {
     const cId = selectedConstituencyId || summary?.constituencyId;
     if (!cId) return;
 
     const confirmed = window.confirm(
-      `Are you sure you want to remove the assigned incharge from slot "${slotCode}" (${slotTitle})?\n\nThis will unassign the number and record from the database, allowing you to add a new incharge.`
+      `Are you sure you want to permanently delete and remove the assigned incharge from slot "${slotCode}" (${slotTitle})?\n\nThis will permanently delete the user record from the database and revoke all login access.`
     );
     if (!confirmed) return;
 
@@ -571,8 +571,8 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
     setManualSubmitError(null);
     setManualSubmitMessage(null);
     try {
-      const res = await unassignInchargeSlot(cId, slotCode);
-      setManualSubmitMessage(res?.message || `Successfully removed incharge from slot ${slotCode}.`);
+      const res = await unassignInchargeSlot(cId, slotCode, userMobile);
+      setManualSubmitMessage(res?.message || `Successfully removed and permanently deleted incharge for slot ${slotCode}.`);
       setManualInputs((prev) => {
         const next = { ...prev };
         delete next[slotCode];
@@ -2249,9 +2249,9 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={() => handleRemoveSlotIncharge(slot.slotCode, slot.title)}
+                                  onClick={() => handleRemoveSlotIncharge(slot.slotCode, slot.title, slot.assignedUser?.mobileNumber)}
                                   disabled={removingSlotCode === slot.slotCode}
-                                  title={`Remove and unassign incharge from slot ${slot.slotCode}`}
+                                  title={`Permanently delete incharge user and unassign slot ${slot.slotCode}`}
                                   className="px-2.5 py-1 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-300 hover:text-red-200 border border-red-500/30 text-[11px] font-semibold transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
                                 >
                                   {removingSlotCode === slot.slotCode ? (

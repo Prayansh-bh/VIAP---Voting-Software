@@ -920,9 +920,11 @@ export async function submitManualInchargeRoster(
 
 export async function unassignInchargeSlot(
   constituencyId: string,
-  slotIdentifier: string
+  slotIdentifier: string,
+  mobileNumber?: string
 ): Promise<any> {
-  return request(`/cadre/roster-slot/${encodeURIComponent(constituencyId)}/${encodeURIComponent(slotIdentifier)}`, {
+  const query = mobileNumber ? `?mobileNumber=${encodeURIComponent(mobileNumber)}` : '';
+  return request(`/cadre/roster-slot/${encodeURIComponent(constituencyId)}/${encodeURIComponent(slotIdentifier)}${query}`, {
     method: 'DELETE',
   });
 }
