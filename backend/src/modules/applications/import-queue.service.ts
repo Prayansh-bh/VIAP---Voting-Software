@@ -1231,37 +1231,44 @@ export class ImportQueueService {
         }
 
         // In-place update preserving voter primary key and existing foreign-key relations
-        for (const u of votersToUpdate) {
-          await tx.voter.update({
-            where: { id: u.existingId },
-            data: {
-              name: u.item.name,
-              fatherHusbandName: u.item.relativeName,
-              relationType: u.item.relation,
-              age: u.item.age,
-              gender: u.item.gender,
-              mobileNumber: u.item.mobileNumber,
-              houseNumber: u.item.houseNumber,
-              caste: u.item.caste,
-              profession: u.item.profession,
-              politicalPreference: u.item.politicalPreference,
-              voterStatus: u.item.voterStatus as any,
-              notes: u.item.notes,
-              stateId: resolvedStateId,
-              zoneId: resolvedZoneId,
-              parliamentId: resolvedParliamentId,
-              constituencyId: constituency.id,
-              mandalId: u.mandalId,
-              villageId: u.villageId,
-              boothId: u.boothId,
-              voterGroupId: u.groupId,
-              updatedById: actorId,
-            },
-          });
-          batchUpdated++;
+        // Process in concurrent batches of 25 to complete quickly and prevent transaction timeout on large batches
+        const updateChunkSize = 25;
+        for (let i = 0; i < votersToUpdate.length; i += updateChunkSize) {
+          const chunk = votersToUpdate.slice(i, i + updateChunkSize);
+          await Promise.all(
+            chunk.map(async (u) => {
+              await tx.voter.update({
+                where: { id: u.existingId },
+                data: {
+                  name: u.item.name,
+                  fatherHusbandName: u.item.relativeName,
+                  relationType: u.item.relation,
+                  age: u.item.age,
+                  gender: u.item.gender,
+                  mobileNumber: u.item.mobileNumber,
+                  houseNumber: u.item.houseNumber,
+                  caste: u.item.caste,
+                  profession: u.item.profession,
+                  politicalPreference: u.item.politicalPreference,
+                  voterStatus: u.item.voterStatus as any,
+                  notes: u.item.notes,
+                  stateId: resolvedStateId,
+                  zoneId: resolvedZoneId,
+                  parliamentId: resolvedParliamentId,
+                  constituencyId: constituency.id,
+                  mandalId: u.mandalId,
+                  villageId: u.villageId,
+                  boothId: u.boothId,
+                  voterGroupId: u.groupId,
+                  updatedById: actorId,
+                },
+              });
+            })
+          );
+          batchUpdated += chunk.length;
         }
       },
-      { timeout: 15000 }
+      { timeout: 180000, maxWait: 60000 }
     );
 
     return { imported: batchImported, updated: batchUpdated, skipped, errors };
