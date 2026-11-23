@@ -20,7 +20,7 @@ import { emitHierarchyEvent } from '../../lib/socket.js';
 import { errorResponse, successResponse } from '../../common/response.js';
 import { ApplicationsService } from './applications.service.js';
 
-const BATCH_SIZE = 500;
+const BATCH_SIZE = 1500;
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB max for bulk CSV file
 const TEMP_DIR = path.join(os.tmpdir(), 'viap-imports');
 const WORKER_NODE_ID = process.env.RENDER_INSTANCE_ID || process.env.INSTANCE_ID || crypto.randomUUID();
@@ -1232,7 +1232,7 @@ export class ImportQueueService {
 
         // In-place update preserving voter primary key and existing foreign-key relations
         // Process in concurrent batches of 25 to complete quickly and prevent transaction timeout on large batches
-        const updateChunkSize = 25;
+        const updateChunkSize = 50;
         for (let i = 0; i < votersToUpdate.length; i += updateChunkSize) {
           const chunk = votersToUpdate.slice(i, i + updateChunkSize);
           await Promise.all(

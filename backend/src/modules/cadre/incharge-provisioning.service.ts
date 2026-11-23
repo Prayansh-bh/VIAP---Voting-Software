@@ -1004,6 +1004,7 @@ export class InchargeProvisioningService {
       const neededCodes = new Set<string>();
       for (let g = 1; g <= neededGroups; g++) {
         neededCodes.add(`VG-${booth.id.slice(0, 8)}-G${g}`);
+        neededCodes.add(`VG-${booth.id.slice(0, 8)}-GROUP${g}`);
       }
 
       // Prune obsolete/duplicate groups for this booth (e.g. legacy -GROUP format or excess groups)
@@ -1089,11 +1090,12 @@ export class InchargeProvisioningService {
    * structured by section for manual entry and spreadsheet template generation.
    */
   static async getRequiredRosterSlots(constituencyId: string): Promise<CadreSlotsResponse> {
-    try {
-      await this.ensureConstituencyVoterGroups(constituencyId);
-    } catch (err: any) {
-      console.warn(`[getRequiredRosterSlots] ensureConstituencyVoterGroups non-fatal warning for ${constituencyId}:`, err?.message || err);
-    }
+    // Non-blocking background sync so GET response returns instantly in <100ms
+    setImmediate(() => {
+      this.ensureConstituencyVoterGroups(constituencyId).catch((err) => {
+        console.warn(`[getRequiredRosterSlots] background voter group sync note for ${constituencyId}:`, err?.message || err);
+      });
+    });
 
     const constituency = await prisma.constituency.findUnique({
       where: { id: constituencyId },
