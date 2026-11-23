@@ -77,15 +77,40 @@ interface BoothInchargeDashboardProps {
   onLogout: () => void;
 }
 
-const PARTY_COLORS: Record<VoterPreference, { bg: string; text: string; hex: string; lightBg: string; border: string; darkText: string }> = {
+const DEFAULT_PARTY_COLOR_INFO = {
+  bg: 'bg-gray-400',
+  text: 'text-gray-800',
+  hex: '#64748b',
+  lightBg: 'bg-gray-50',
+  border: 'border-gray-200',
+  darkText: 'text-gray-800'
+};
+
+const BASE_PARTY_COLORS: Record<string, { bg: string; text: string; hex: string; lightBg: string; border: string; darkText: string }> = {
   TDP: { bg: 'bg-yellow-400', text: 'text-yellow-800', hex: '#eab308', lightBg: 'bg-yellow-50', border: 'border-yellow-200', darkText: 'text-yellow-800' },
   YSRCP: { bg: 'bg-blue-600', text: 'text-blue-600', hex: '#2563eb', lightBg: 'bg-blue-50', border: 'border-blue-200', darkText: 'text-blue-800' },
   JSP: { bg: 'bg-red-600', text: 'text-red-600', hex: '#dc2626', lightBg: 'bg-red-50', border: 'border-red-200', darkText: 'text-red-800' },
   BJP: { bg: 'bg-orange-500', text: 'text-orange-500', hex: '#f97316', lightBg: 'bg-orange-50', border: 'border-orange-200', darkText: 'text-orange-800' },
   INC: { bg: 'bg-sky-400', text: 'text-sky-400', hex: '#38bdf8', lightBg: 'bg-sky-50', border: 'border-sky-200', darkText: 'text-sky-950' },
   Neutral: { bg: 'bg-gray-400', text: 'text-gray-500', hex: '#9ca3af', lightBg: 'bg-gray-50', border: 'border-gray-200', darkText: 'text-gray-800' },
-  OTH: { bg: 'bg-purple-600', text: 'text-purple-600', hex: '#9333ea', lightBg: 'bg-purple-50', border: 'border-purple-200', darkText: 'text-purple-800' }
+  NEUTRAL: { bg: 'bg-gray-400', text: 'text-gray-500', hex: '#9ca3af', lightBg: 'bg-gray-50', border: 'border-gray-200', darkText: 'text-gray-800' },
+  OTH: { bg: 'bg-purple-600', text: 'text-purple-600', hex: '#9333ea', lightBg: 'bg-purple-50', border: 'border-purple-200', darkText: 'text-purple-800' },
+  OTHER: { bg: 'bg-purple-600', text: 'text-purple-600', hex: '#9333ea', lightBg: 'bg-purple-50', border: 'border-purple-200', darkText: 'text-purple-800' },
+  Unknown: { bg: 'bg-gray-400', text: 'text-gray-500', hex: '#64748b', lightBg: 'bg-gray-50', border: 'border-gray-200', darkText: 'text-gray-800' },
+  UNKNOWN: { bg: 'bg-gray-400', text: 'text-gray-500', hex: '#64748b', lightBg: 'bg-gray-50', border: 'border-gray-200', darkText: 'text-gray-800' }
 };
+
+const STANDARD_PARTIES: VoterPreference[] = ['TDP', 'YSRCP', 'JSP', 'BJP', 'INC', 'Neutral', 'OTH'];
+
+const PARTY_COLORS: Record<any, { bg: string; text: string; hex: string; lightBg: string; border: string; darkText: string }> = new Proxy(BASE_PARTY_COLORS, {
+  get: (target, prop: string) => {
+    if (typeof prop !== 'string') return DEFAULT_PARTY_COLOR_INFO;
+    if (target[prop]) return target[prop];
+    const upper = prop.toUpperCase();
+    if (target[upper]) return target[upper];
+    return DEFAULT_PARTY_COLOR_INFO;
+  }
+});
 
 export function getVoterCategory(v: Voter): 'SC' | 'ST' | 'BC' | 'OC' | 'OBC' | 'Unknown' {
   const cat = (v.subCaste || '').trim().toUpperCase();
@@ -213,14 +238,14 @@ function StackedBarChartCard({ title, icon, totalVoters, data }: ChartCardProps)
                   {/* Horizontal Stacked Bar */}
                   {rowTotal > 0 ? (
                     <div className="relative w-full h-4 bg-slate-50 rounded-sm flex overflow-hidden shadow-sm z-10">
-                      {(Object.keys(PARTY_COLORS) as VoterPreference[]).map(party => {
+                      {STANDARD_PARTIES.map(party => {
                         const count = row.preferences[party] || 0;
                         const pct = (count / rowTotal) * 100;
                         if (pct <= 0) return null;
                         return (
                           <div
                             key={party}
-                            style={{ width: `${pct}%`, backgroundColor: PARTY_COLORS[party].hex }}
+                            style={{ width: `${pct}%`, backgroundColor: PARTY_COLORS[party]?.hex || '#64748b' }}
                             className="h-full cursor-pointer hover:brightness-105 transition-all relative group"
                             title={`${party}: ${count} (${pct.toFixed(1)}%)`}
                           >
@@ -246,9 +271,9 @@ function StackedBarChartCard({ title, icon, totalVoters, data }: ChartCardProps)
 
       {/* Legend below the chart */}
       <div className="flex flex-wrap items-center justify-center gap-x-3.5 gap-y-1.5 pt-4 mt-4 border-t border-slate-100 text-[9px] font-black text-slate-400 uppercase tracking-wider select-none">
-        {(Object.keys(PARTY_COLORS) as VoterPreference[]).map(party => (
+        {STANDARD_PARTIES.map(party => (
           <div key={party} className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: PARTY_COLORS[party].hex }} />
+            <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: PARTY_COLORS[party]?.hex || '#64748b' }} />
             <span>{party}</span>
           </div>
         ))}
@@ -1038,13 +1063,14 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
   const [hoveredSlice, setHoveredSlice] = useState<string | null>(null);
 
   const donutChartData = useMemo(() => {
-    return (Object.entries(partyStats) as [VoterPreference, number][]).map(([key, value]) => {
+    return (Object.entries(partyStats) as [string, number][]).map(([key, value]) => {
       const percentage = totalValid > 0 ? (value / totalValid) * 100 : 0;
+      const colorInfo = PARTY_COLORS[key] || DEFAULT_PARTY_COLOR_INFO;
       return {
         key,
         value,
         percentage,
-        color: PARTY_COLORS[key as VoterPreference].hex
+        color: colorInfo?.hex || '#64748b'
       };
     }).sort((a, b) => b.value - a.value);
   }, [partyStats, totalValid]);
@@ -1431,7 +1457,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                       <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider mb-2">Ground Preference Counts</h4>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {donutChartData.map((slice) => {
-                          const info = PARTY_COLORS[slice.key as VoterPreference];
+                          const info = PARTY_COLORS[slice.key] || DEFAULT_PARTY_COLOR_INFO;
                           const isHovered = hoveredSlice === slice.key;
                           return (
                             <div 
@@ -1964,12 +1990,12 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
               <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 text-center">
                 {(['TDP', 'YSRCP', 'JSP', 'BJP', 'INC', 'Neutral', 'OTH', 'Unknown'] as const).map((key) => {
                   const count = liveAssessmentStats[key] || 0;
-                  const colorInfo = key !== 'Unknown' ? PARTY_COLORS[key as VoterPreference] : { bg: 'bg-gray-400', hex: '#64748b' };
+                  const colorInfo = PARTY_COLORS[key] || DEFAULT_PARTY_COLOR_INFO;
                   
                   return (
                     <div key={key} className="bg-white border border-slate-100 rounded-lg p-2.5 shadow-sm space-y-1">
                       <div className="flex items-center justify-center gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colorInfo.hex }}></span>
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colorInfo?.hex || '#64748b' }}></span>
                         <span className="text-[10px] font-bold text-slate-500">{key}</span>
                       </div>
                       <p className="text-lg font-black text-slate-900">{count}</p>
@@ -2521,7 +2547,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                 const leadingParty = leader.party;
                 const leadVotes = diff;
 
-                const colorInfo = PARTY_COLORS[leadingParty];
+                const colorInfo = PARTY_COLORS[leadingParty] || DEFAULT_PARTY_COLOR_INFO;
                 const majorityLabel = diff === 0 ? "TIE (NO MAJORITY)" : `${leadingParty} MAJORITY`;
                 const majorityValue = diff === 0 ? "0 Votes" : `+${leadVotes} Votes`;
 
@@ -2580,7 +2606,7 @@ export default function BoothInchargeDashboard({ session, onLogout }: BoothIncha
                       <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5 pt-1">
                         {parties.map(party => {
                           const count = team.pStats[party] || 0;
-                          const info = PARTY_COLORS[party];
+                          const info = PARTY_COLORS[party] || DEFAULT_PARTY_COLOR_INFO;
                           return (
                             <div 
                               key={party} 

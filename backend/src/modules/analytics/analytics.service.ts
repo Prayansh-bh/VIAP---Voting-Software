@@ -439,7 +439,7 @@ export class AnalyticsService {
         resolvedGeoId = m.id;
         resolvedEntityName = m.name;
         resolvedEntityCode = m.code;
-        resolvedOrgId = resolvedOrgId || m.constituency.parliament.zone.state.organisationId;
+        resolvedOrgId = resolvedOrgId || m.constituency?.parliament?.zone?.state?.organisationId || null;
         return true;
       }
       if (level === OrgHierarchyLevel.VILLAGE) {
@@ -449,7 +449,7 @@ export class AnalyticsService {
           resolvedGeoId = v.id;
           resolvedEntityName = v.name;
           resolvedEntityCode = v.code;
-          resolvedOrgId = resolvedOrgId || v.mandal.constituency.parliament.zone.state.organisationId;
+          resolvedOrgId = resolvedOrgId || v.mandal?.constituency?.parliament?.zone?.state?.organisationId || null;
           return true;
         }
         return tryResolvePollingStation(id);
@@ -461,7 +461,7 @@ export class AnalyticsService {
         resolvedGeoId = b.id;
         resolvedEntityName = b.name || `Booth ${b.boothNumber}`;
         resolvedEntityCode = b.code;
-        resolvedOrgId = resolvedOrgId || b.village.mandal.constituency.parliament.zone.state.organisationId;
+        resolvedOrgId = resolvedOrgId || b.village?.mandal?.constituency?.parliament?.zone?.state?.organisationId || null;
         return true;
       }
       if (level === OrgHierarchyLevel.VOTER_GROUP) {
@@ -471,7 +471,7 @@ export class AnalyticsService {
         resolvedGeoId = vg.id;
         resolvedEntityName = vg.name;
         resolvedEntityCode = vg.code;
-        resolvedOrgId = resolvedOrgId || vg.booth.village.mandal.constituency.parliament.zone.state.organisationId;
+        resolvedOrgId = resolvedOrgId || vg.booth?.village?.mandal?.constituency?.parliament?.zone?.state?.organisationId || null;
         return true;
       }
       return false;

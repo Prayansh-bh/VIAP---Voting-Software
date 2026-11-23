@@ -95,16 +95,38 @@ const PROFESSION_PRESETS = [
 ];
 
 
-// Color definitions for parties
-const PARTY_COLORS: Record<VoterPreference, { bg: string; text: string; hex: string; lightBg: string; border: string; darkText: string }> = {
+const DEFAULT_PARTY_COLOR_INFO = {
+  bg: 'bg-gray-400',
+  text: 'text-gray-800',
+  hex: '#64748b',
+  lightBg: 'bg-gray-50',
+  border: 'border-gray-200',
+  darkText: 'text-gray-800'
+};
+
+const BASE_PARTY_COLORS: Record<string, { bg: string; text: string; hex: string; lightBg: string; border: string; darkText: string }> = {
   TDP: { bg: 'bg-yellow-400', text: 'text-yellow-800', hex: '#eab308', lightBg: 'bg-yellow-50', border: 'border-yellow-200', darkText: 'text-yellow-800' },
   YSRCP: { bg: 'bg-blue-600', text: 'text-white', hex: '#2563eb', lightBg: 'bg-blue-50', border: 'border-blue-200', darkText: 'text-blue-800' },
   JSP: { bg: 'bg-red-600', text: 'text-white', hex: '#dc2626', lightBg: 'bg-red-50', border: 'border-red-200', darkText: 'text-red-800' },
   BJP: { bg: 'bg-orange-500', text: 'text-white', hex: '#f97316', lightBg: 'bg-orange-50', border: 'border-orange-200', darkText: 'text-orange-800' },
   INC: { bg: 'bg-sky-400', text: 'text-sky-950', hex: '#38bdf8', lightBg: 'bg-sky-50', border: 'border-sky-200', darkText: 'text-sky-950' },
   Neutral: { bg: 'bg-gray-400', text: 'text-gray-800', hex: '#9ca3af', lightBg: 'bg-gray-50', border: 'border-gray-200', darkText: 'text-gray-800' },
-  OTH: { bg: 'bg-purple-600', text: 'text-white', hex: '#9333ea', lightBg: 'bg-purple-50', border: 'border-purple-200', darkText: 'text-purple-800' }
+  NEUTRAL: { bg: 'bg-gray-400', text: 'text-gray-800', hex: '#9ca3af', lightBg: 'bg-gray-50', border: 'border-gray-200', darkText: 'text-gray-800' },
+  OTH: { bg: 'bg-purple-600', text: 'text-white', hex: '#9333ea', lightBg: 'bg-purple-50', border: 'border-purple-200', darkText: 'text-purple-800' },
+  OTHER: { bg: 'bg-purple-600', text: 'text-white', hex: '#9333ea', lightBg: 'bg-purple-50', border: 'border-purple-200', darkText: 'text-purple-800' },
+  Unknown: { bg: 'bg-gray-400', text: 'text-gray-800', hex: '#64748b', lightBg: 'bg-gray-50', border: 'border-gray-200', darkText: 'text-gray-800' },
+  UNKNOWN: { bg: 'bg-gray-400', text: 'text-gray-800', hex: '#64748b', lightBg: 'bg-gray-50', border: 'border-gray-200', darkText: 'text-gray-800' }
 };
+
+const PARTY_COLORS: Record<any, { bg: string; text: string; hex: string; lightBg: string; border: string; darkText: string }> = new Proxy(BASE_PARTY_COLORS, {
+  get: (target, prop: string) => {
+    if (typeof prop !== 'string') return DEFAULT_PARTY_COLOR_INFO;
+    if (target[prop]) return target[prop];
+    const upper = prop.toUpperCase();
+    if (target[upper]) return target[upper];
+    return DEFAULT_PARTY_COLOR_INFO;
+  }
+});
 
 import { useLocation, useNavigate } from 'react-router-dom';
 

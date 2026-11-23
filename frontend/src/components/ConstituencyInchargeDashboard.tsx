@@ -181,15 +181,29 @@ interface FlaggedVoter {
   status: 'FLAGGED' | 'UNDER VERIFICATION' | 'VERIFIED ISSUE' | 'RESOLVED';
 }
 
-const CONST_PARTY_COLORS: Record<VoterPreference, string> = {
+const BASE_CONST_PARTY_COLORS: Record<string, string> = {
   TDP: '#eab308',     // Yellow-500
   YSRCP: '#2563eb',   // Blue-600
   JSP: '#dc2626',     // Red-600
   BJP: '#f97316',     // Orange-500
   INC: '#38bdf8',     // Sky-400
   Neutral: '#64748b', // Slate-500
-  OTH: '#a855f7'      // Purple-500
+  NEUTRAL: '#64748b',
+  OTH: '#a855f7',     // Purple-500
+  OTHER: '#a855f7',
+  Unknown: '#64748b',
+  UNKNOWN: '#64748b',
 };
+
+const CONST_PARTY_COLORS: Record<any, string> = new Proxy(BASE_CONST_PARTY_COLORS, {
+  get: (target, prop: string) => {
+    if (typeof prop !== 'string') return '#64748b';
+    if (target[prop]) return target[prop];
+    const upper = prop.toUpperCase();
+    if (target[upper]) return target[upper];
+    return '#64748b';
+  }
+});
 
 export default function ConstituencyInchargeDashboard({ session, onLogout }: ConstituencyInchargeDashboardProps) {
   const location = useLocation();

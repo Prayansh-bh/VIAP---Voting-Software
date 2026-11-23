@@ -132,35 +132,77 @@ const MANDAL_PATH_TO_TAB: Record<string, TabType> = {
   training_analytics: 'training_analytics',
 };
 
-const PARTY_COLORS: Record<VoterPreference, string> = {
+const BASE_MANDAL_PARTY_COLORS: Record<string, string> = {
   TDP: '#eab308',     // Yellow-500
   YSRCP: '#2563eb',   // Blue-600
   JSP: '#dc2626',     // Red-600
   BJP: '#f97316',     // Orange-500
   INC: '#38bdf8',     // Sky-400
   Neutral: '#64748b', // Slate-500
-  OTH: '#a855f7'      // Purple-500
+  NEUTRAL: '#64748b',
+  OTH: '#a855f7',     // Purple-500
+  OTHER: '#a855f7',
+  Unknown: '#64748b',
+  UNKNOWN: '#64748b',
 };
 
-const PARTY_NAMES: Record<VoterPreference, string> = {
+const PARTY_COLORS: Record<any, string> = new Proxy(BASE_MANDAL_PARTY_COLORS, {
+  get: (target, prop: string) => {
+    if (typeof prop !== 'string') return '#64748b';
+    if (target[prop]) return target[prop];
+    const upper = prop.toUpperCase();
+    if (target[upper]) return target[upper];
+    return '#64748b';
+  }
+});
+
+const BASE_MANDAL_PARTY_NAMES: Record<string, string> = {
   TDP: 'TDP',
   YSRCP: 'YSRCP',
   JSP: 'JSP',
   BJP: 'BJP',
   INC: 'Congress',
   Neutral: 'Neutral',
-  OTH: 'Undecided'
+  NEUTRAL: 'Neutral',
+  OTH: 'Undecided',
+  OTHER: 'Undecided',
+  Unknown: 'Unknown',
+  UNKNOWN: 'Unknown',
 };
 
-const PARTY_TEXT_COLORS: Record<VoterPreference, string> = {
+const PARTY_NAMES: Record<any, string> = new Proxy(BASE_MANDAL_PARTY_NAMES, {
+  get: (target, prop: string) => {
+    if (typeof prop !== 'string') return 'Unknown';
+    if (target[prop]) return target[prop];
+    const upper = prop.toUpperCase();
+    if (target[upper]) return target[upper];
+    return prop;
+  }
+});
+
+const BASE_MANDAL_PARTY_TEXT_COLORS: Record<string, string> = {
   TDP: 'text-amber-600',
   YSRCP: 'text-blue-600',
   JSP: 'text-red-600',
   BJP: 'text-orange-600',
   INC: 'text-sky-500',
   Neutral: 'text-slate-500',
-  OTH: 'text-purple-600'
+  NEUTRAL: 'text-slate-500',
+  OTH: 'text-purple-600',
+  OTHER: 'text-purple-600',
+  Unknown: 'text-slate-500',
+  UNKNOWN: 'text-slate-500',
 };
+
+const PARTY_TEXT_COLORS: Record<any, string> = new Proxy(BASE_MANDAL_PARTY_TEXT_COLORS, {
+  get: (target, prop: string) => {
+    if (typeof prop !== 'string') return 'text-slate-600';
+    if (target[prop]) return target[prop];
+    const upper = prop.toUpperCase();
+    if (target[upper]) return target[upper];
+    return 'text-slate-600';
+  }
+});
 
 const PARTY_BG_COLORS: Record<VoterPreference, string> = {
   TDP: 'bg-amber-50 text-amber-800 border-amber-200',

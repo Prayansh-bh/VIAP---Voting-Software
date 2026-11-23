@@ -462,21 +462,31 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
     }
   };
 
-  const loadLiveData = async (overrideConstituencyId?: string) => {
+  const loadLiveData = async (overrideConstituencyId?: string | null) => {
     if (!currentApp) return;
     setLoading(true);
     try {
-      const activeCId = overrideConstituencyId || selectedConstituencyId || undefined;
+      const initialCId = overrideConstituencyId === null ? undefined : (overrideConstituencyId || selectedConstituencyId || undefined);
       const [sum, vList] = await Promise.all([
-        fetchApplicationSummary(currentApp.id, activeCId),
-        fetchVotersList({ appId: currentApp.id, constituencyId: activeCId, limit: 15 }),
+        fetchApplicationSummary(currentApp.id, initialCId),
+        fetchVotersList({ appId: currentApp.id, constituencyId: initialCId, limit: 15 }),
       ]);
       setSummary(sum);
       setVoters(vList.items);
       setTotalVotersCount(sum?.totalVoters ?? vList.total);
 
-      const effectiveCId = activeCId || sum?.constituencyId || null;
-      if (effectiveCId && effectiveCId !== selectedConstituencyId) {
+      // Validate that effectiveCId strictly belongs to this application's constituencies
+      const validCIds = (sum?.constituencies || []).map((c: any) => c.id);
+      let effectiveCId: string | null = null;
+      if (overrideConstituencyId && validCIds.includes(overrideConstituencyId)) {
+        effectiveCId = overrideConstituencyId;
+      } else if (overrideConstituencyId !== null && selectedConstituencyId && validCIds.includes(selectedConstituencyId)) {
+        effectiveCId = selectedConstituencyId;
+      } else {
+        effectiveCId = sum?.constituencyId || validCIds[0] || null;
+      }
+
+      if (effectiveCId !== selectedConstituencyId) {
         setSelectedConstituencyId(effectiveCId);
       }
 
@@ -498,9 +508,12 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
           setRosterSummary(rPrev?.summary || null);
           if (slots) {
             setRosterSlotsData(slots);
+          } else {
+            setRosterSlotsData(null);
           }
         } catch (err: any) {
           setRosterSummary(null);
+          setRosterSlotsData(null);
           setSlotsLoadError(err?.message || 'Error loading roster data');
         } finally {
           setIsLoadingSlots(false);
@@ -689,7 +702,11 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
   };
 
   useEffect(() => {
-    loadLiveData();
+    setSelectedConstituencyId(null);
+    setSummary(null);
+    setRosterSlotsData(null);
+    setRosterSummary(null);
+    loadLiveData(null);
     loadExecutiveIncharges();
   }, [currentApp?.id]);
 
@@ -1999,7 +2016,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
                   </span>
                 </div>
                 <div className="text-xs text-slate-300 font-mono">
-                  UserCode: <span className="text-cyan-400">VIL-&lt;001..151&gt;</span>
+                  UserCode: <span className="text-cyan-400">VIL-&lt;001..{String(psCount || 1).padStart(3, '0')}&gt;</span>
                 </div>
                 <div className="text-[11px] text-slate-400">
                   Unit: <strong>Polling Station / Village Campus</strong>
@@ -2018,7 +2035,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
                   </span>
                 </div>
                 <div className="text-xs text-slate-300 font-mono">
-                  UserCode: <span className="text-cyan-400">BTH-&lt;001..283&gt;</span>
+                  UserCode: <span className="text-cyan-400">BTH-&lt;001..{String(bCount || 1).padStart(3, '0')}&gt;</span>
                 </div>
                 <div className="text-[11px] text-slate-400">
                   Unit: <strong>Electoral Part / Booth Incharge</strong>

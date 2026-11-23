@@ -22,6 +22,7 @@ export interface CadreSlotItem {
   pollingStationId?: string;
   pollingStationName?: string;
   villageId?: string;
+  villageName?: string;
   boothId?: string;
   boothNumber?: string;
   groupId?: string;
@@ -1000,6 +1001,13 @@ export class InchargeProvisioningService {
       const activeVoterCount = booth._count.voters;
       if (activeVoterCount === 0) continue;
 
+      if (booth.totalVoters !== activeVoterCount) {
+        await prisma.booth.update({
+          where: { id: booth.id },
+          data: { totalVoters: activeVoterCount },
+        }).catch(() => {});
+      }
+
       const neededGroups = Math.max(1, Math.ceil(activeVoterCount / 100));
       const neededCodes = new Set<string>();
       for (let g = 1; g <= neededGroups; g++) {
@@ -1393,6 +1401,8 @@ export class InchargeProvisioningService {
         mandalId: booth.mandalId,
         mandalName: booth.mandalName,
         pollingStationName: booth.pollingStation,
+        villageId: booth.villageId,
+        villageName: booth.villageName,
         boothId: booth.id,
         boothNumber: String(booth.boothNumber),
         voterCount: booth.totalVoters,
@@ -1402,7 +1412,7 @@ export class InchargeProvisioningService {
 
       // 100-Voter groups for this booth
       const groups = (booth.voterGroups || []).filter(
-        (g: any) => g.name !== 'Deleted Electors' && !g.name.includes('-DEL') && !g.code?.includes('-DEL') && !g.code?.includes('-GROUP')
+        (g: any) => g.name !== 'Deleted Electors' && !g.name.includes('-DEL') && !g.code?.includes('-DEL')
       );
       groups.sort((a: any, b: any) => (a.rangeStart || 0) - (b.rangeStart || 0) || a.name.localeCompare(b.name));
 
@@ -1426,6 +1436,8 @@ export class InchargeProvisioningService {
           mandalId: booth.mandalId,
           mandalName: booth.mandalName,
           pollingStationName: booth.pollingStation,
+          villageId: booth.villageId,
+          villageName: booth.villageName,
           boothId: booth.id,
           boothNumber: String(booth.boothNumber),
           groupId: `fallback-${booth.id}-1`,
@@ -1467,6 +1479,8 @@ export class InchargeProvisioningService {
             mandalId: booth.mandalId,
             mandalName: booth.mandalName,
             pollingStationName: booth.pollingStation,
+            villageId: booth.villageId,
+            villageName: booth.villageName,
             boothId: booth.id,
             boothNumber: String(booth.boothNumber),
             groupId: grp.id,
@@ -1982,17 +1996,46 @@ export class InchargeProvisioningService {
           },
         });
       } else {
-        user = await prisma.user.create({
-          data: {
-            userCode,
-            mobileNumber: cleanMobile,
-            name: userName,
-            role: targetSlot.roleRequired,
-            accountStatus: AccountStatus.ACTIVE,
-            organisationId: orgId,
-            passwordHash,
-          },
-        });
+        try {
+          user = await prisma.user.create({
+            data: {
+              userCode,
+              mobileNumber: cleanMobile,
+              name: userName,
+              role: targetSlot.roleRequired,
+              accountStatus: AccountStatus.ACTIVE,
+              organisationId: orgId,
+              passwordHash,
+            },
+          });
+        } catch (createErr: any) {
+          // If concurrent create or format difference collided on unique mobileNumber
+          const fallbackUser = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { mobileNumber: cleanMobile },
+                { mobileNumber: `+91${rawDigits}` },
+                { mobileNumber: rawDigits },
+                { mobileNumber: { endsWith: rawDigits } },
+              ],
+            },
+          });
+          if (fallbackUser) {
+            user = await prisma.user.update({
+              where: { id: fallbackUser.id },
+              data: {
+                userCode,
+                name: entry.inchargeName?.trim() || fallbackUser.name || userName,
+                role: targetSlot.roleRequired,
+                accountStatus: AccountStatus.ACTIVE,
+                organisationId: orgId || fallbackUser.organisationId,
+                passwordHash,
+              },
+            });
+          } else {
+            throw createErr;
+          }
+        }
       }
 
       let resolvedGroupId = targetSlot.groupId;
@@ -2012,6 +2055,12 @@ export class InchargeProvisioningService {
         resolvedGroupId = realGroup.id;
       }
 
+      const resolvedVillageId =
+        targetSlot.villageId ||
+        (targetSlot.boothId
+          ? (await prisma.booth.findUnique({ where: { id: targetSlot.boothId }, select: { villageId: true } }))?.villageId
+          : null);
+
       // 2. Idempotent UserHierarchyAssignment
       const existingAssign = await prisma.userHierarchyAssignment.findFirst({
         where: {
@@ -2030,7 +2079,7 @@ export class InchargeProvisioningService {
           data: {
             mandalId: targetSlot.mandalId,
             pollingStationId: targetSlot.pollingStationId,
-            villageId: targetSlot.villageId,
+            villageId: resolvedVillageId,
             boothId: targetSlot.boothId,
             voterGroupId: resolvedGroupId,
             isActive: true,
@@ -2044,12 +2093,28 @@ export class InchargeProvisioningService {
             constituencyId: constituency.id,
             mandalId: targetSlot.mandalId,
             pollingStationId: targetSlot.pollingStationId,
-            villageId: targetSlot.villageId,
+            villageId: resolvedVillageId,
             boothId: targetSlot.boothId,
             voterGroupId: resolvedGroupId,
             isActive: true,
           },
         });
+      }
+
+      // Update user.unitId to the authoritative unit ID so direct token & login queries align
+      const authoritativeUnitId =
+        resolvedGroupId ||
+        targetSlot.boothId ||
+        targetSlot.pollingStationId ||
+        resolvedVillageId ||
+        targetSlot.mandalId ||
+        null;
+
+      if (authoritativeUnitId) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { unitId: authoritativeUnitId },
+        }).catch(() => {});
       }
 
       // 3. If 100-voter group, link to VoterGroup and assigned voters

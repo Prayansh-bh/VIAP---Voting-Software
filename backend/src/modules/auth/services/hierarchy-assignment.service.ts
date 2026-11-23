@@ -10,7 +10,41 @@ export class HierarchyAssignmentService {
       where: { userId: user.id, isActive: true },
     });
 
-    if (existingAssignment && user.unitId) {
+    if (existingAssignment) {
+      if (!user.unitId) {
+        const unitId =
+          existingAssignment.voterGroupId ||
+          existingAssignment.boothId ||
+          existingAssignment.pollingStationId ||
+          existingAssignment.villageId ||
+          existingAssignment.mandalId ||
+          existingAssignment.constituencyId ||
+          existingAssignment.parliamentId ||
+          existingAssignment.zoneId ||
+          existingAssignment.stateId;
+        if (unitId) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { unitId },
+          });
+          user.unitId = unitId;
+        }
+      }
+
+      // If villageId is missing on assignment but boothId exists, automatically populate villageId from booth
+      if (!existingAssignment.villageId && existingAssignment.boothId) {
+        const b = await prisma.booth.findUnique({
+          where: { id: existingAssignment.boothId },
+          select: { villageId: true },
+        });
+        if (b?.villageId) {
+          await prisma.userHierarchyAssignment.update({
+            where: { id: existingAssignment.id },
+            data: { villageId: b.villageId },
+          });
+          existingAssignment.villageId = b.villageId;
+        }
+      }
       return;
     }
 
@@ -127,6 +161,11 @@ export class HierarchyAssignmentService {
       village: assignment.village,
       booth: assignment.booth,
       voterGroup: assignment.voterGroup,
+      boothId: assignment.boothId,
+      villageId: assignment.villageId,
+      mandalId: assignment.mandalId,
+      constituencyId: assignment.constituencyId,
+      voterGroupId: assignment.voterGroupId,
     };
   }
 }

@@ -828,6 +828,63 @@ export class ImportQueueService {
         data: { totalVoters: totalVotersInAC },
       });
 
+      // Synchronize exact totalVoters for Booth, Village, Mandal, and VoterGroup
+      await prisma.$executeRaw`
+        UPDATE "Booth" b
+        SET "totalVoters" = sub.cnt
+        FROM (
+          SELECT "boothId", COUNT(*)::int AS cnt
+          FROM "Voter"
+          WHERE "constituencyId" = ${constituency.id}::uuid AND "boothId" IS NOT NULL
+          GROUP BY "boothId"
+        ) sub
+        WHERE b.id = sub."boothId"
+      `.catch(() => {});
+
+      await prisma.$executeRaw`
+        UPDATE "Village" v
+        SET "totalVoters" = sub.cnt
+        FROM (
+          SELECT "villageId", COUNT(*)::int AS cnt
+          FROM "Voter"
+          WHERE "constituencyId" = ${constituency.id}::uuid AND "villageId" IS NOT NULL
+          GROUP BY "villageId"
+        ) sub
+        WHERE v.id = sub."villageId"
+      `.catch(() => {});
+
+      await prisma.$executeRaw`
+        UPDATE "Mandal" m
+        SET "totalVoters" = sub.cnt
+        FROM (
+          SELECT "mandalId", COUNT(*)::int AS cnt
+          FROM "Voter"
+          WHERE "constituencyId" = ${constituency.id}::uuid AND "mandalId" IS NOT NULL
+          GROUP BY "mandalId"
+        ) sub
+        WHERE m.id = sub."mandalId"
+      `.catch(() => {});
+
+      await prisma.$executeRaw`
+        UPDATE "VoterGroup" vg
+        SET "totalVoters" = sub.cnt
+        FROM (
+          SELECT "voterGroupId", COUNT(*)::int AS cnt
+          FROM "Voter"
+          WHERE "constituencyId" = ${constituency.id}::uuid AND "voterGroupId" IS NOT NULL
+          GROUP BY "voterGroupId"
+        ) sub
+        WHERE vg.id = sub."voterGroupId"
+      `.catch(() => {});
+
+      // Refresh 100-voter groups for all booths in background
+      try {
+        const { InchargeProvisioningService } = await import('../cadre/incharge-provisioning.service.js');
+        await InchargeProvisioningService.ensureConstituencyVoterGroups(constituency.id);
+      } catch (err) {
+        console.warn('[ImportQueue] Voter groups sync note:', err);
+      }
+
       // Record error entries in database if any
       if (errorRecords.length > 0) {
         for (const err of errorRecords.slice(0, 500)) {
