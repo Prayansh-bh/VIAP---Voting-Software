@@ -374,6 +374,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
   const [rosterSummary, setRosterSummary] = useState<any>(null);
   const [rosterSlotsData, setRosterSlotsData] = useState<CadreRosterSlotsResponse | null>(null);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
+  const [slotsLoadError, setSlotsLoadError] = useState<string | null>(null);
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [provisionMessage, setProvisionMessage] = useState<string | null>(null);
 
@@ -481,23 +482,33 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
 
       if (effectiveCId) {
         setIsLoadingSlots(true);
+        setSlotsLoadError(null);
         try {
           const [rPrev, slots] = await Promise.all([
-            fetchInchargeRosterPreview(effectiveCId).catch(() => null),
-            fetchInchargeRosterSlots(effectiveCId).catch(() => null),
+            fetchInchargeRosterPreview(effectiveCId).catch((err) => {
+              console.warn('Roster preview fetch note:', err);
+              return null;
+            }),
+            fetchInchargeRosterSlots(effectiveCId).catch((err) => {
+              console.error('Failed to fetch incharge roster slots:', err);
+              setSlotsLoadError(err?.message || 'Failed to fetch roster slots from backend server');
+              return null;
+            }),
           ]);
           setRosterSummary(rPrev?.summary || null);
           if (slots) {
             setRosterSlotsData(slots);
           }
-        } catch {
+        } catch (err: any) {
           setRosterSummary(null);
+          setSlotsLoadError(err?.message || 'Error loading roster data');
         } finally {
           setIsLoadingSlots(false);
         }
       } else {
         setRosterSummary(null);
         setRosterSlotsData(null);
+        setSlotsLoadError(null);
       }
     } catch (err) {
       console.warn('Failed to load live ingestion summary from DB:', err);
@@ -1863,14 +1874,22 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
           if (onlyUnassignedFilter && slot.assignedUser) return false;
           if (!cadreSearchQuery.trim()) return true;
           const q = cadreSearchQuery.toLowerCase();
+          const title = (slot.title || slot.jurisdictionName || '').toLowerCase();
+          const subtitle = (slot.subtitle || slot.mandalName || slot.pollingStationName || '').toLowerCase();
+          const code = (slot.slotCode || slot.canonicalCode || '').toLowerCase();
+          const mandal = (slot.mandalName || '').toLowerCase();
+          const village = (slot.villageName || '').toLowerCase();
+          const assignedName = (slot.assignedUser?.name || '').toLowerCase();
+          const assignedMobile = slot.assignedUser?.mobileNumber || '';
+
           return (
-            slot.slotCode.toLowerCase().includes(q) ||
-            slot.title.toLowerCase().includes(q) ||
-            (slot.subtitle && slot.subtitle.toLowerCase().includes(q)) ||
-            (slot.mandalName && slot.mandalName.toLowerCase().includes(q)) ||
-            (slot.villageName && slot.villageName.toLowerCase().includes(q)) ||
-            (slot.assignedUser?.name && slot.assignedUser.name.toLowerCase().includes(q)) ||
-            (slot.assignedUser?.mobileNumber && slot.assignedUser.mobileNumber.includes(q))
+            code.includes(q) ||
+            title.includes(q) ||
+            subtitle.includes(q) ||
+            mandal.includes(q) ||
+            village.includes(q) ||
+            assignedName.includes(q) ||
+            assignedMobile.includes(q)
           );
         });
 
@@ -2198,6 +2217,21 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
                 </div>
 
                 {/* Feedback Alerts */}
+                {slotsLoadError && (
+                  <div className="p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Server Notice: {slotsLoadError}</span>
+                    </div>
+                    <button
+                      onClick={() => loadLiveData()}
+                      className="px-3 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs border border-amber-500/40 cursor-pointer"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+
                 {manualSubmitMessage && (
                   <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-3">
                     <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400" />
@@ -2219,22 +2253,24 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
                       const input = manualInputs[slot.slotCode] || { inchargeName: '', mobileNumber: '' };
                       const val = getValidation(input.mobileNumber);
                       const isAssignedInDb = Boolean(slot.assignedUser);
+                      const displayTitle = slot.title || slot.jurisdictionName || slot.slotCode;
+                      const displaySubtitle = slot.subtitle || slot.mandalName || slot.pollingStationName || '';
 
                       return (
                         <div
-                          key={slot.slotIdentifier}
+                          key={slot.unitKey || slot.slotCode || slot.slotIdentifier}
                           className={`p-3.5 rounded-2xl border transition flex flex-col md:flex-row md:items-center justify-between gap-3 ${isAssignedInDb ? 'bg-slate-950/40 border-slate-800/60' : 'bg-slate-950 border-slate-800'}`}
                         >
                           {/* Slot Info */}
                           <div className="min-w-0 md:w-5/12 space-y-1">
                             <div className="flex items-center gap-2">
                               <span className="font-mono text-xs font-bold px-2 py-0.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shrink-0">
-                                {slot.slotCode}
+                                {slot.slotCode || slot.canonicalCode}
                               </span>
-                              <span className="text-xs font-bold text-white truncate">{slot.title}</span>
+                              <span className="text-xs font-bold text-white truncate">{displayTitle}</span>
                             </div>
                             <div className="text-[11px] text-slate-400 truncate flex items-center gap-2">
-                              <span>{slot.subtitle}</span>
+                              <span>{displaySubtitle}</span>
                               {slot.voterRange && (
                                 <span className="font-mono text-[10px] text-purple-400 px-1.5 py-0.2 rounded bg-purple-500/10 border border-purple-500/20">
                                   Electors: {slot.voterRange} ({slot.voterCount})
@@ -2249,7 +2285,7 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={() => handleRemoveSlotIncharge(slot.slotCode, slot.title, slot.assignedUser?.mobileNumber)}
+                                  onClick={() => handleRemoveSlotIncharge(slot.slotCode, displayTitle, slot.assignedUser?.mobileNumber)}
                                   disabled={removingSlotCode === slot.slotCode}
                                   title={`Permanently delete incharge user and unassign slot ${slot.slotCode}`}
                                   className="px-2.5 py-1 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-300 hover:text-red-200 border border-red-500/30 text-[11px] font-semibold transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
@@ -2299,9 +2335,26 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
                     })
                   ) : (
                     <div className="p-8 text-center text-slate-500 rounded-2xl bg-slate-950/40 border border-slate-800">
-                      <Users className="w-8 h-8 mx-auto mb-2 text-slate-600" />
-                      <p className="font-bold text-slate-300">No slots match filter in this section.</p>
-                      <p className="text-xs text-slate-500 mt-1">Try clearing your search query or unchecking 'Only Unassigned'.</p>
+                      {isLoadingSlots ? (
+                        <div className="py-6 flex flex-col items-center justify-center space-y-2">
+                          <RefreshCw className="w-6 h-6 animate-spin text-cyan-400" />
+                          <p className="text-xs text-slate-400">Loading roster slots from database...</p>
+                        </div>
+                      ) : (
+                        <>
+                          <Users className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+                          <p className="font-bold text-slate-300">
+                            {currentSlots.length === 0
+                              ? `No ${activeCadreTab} slots found for this constituency.`
+                              : 'No slots match filter in this section.'}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            {currentSlots.length === 0
+                              ? 'Click Refresh or verify if boundaries are mapped in DB for this constituency.'
+                              : "Try clearing your search query or unchecking 'Only Unassigned'."}
+                          </p>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>

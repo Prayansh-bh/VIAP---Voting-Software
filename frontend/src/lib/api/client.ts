@@ -21,6 +21,9 @@ export const getApiBase = (): string => {
   }
   // Mobile app (Capacitor) or Production Web (Vercel) -> Always use production Render backend
   if (typeof window !== 'undefined') {
+    if (window.location.hostname.includes('livesurvey.tech') || /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname)) {
+      return `${window.location.origin}/api`;
+    }
     if (isMobileClient() || (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')) {
       return 'https://viap-backend.onrender.com';
     }

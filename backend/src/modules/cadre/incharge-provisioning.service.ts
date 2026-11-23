@@ -6,10 +6,14 @@ import { OtpService } from '../auth/services/otp.service.js';
 
 export interface CadreSlotItem {
   unitKey: string;
+  slotIdentifier?: string;
   slotCode: string;
   canonicalCode?: string;
   level: 'MANDAL' | 'POLLING_STATION' | 'BOOTH' | '100_VOTER_GROUP';
+  role?: RoleType;
   roleRequired: RoleType;
+  title?: string;
+  subtitle?: string;
   jurisdictionName: string;
   constituencyId: string;
   constituencyName: string;
@@ -1085,7 +1089,11 @@ export class InchargeProvisioningService {
    * structured by section for manual entry and spreadsheet template generation.
    */
   static async getRequiredRosterSlots(constituencyId: string): Promise<CadreSlotsResponse> {
-    await this.ensureConstituencyVoterGroups(constituencyId);
+    try {
+      await this.ensureConstituencyVoterGroups(constituencyId);
+    } catch (err: any) {
+      console.warn(`[getRequiredRosterSlots] ensureConstituencyVoterGroups non-fatal warning for ${constituencyId}:`, err?.message || err);
+    }
 
     const constituency = await prisma.constituency.findUnique({
       where: { id: constituencyId },
@@ -1186,9 +1194,13 @@ export class InchargeProvisioningService {
       const slug = mandal.name.replace(/\W/g, '').toUpperCase().slice(0, 14);
       mandalSlots.push({
         unitKey: `MDL-${mandal.id}`,
+        slotIdentifier: `MDL-${mandal.id}`,
         slotCode: `MDL-${slug}`,
         level: 'MANDAL',
+        role: RoleType.MANDAL_INCHARGE,
         roleRequired: RoleType.MANDAL_INCHARGE,
+        title: `${mandal.name} Mandal`,
+        subtitle: `${constituency.name} • Mandal Administrative Unit`,
         jurisdictionName: `${mandal.name} Mandal`,
         constituencyId: constituency.id,
         constituencyName: constituency.name,
@@ -1226,9 +1238,13 @@ export class InchargeProvisioningService {
           const slotCode = `VIL-${String(psIdx).padStart(3, '0')}`;
           psSlots.push({
             unitKey: `PS-${ps.id}`,
+            slotIdentifier: `PS-${ps.id}`,
             slotCode,
             level: 'POLLING_STATION',
+            role: RoleType.VILLAGE_INCHARGE,
             roleRequired: RoleType.VILLAGE_INCHARGE,
+            title: ps.name,
+            subtitle: `${mandal.name} Mandal • Polling Station Unit`,
             jurisdictionName: ps.name,
             constituencyId: constituency.id,
             constituencyName: constituency.name,
@@ -1293,9 +1309,13 @@ export class InchargeProvisioningService {
         const slug = psData.pollingStationName.replace(/\W/g, '').slice(0, 12);
         psSlots.push({
           unitKey: `PS-${psData.mandalId}-${slug}-${psIdx}`,
+          slotIdentifier: `PS-${psData.mandalId}-${slug}-${psIdx}`,
           slotCode,
           level: 'POLLING_STATION',
+          role: RoleType.VILLAGE_INCHARGE,
           roleRequired: RoleType.VILLAGE_INCHARGE,
+          title: psData.pollingStationName,
+          subtitle: `${psData.mandalName} Mandal • Polling Station Unit`,
           jurisdictionName: psData.pollingStationName,
           constituencyId: constituency.id,
           constituencyName: constituency.name,
@@ -1358,9 +1378,13 @@ export class InchargeProvisioningService {
       const bSlotCode = `BTH-${partStr}`;
       boothSlots.push({
         unitKey: `BTH-${booth.id}`,
+        slotIdentifier: `BTH-${booth.id}`,
         slotCode: bSlotCode,
         level: 'BOOTH',
+        role: RoleType.BOOTH_PRESIDENT,
         roleRequired: RoleType.BOOTH_PRESIDENT,
+        title: `Booth ${partNum} - ${booth.pollingStation || booth.name || `Part ${partNum}`}`,
+        subtitle: `${booth.mandalName || ''} • Booth Unit`,
         jurisdictionName: `Booth ${partNum} - ${booth.pollingStation || booth.name || `Part ${partNum}`}`,
         constituencyId: constituency.id,
         constituencyName: constituency.name,
@@ -1380,27 +1404,21 @@ export class InchargeProvisioningService {
       );
       groups.sort((a: any, b: any) => (a.rangeStart || 0) - (b.rangeStart || 0) || a.name.localeCompare(b.name));
 
-      for (let gIdx = 0; gIdx < groups.length; gIdx++) {
-        const grp = groups[gIdx];
-        const canonicalCode = `B${partNum}-V${gIdx + 1}`;
-        const rangeStart = grp.rangeStart || (gIdx * 100 + 1);
-        const rangeEnd = grp.rangeEnd || Math.min((gIdx + 1) * 100, booth.totalVoters || (gIdx + 1) * 100);
-        const voterRange = `${rangeStart} - ${rangeEnd}`;
-        const gAssigns = groupAssignMap.get(grp.id) || [];
-        const gStatus: 'ASSIGNED' | 'MISSING' | 'CONFLICT' =
-          gAssigns.length === 1 ? 'ASSIGNED' : gAssigns.length > 1 ? 'CONFLICT' : 'MISSING';
-
-        if (gStatus === 'ASSIGNED') groupAssigned++;
-        else if (gStatus === 'CONFLICT') groupConflict++;
-        else groupMissing++;
-
+      if (groups.length === 0) {
+        // Fallback: Ensure at least Group 1 exists per booth so 100-voter incharges can be provisioned
+        const canonicalCode = `B${partNum}-V1`;
+        const voterRange = booth.totalVoters > 0 ? `1 - ${Math.min(100, booth.totalVoters)}` : '1 - 100';
         groupSlots.push({
-          unitKey: `VG-${grp.id}`,
+          unitKey: `VG-FALLBACK-${booth.id}-1`,
+          slotIdentifier: `VG-FALLBACK-${booth.id}-1`,
           slotCode: canonicalCode,
           canonicalCode,
           level: '100_VOTER_GROUP',
+          role: RoleType.VOTER_100_INCHARGE,
           roleRequired: RoleType.VOTER_100_INCHARGE,
-          jurisdictionName: `Booth ${partNum} / Group ${gIdx + 1} (Voters ${voterRange})`,
+          title: `Booth ${partNum} / Group 1 (Electors ${voterRange})`,
+          subtitle: `${booth.pollingStation || booth.mandalName || `Part ${partNum}`} • 100-Voter Unit`,
+          jurisdictionName: `Booth ${partNum} / Group 1 (Electors ${voterRange})`,
           constituencyId: constituency.id,
           constituencyName: constituency.name,
           mandalId: booth.mandalId,
@@ -1408,13 +1426,55 @@ export class InchargeProvisioningService {
           pollingStationName: booth.pollingStation,
           boothId: booth.id,
           boothNumber: String(booth.boothNumber),
-          groupId: grp.id,
-          groupName: grp.name,
+          groupId: `fallback-${booth.id}-1`,
+          groupName: 'Group 1',
           voterRange,
-          voterCount: grp.totalVoters || (rangeEnd - rangeStart + 1),
-          status: gStatus,
-          assignedUser: gAssigns[0]?.user,
+          voterCount: booth.totalVoters > 0 ? Math.min(100, booth.totalVoters) : 100,
+          status: 'MISSING',
+          assignedUser: undefined,
         });
+        groupMissing++;
+      } else {
+        for (let gIdx = 0; gIdx < groups.length; gIdx++) {
+          const grp = groups[gIdx];
+          const canonicalCode = `B${partNum}-V${gIdx + 1}`;
+          const rangeStart = grp.rangeStart || (gIdx * 100 + 1);
+          const rangeEnd = grp.rangeEnd || Math.min((gIdx + 1) * 100, booth.totalVoters || (gIdx + 1) * 100);
+          const voterRange = `${rangeStart} - ${rangeEnd}`;
+          const gAssigns = groupAssignMap.get(grp.id) || [];
+          const gStatus: 'ASSIGNED' | 'MISSING' | 'CONFLICT' =
+            gAssigns.length === 1 ? 'ASSIGNED' : gAssigns.length > 1 ? 'CONFLICT' : 'MISSING';
+
+          if (gStatus === 'ASSIGNED') groupAssigned++;
+          else if (gStatus === 'CONFLICT') groupConflict++;
+          else groupMissing++;
+
+          groupSlots.push({
+            unitKey: `VG-${grp.id}`,
+            slotIdentifier: `VG-${grp.id}`,
+            slotCode: canonicalCode,
+            canonicalCode,
+            level: '100_VOTER_GROUP',
+            role: RoleType.VOTER_100_INCHARGE,
+            roleRequired: RoleType.VOTER_100_INCHARGE,
+            title: `Booth ${partNum} / Group ${gIdx + 1} (Electors ${voterRange})`,
+            subtitle: `${booth.pollingStation || booth.mandalName || `Booth ${partNum}`} • 100-Voter Unit`,
+            jurisdictionName: `Booth ${partNum} / Group ${gIdx + 1} (Electors ${voterRange})`,
+            constituencyId: constituency.id,
+            constituencyName: constituency.name,
+            mandalId: booth.mandalId,
+            mandalName: booth.mandalName,
+            pollingStationName: booth.pollingStation,
+            boothId: booth.id,
+            boothNumber: String(booth.boothNumber),
+            groupId: grp.id,
+            groupName: grp.name,
+            voterRange,
+            voterCount: grp.totalVoters || (rangeEnd - rangeStart + 1),
+            status: gStatus,
+            assignedUser: gAssigns[0]?.user,
+          });
+        }
       }
     }
 
@@ -1933,13 +1993,30 @@ export class InchargeProvisioningService {
         });
       }
 
+      let resolvedGroupId = targetSlot.groupId;
+      if (targetSlot.level === '100_VOTER_GROUP' && (!resolvedGroupId || resolvedGroupId.startsWith('fallback-')) && targetSlot.boothId) {
+        const groupCode = `VG-${targetSlot.boothId.slice(0, 8)}-G1`;
+        const realGroup = await prisma.voterGroup.upsert({
+          where: { code: groupCode },
+          update: { name: 'Group 1', rangeStart: 1, rangeEnd: 100 },
+          create: {
+            boothId: targetSlot.boothId,
+            name: 'Group 1',
+            code: groupCode,
+            rangeStart: 1,
+            rangeEnd: 100,
+          },
+        });
+        resolvedGroupId = realGroup.id;
+      }
+
       // 2. Idempotent UserHierarchyAssignment
       const existingAssign = await prisma.userHierarchyAssignment.findFirst({
         where: {
           userId: user.id,
           roleType: targetSlot.roleRequired,
           constituencyId: constituency.id,
-          ...(targetSlot.groupId ? { voterGroupId: targetSlot.groupId } : {}),
+          ...(resolvedGroupId ? { voterGroupId: resolvedGroupId } : {}),
           ...(targetSlot.boothId ? { boothId: targetSlot.boothId } : {}),
           ...(targetSlot.mandalId ? { mandalId: targetSlot.mandalId } : {}),
         },
@@ -1953,7 +2030,7 @@ export class InchargeProvisioningService {
             pollingStationId: targetSlot.pollingStationId,
             villageId: targetSlot.villageId,
             boothId: targetSlot.boothId,
-            voterGroupId: targetSlot.groupId,
+            voterGroupId: resolvedGroupId,
             isActive: true,
           },
         });
@@ -1967,21 +2044,21 @@ export class InchargeProvisioningService {
             pollingStationId: targetSlot.pollingStationId,
             villageId: targetSlot.villageId,
             boothId: targetSlot.boothId,
-            voterGroupId: targetSlot.groupId,
+            voterGroupId: resolvedGroupId,
             isActive: true,
           },
         });
       }
 
       // 3. If 100-voter group, link to VoterGroup and assigned voters
-      if (targetSlot.level === '100_VOTER_GROUP' && targetSlot.groupId) {
+      if (targetSlot.level === '100_VOTER_GROUP' && resolvedGroupId) {
         await prisma.voterGroup.update({
-          where: { id: targetSlot.groupId },
+          where: { id: resolvedGroupId },
           data: { assignedInchargeId: user.id },
         }).catch(() => {});
 
         await prisma.voter.updateMany({
-          where: { voterGroupId: targetSlot.groupId },
+          where: { voterGroupId: resolvedGroupId },
           data: { assignedInchargeId: user.id },
         }).catch(() => {});
 

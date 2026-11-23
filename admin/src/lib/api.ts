@@ -1,15 +1,22 @@
 import { AppInstance, InchargeRecord, ApprovalRecord, AdminUser, ApplicationSummary } from '../types';
 import { getAdminToken, setAdminToken, clearAdminToken, setAdminSession, getAdminSession } from './auth';
 
-const getApiBase = () => {
+export const getApiBase = () => {
   const envUrl = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || '').trim();
-  // Exclude legacy dead Railway endpoints; fallback to active Render backend
+  // Exclude legacy dead Railway endpoints
   if (envUrl && !envUrl.includes('railway.app')) {
     const cleaned = envUrl.replace(/\/+$/, '');
     return cleaned.endsWith('/api') ? cleaned : `${cleaned}/api`;
   }
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return 'https://viap-backend.onrender.com/api';
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host !== 'localhost' && host !== '127.0.0.1') {
+      // Production VPS domains or direct IP addresses (reverse-proxied locally by Nginx at /api)
+      if (host.includes('livesurvey.tech') || /^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+        return `${window.location.origin}/api`;
+      }
+      return 'https://viap-backend.onrender.com/api';
+    }
   }
   return 'http://localhost:4000/api';
 };
@@ -803,22 +810,38 @@ export async function downloadInchargeRosterCsv(constituencyId: string): Promise
 }
 
 export interface CadreSlotItem {
-  slotIdentifier: string;
+  slotIdentifier?: string;
+  unitKey?: string;
   slotCode: string;
-  category: 'mandal' | 'pollingStation' | 'booth' | 'group';
+  canonicalCode?: string;
+  category?: 'mandal' | 'pollingStation' | 'booth' | 'group';
   level: string;
-  role: string;
-  title: string;
-  subtitle: string;
+  role?: string;
+  roleRequired?: string;
+  title?: string;
+  subtitle?: string;
+  jurisdictionName?: string;
+  constituencyId?: string;
+  constituencyName?: string;
+  mandalId?: string;
   mandalName?: string;
+  pollingStationId?: string;
+  pollingStationName?: string;
+  villageId?: string;
   villageName?: string;
+  boothId?: string;
   boothNumber?: string | number;
+  groupId?: string;
+  groupName?: string;
   voterRange?: string;
   voterCount?: number;
+  status?: 'ASSIGNED' | 'MISSING' | 'CONFLICT';
   assignedUser?: {
     id: string;
     name: string;
     mobileNumber: string;
+    role?: string;
+    userCode?: string;
   } | null;
 }
 
@@ -858,7 +881,7 @@ export async function downloadInchargeRosterTemplate(
   format: 'xlsx' | 'csv' = 'xlsx'
 ): Promise<void> {
   const token = getAdminToken();
-  const url = `${API_BASE}/cadre/roster-template/${encodeURIComponent(constituencyId)}?format=${format}`;
+  const url = `${getApiBase()}/cadre/roster-template/${encodeURIComponent(constituencyId)}?format=${format}`;
   const resp = await fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
@@ -888,7 +911,7 @@ export async function uploadInchargeRosterSpreadsheet(
   if (partyCode) formData.append('partyCode', partyCode);
   if (defaultPasscode) formData.append('defaultPasscode', defaultPasscode);
 
-  const url = `${API_BASE}/cadre/roster-upload/${encodeURIComponent(constituencyId)}`;
+  const url = `${getApiBase()}/cadre/roster-upload/${encodeURIComponent(constituencyId)}`;
   const resp = await fetch(url, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
