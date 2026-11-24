@@ -11,26 +11,6 @@ export class HierarchyAssignmentService {
     });
 
     if (existingAssignment) {
-      if (!user.unitId) {
-        const unitId =
-          existingAssignment.voterGroupId ||
-          existingAssignment.boothId ||
-          existingAssignment.pollingStationId ||
-          existingAssignment.villageId ||
-          existingAssignment.mandalId ||
-          existingAssignment.constituencyId ||
-          existingAssignment.parliamentId ||
-          existingAssignment.zoneId ||
-          existingAssignment.stateId;
-        if (unitId) {
-          await prisma.user.update({
-            where: { id: user.id },
-            data: { unitId },
-          });
-          user.unitId = unitId;
-        }
-      }
-
       // If villageId is missing on assignment but boothId exists, automatically populate villageId from booth
       if (!existingAssignment.villageId && existingAssignment.boothId) {
         const b = await prisma.booth.findUnique({
@@ -131,11 +111,21 @@ export class HierarchyAssignmentService {
     }
 
     if (resolvedUnitId && !user.unitId) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { unitId: resolvedUnitId },
-      });
-      user.unitId = resolvedUnitId;
+      try {
+        const validUnit = await prisma.organizationUnit.findUnique({
+          where: { id: resolvedUnitId },
+          select: { id: true },
+        });
+        if (validUnit) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { unitId: validUnit.id },
+          });
+          user.unitId = validUnit.id;
+        }
+      } catch (e) {
+        console.warn('Safe bypass of User.unitId update in resolveUnitAndAssignment:', e);
+      }
     }
 
     if (!existingAssignment && (assignmentData.stateId || assignmentData.constituencyId || assignmentData.mandalId || assignmentData.villageId || assignmentData.boothId || assignmentData.voterGroupId)) {
