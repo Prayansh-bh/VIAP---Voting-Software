@@ -382,6 +382,27 @@ export class AnalyticsService {
       resolvedEntityCode = ps.code || ps.id.slice(0, 8);
       resolvedOrgId = resolvedOrgId || ps.constituency?.parliament?.zone?.state?.organisationId || null;
       psBoothIds = ps.booths.map((b) => b.id);
+      if (psBoothIds.length === 0) {
+        // Fallback: match booths by pollingStation text or village name in same mandal
+        const fallbackBooths = await prisma.booth.findMany({
+          where: {
+            village: { mandalId: ps.mandalId },
+            OR: [
+              { pollingStation: { equals: ps.name, mode: 'insensitive' } },
+              { name: { contains: ps.name, mode: 'insensitive' } },
+              { village: { name: { equals: ps.name, mode: 'insensitive' } } },
+            ],
+          },
+          select: { id: true },
+        });
+        psBoothIds = fallbackBooths.map((b) => b.id);
+        if (psBoothIds.length > 0) {
+          await prisma.booth.updateMany({
+            where: { id: { in: psBoothIds } },
+            data: { pollingStationId: ps.id },
+          }).catch(() => {});
+        }
+      }
       if (psBoothIds.length > 0) {
         const bSql = psBoothIds.map((id) => Prisma.sql`${id}::uuid`);
         geoCondition = Prisma.sql`"boothId" IN (${Prisma.join(bSql)})`;
@@ -1418,7 +1439,27 @@ export class AnalyticsService {
         where: { id: target.pollingStationId },
         include: { booths: { select: { id: true } } },
       });
-      const bIds = (ps?.booths || []).map((b) => b.id);
+      let bIds = (ps?.booths || []).map((b) => b.id);
+      if (bIds.length === 0 && ps) {
+        const fallbackBooths = await prisma.booth.findMany({
+          where: {
+            village: { mandalId: ps.mandalId },
+            OR: [
+              { pollingStation: { equals: ps.name, mode: 'insensitive' } },
+              { name: { contains: ps.name, mode: 'insensitive' } },
+              { village: { name: { equals: ps.name, mode: 'insensitive' } } },
+            ],
+          },
+          select: { id: true },
+        });
+        bIds = fallbackBooths.map((b) => b.id);
+        if (bIds.length > 0) {
+          await prisma.booth.updateMany({
+            where: { id: { in: bIds } },
+            data: { pollingStationId: ps.id },
+          }).catch(() => {});
+        }
+      }
       if (bIds.length === 0) {
         return {
           totalVoters: 0,

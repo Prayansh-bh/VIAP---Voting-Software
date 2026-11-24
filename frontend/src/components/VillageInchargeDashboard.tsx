@@ -1183,12 +1183,12 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
               <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-slate-600 font-semibold">
                 <div className="flex items-center gap-1.5">
                   <span className="text-slate-400 uppercase text-[10px] font-bold">Village:</span>
-                  <span className="text-slate-900 font-extrabold">{session.assignedVillage || 'Ponnaluru'}</span>
+                  <span className="text-slate-900 font-extrabold">{session.assignedVillage || (backendSummary as any)?.user?.unitName || (backendSummary as any)?.analytics?.unit?.name || 'Assigned Station'}</span>
                 </div>
                 <div className="hidden sm:block text-slate-300">•</div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-slate-400 uppercase text-[10px] font-bold">Mandal:</span>
-                  <span className="text-slate-900 font-extrabold">{session.assignedMandal || 'Ponnaluru Mandal'}</span>
+                  <span className="text-slate-900 font-extrabold">{session.assignedMandal || 'Assigned Mandal'}</span>
                 </div>
                 <div className="hidden sm:block text-slate-300">•</div>
                 <div className="flex items-center gap-1.5">
@@ -1219,7 +1219,7 @@ export default function VillageInchargeDashboard({ session, onLogout }: VillageI
                   </h3>
                   
                   <p className="text-xs text-slate-400 font-medium">
-                    Live voter analytics for {session.assignedVillage || 'Assigned'} Village. Total registered preferences: TDP ({partyStats.TDP}), YSRCP ({partyStats.YSRCP}), JSP ({partyStats.JSP}), BJP ({partyStats.BJP}), INC ({partyStats.INC}).
+                    Live voter analytics for {session.assignedVillage || (backendSummary as any)?.user?.unitName || (backendSummary as any)?.analytics?.unit?.name || 'Assigned'} Village. Total registered preferences: TDP ({partyStats.TDP}), YSRCP ({partyStats.YSRCP}), JSP ({partyStats.JSP}), BJP ({partyStats.BJP}), INC ({partyStats.INC}).
                   </p>
                 </div>
 

@@ -138,6 +138,9 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
             assignment?.stateId ||
             assignment?.mandal?.id ||
             assignment?.village?.id ||
+            assignment?.pollingStationId ||
+            assignment?.pollingStationRef?.id ||
+            assignment?.pollingStation?.id ||
             assignment?.booth?.id ||
             assignment?.voterGroup?.id ||
             user.unitId ||
@@ -150,8 +153,8 @@ export default function App({ initialPath }: { initialPath?: string } = {}) {
             role: user.role,
             unitId: authoritativeUnitId,
             assignedConstituency: assignment?.constituency?.name || user.organisation?.name || 'Assigned Segment',
-            assignedMandal: assignment?.mandal?.name || user.unitName,
-            assignedVillage: assignment?.village?.name,
+            assignedMandal: assignment?.mandal?.name || assignment?.pollingStationRef?.mandal?.name || assignment?.pollingStation?.mandal?.name || (user.unitName && !user.unitName.includes('(') ? user.unitName : undefined) || 'Assigned Mandal',
+            assignedVillage: assignment?.pollingStationRef?.name || assignment?.pollingStation?.name || assignment?.village?.name || 'Assigned Station',
             assignedBooth: assignment?.booth?.boothNumber || assignment?.booth?.name,
             assignedVoterGroup: assignment?.voterGroup?.name,
             userId: user.id,

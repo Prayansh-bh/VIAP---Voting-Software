@@ -332,47 +332,65 @@ export class InchargeProvisioningService {
     }
 
     // 2. Village Incharge Roster (at PollingStation level)
-    const hasFirstClassPs = constituency.mandals.some((m) => ((m as any).pollingStations || []).length > 0);
+    for (const mandal of constituency.mandals) {
+      const psRecordsByName = new Map<string, any>();
+      for (const ps of (mandal as any).pollingStations || []) {
+        psRecordsByName.set(ps.name.trim().toUpperCase(), ps);
+      }
 
-    if (hasFirstClassPs) {
-      for (const mandal of constituency.mandals) {
-        for (const ps of (mandal as any).pollingStations || []) {
-          const vAssigns = psAssignMap.get(ps.id) || [];
-          const vStatus: 'ASSIGNED' | 'MISSING' | 'CONFLICT' =
-            vAssigns.length === 1 ? 'ASSIGNED' : vAssigns.length > 1 ? 'CONFLICT' : 'MISSING';
+      interface AggregatedStationPreview {
+        name: string;
+        voterCount: number;
+        pollingStationId?: string;
+        villageId?: string;
+      }
+      const aggregatedStations = new Map<string, AggregatedStationPreview>();
 
-          if (vStatus === 'ASSIGNED') villageAssigned++;
-          else if (vStatus === 'CONFLICT') villageConflict++;
-          else villageMissing++;
+      for (const village of mandal.villages) {
+        for (const booth of village.booths) {
+          const rawName = booth.pollingStation || `${village.name} Polling Station`;
+          const normKey = rawName.trim().toUpperCase();
+          const existing = aggregatedStations.get(normKey);
+          if (existing) {
+            existing.voterCount += booth.totalVoters || 0;
+            if (!existing.pollingStationId && (booth as any).pollingStationId) {
+              existing.pollingStationId = (booth as any).pollingStationId;
+            }
+          } else {
+            aggregatedStations.set(normKey, {
+              name: rawName.trim(),
+              voterCount: booth.totalVoters || 0,
+              villageId: village.id,
+              pollingStationId: (booth as any).pollingStationId || undefined,
+            });
+          }
+        }
+      }
 
-          roster.push({
-            unitKey: `PS-${ps.id}`,
-            level: 'POLLING_STATION',
-            roleRequired: RoleType.VILLAGE_INCHARGE,
-            constituencyId: constituency.id,
-            constituencyName: constituency.name,
-            mandalId: mandal.id,
-            mandalName: mandal.name,
-            pollingStationName: ps.name,
-            voterCount: ps.totalVoters,
-            status: vStatus,
-            assignedUsers: vAssigns.map((a) => a.user),
-            proposedAction: vStatus === 'ASSIGNED' ? 'NO_ACTION' : vStatus === 'CONFLICT' ? 'RESOLVE_CONFLICT' : 'INVITATION_REQUIRED',
+      for (const ps of (mandal as any).pollingStations || []) {
+        const normKey = ps.name.trim().toUpperCase();
+        if (!aggregatedStations.has(normKey)) {
+          aggregatedStations.set(normKey, {
+            name: ps.name.trim(),
+            voterCount: ps.totalVoters || 0,
+            pollingStationId: ps.id,
           });
         }
       }
-    } else {
-      for (const psEntry of distinctPollingStations) {
-        const [mandalId, psName, targetNodeId] = psEntry.split(':');
-        const mandal = constituency.mandals.find((m) => m.id === mandalId);
-        
-        const vAssigns = targetNodeId
-          ? existingAssignments.filter(
-              (a) => a.roleType === RoleType.VILLAGE_INCHARGE &&
-                a.mandalId === mandalId &&
-                (a.pollingStationId === targetNodeId || a.villageId === targetNodeId)
-            )
-          : [];
+
+      const sortedKeys = Array.from(aggregatedStations.keys()).sort();
+      for (const key of sortedKeys) {
+        const stData = aggregatedStations.get(key)!;
+        const psRecord = psRecordsByName.get(key);
+        const resolvedPsId = psRecord?.id || stData.pollingStationId;
+        const totalVoters = stData.voterCount > 0 ? stData.voterCount : (psRecord?.totalVoters || 0);
+
+        const vAssigns = resolvedPsId
+          ? (psAssignMap.get(resolvedPsId) || [])
+          : stData.villageId
+            ? (villageAssignMap.get(stData.villageId) || [])
+            : [];
+
         const vStatus: 'ASSIGNED' | 'MISSING' | 'CONFLICT' =
           vAssigns.length === 1 ? 'ASSIGNED' : vAssigns.length > 1 ? 'CONFLICT' : 'MISSING';
 
@@ -380,16 +398,19 @@ export class InchargeProvisioningService {
         else if (vStatus === 'CONFLICT') villageConflict++;
         else villageMissing++;
 
+        const slug = stData.name.replace(/\W/g, '').slice(0, 12);
+        const unitKey = resolvedPsId ? `PS-${resolvedPsId}` : `PS-${mandal.id}-${slug}`;
+
         roster.push({
-          unitKey: `PS-${mandalId}-${psName.replace(/\W/g, '').slice(0, 12)}`,
+          unitKey,
           level: 'POLLING_STATION',
           roleRequired: RoleType.VILLAGE_INCHARGE,
           constituencyId: constituency.id,
           constituencyName: constituency.name,
-          mandalId,
-          mandalName: mandal?.name || '',
-          pollingStationName: psName,
-          voterCount: 0,
+          mandalId: mandal.id,
+          mandalName: mandal.name,
+          pollingStationName: stData.name,
+          voterCount: totalVoters,
           status: vStatus,
           assignedUsers: vAssigns.map((a) => a.user),
           proposedAction: vStatus === 'ASSIGNED' ? 'NO_ACTION' : vStatus === 'CONFLICT' ? 'RESOLVE_CONFLICT' : 'INVITATION_REQUIRED',
@@ -397,9 +418,7 @@ export class InchargeProvisioningService {
       }
     }
 
-    const pollingStationsCount = hasFirstClassPs
-      ? constituency.mandals.reduce((acc, m) => acc + ((m as any).pollingStations?.length || 0), 0)
-      : distinctPollingStations.size;
+    const pollingStationsCount = villageAssigned + villageMissing + villageConflict;
 
     const totalRequired = constituency.mandals.length + pollingStationsCount + distinctBoothsCount + distinctGroupsCount;
     const totalAssigned = mandalsAssigned + villageAssigned + boothAssigned + groupAssigned;
@@ -410,12 +429,12 @@ export class InchargeProvisioningService {
       summary: {
         constituency: { id: constituency.id, name: constituency.name, code: constituency.code },
         mandalsCount: constituency.mandals.length,
-        pollingStationsCount: distinctPollingStations.size,
+        pollingStationsCount: pollingStationsCount,
         boothsCount: distinctBoothsCount,
         groupsCount: distinctGroupsCount,
         requiredRosterCounts: {
           mandalIncharges: { required: constituency.mandals.length, assigned: mandalsAssigned, missing: mandalsMissing, conflict: mandalsConflict },
-          villageIncharges: { required: distinctPollingStations.size, assigned: villageAssigned, missing: villageMissing, conflict: villageConflict },
+          villageIncharges: { required: pollingStationsCount, assigned: villageAssigned, missing: villageMissing, conflict: villageConflict },
           boothIncharges: { required: distinctBoothsCount, assigned: boothAssigned, missing: boothMissing, conflict: boothConflict },
           groupIncharges: { required: distinctGroupsCount, assigned: groupAssigned, missing: groupMissing, conflict: groupConflict },
           totalRequired,
@@ -1094,6 +1113,71 @@ export class InchargeProvisioningService {
   }
 
   /**
+   * Synchronizes all distinct polling station names in booths to official PollingStation records
+   * and populates booth.pollingStationId so relational queries and analytics succeed immediately.
+   */
+  static async syncAllConstituencyPollingStations(constituencyId: string): Promise<void> {
+    try {
+      const mandals = await prisma.mandal.findMany({
+        where: { constituencyId },
+        include: {
+          pollingStations: true,
+          villages: {
+            include: {
+              booths: {
+                select: { id: true, name: true, pollingStation: true, totalVoters: true, pollingStationId: true },
+              },
+            },
+          },
+        },
+      });
+
+      for (const mandal of mandals) {
+        const psMap = new Map(mandal.pollingStations.map((ps) => [ps.name.trim().toUpperCase(), ps]));
+
+        for (const village of mandal.villages) {
+          for (const booth of village.booths) {
+            const rawName = booth.pollingStation || `${village.name} Polling Station`;
+            const normKey = rawName.trim().toUpperCase();
+            let ps = psMap.get(normKey);
+
+            if (!ps) {
+              const code = `PS-${mandal.id.slice(0, 8)}-${psMap.size + 1}`;
+              try {
+                ps = await prisma.pollingStation.create({
+                  data: {
+                    constituencyId,
+                    mandalId: mandal.id,
+                    name: rawName.trim(),
+                    code,
+                    totalVoters: booth.totalVoters || 0,
+                    totalBooths: 1,
+                  },
+                });
+                psMap.set(normKey, ps);
+              } catch {
+                ps = await prisma.pollingStation.findFirst({
+                  where: { constituencyId, mandalId: mandal.id, name: { equals: rawName.trim(), mode: 'insensitive' } },
+                });
+                if (ps) psMap.set(normKey, ps);
+              }
+            }
+
+            if (ps && booth.pollingStationId !== ps.id) {
+              await prisma.booth.update({
+                where: { id: booth.id },
+                data: { pollingStationId: ps.id },
+              }).catch(() => {});
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[syncAllConstituencyPollingStations] note:', err);
+    }
+  }
+
+  /**
    * Generates hierarchical cadre slots (Mandals, Polling Stations, Booths, 100-Voter Groups)
    * structured by section for manual entry and spreadsheet template generation.
    */
@@ -1102,6 +1186,9 @@ export class InchargeProvisioningService {
     setImmediate(() => {
       this.ensureConstituencyVoterGroups(constituencyId).catch((err) => {
         console.warn(`[getRequiredRosterSlots] background voter group sync note for ${constituencyId}:`, err?.message || err);
+      });
+      this.syncAllConstituencyPollingStations(constituencyId).catch((err) => {
+        console.warn(`[getRequiredRosterSlots] background polling station sync note for ${constituencyId}:`, err?.message || err);
       });
     });
 
@@ -1228,86 +1315,86 @@ export class InchargeProvisioningService {
     let villageMissing = 0;
     let villageConflict = 0;
 
-    const hasFirstClassPs = constituency.mandals.some((m) => ((m as any).pollingStations || []).length > 0);
+    // 2. Polling Stations - Comprehensive merge of PollingStation records and booth polling station locations
+    const psSlots: CadreSlotItem[] = [];
+    let villageAssigned = 0;
+    let villageMissing = 0;
+    let villageConflict = 0;
+    let psIdx = 0;
 
-    if (hasFirstClassPs) {
-      let psIdx = 0;
-      for (const mandal of constituency.mandals) {
-        for (const ps of (mandal as any).pollingStations || []) {
-          psIdx++;
-          const vAssigns = psAssignMap.get(ps.id) || [];
-          const vStatus: 'ASSIGNED' | 'MISSING' | 'CONFLICT' =
-            vAssigns.length === 1 ? 'ASSIGNED' : vAssigns.length > 1 ? 'CONFLICT' : 'MISSING';
-
-          if (vStatus === 'ASSIGNED') villageAssigned++;
-          else if (vStatus === 'CONFLICT') villageConflict++;
-          else villageMissing++;
-
-          const slotCode = `VIL-${String(psIdx).padStart(3, '0')}`;
-          psSlots.push({
-            unitKey: `PS-${ps.id}`,
-            slotIdentifier: `PS-${ps.id}`,
-            slotCode,
-            level: 'POLLING_STATION',
-            role: RoleType.VILLAGE_INCHARGE,
-            roleRequired: RoleType.VILLAGE_INCHARGE,
-            title: ps.name,
-            subtitle: `${mandal.name} Mandal • Polling Station Unit`,
-            jurisdictionName: ps.name,
-            constituencyId: constituency.id,
-            constituencyName: constituency.name,
-            mandalId: mandal.id,
-            mandalName: mandal.name,
-            pollingStationId: ps.id,
-            pollingStationName: ps.name,
-            voterCount: ps.totalVoters,
-            status: vStatus,
-            assignedUser: vAssigns[0]?.user,
-          });
-        }
+    for (const mandal of constituency.mandals) {
+      // Index existing first-class PollingStation rows by normalized name and ID
+      const psRecordsByName = new Map<string, any>();
+      for (const ps of (mandal as any).pollingStations || []) {
+        psRecordsByName.set(ps.name.trim().toUpperCase(), ps);
       }
-    } else {
-      interface CanonicalPs {
-        mandalId: string;
-        mandalName: string;
-        pollingStationName: string;
+
+      // Group booths by polling station name to calculate accurate totals and discover all stations
+      interface AggregatedStation {
+        name: string;
         voterCount: number;
-        pollingStationId?: string;
+        boothCount: number;
+        boothIds: string[];
         villageId?: string;
+        pollingStationId?: string;
       }
-      const psMap = new Map<string, CanonicalPs>();
+      const aggregatedStations = new Map<string, AggregatedStation>();
 
-      for (const mandal of constituency.mandals) {
-        for (const village of mandal.villages) {
-          for (const booth of village.booths) {
-            const psRaw = booth.pollingStation || `${village.name} Polling Station`;
-            const normalizedPsName = psRaw.trim().replace(/\s+/g, ' ').toUpperCase();
-            const key = `${mandal.id}:::${normalizedPsName}`;
-            const existing = psMap.get(key);
-            if (existing) {
-              existing.voterCount += booth.totalVoters;
-            } else {
-              psMap.set(key, {
-                mandalId: mandal.id,
-                mandalName: mandal.name,
-                pollingStationName: psRaw.trim(),
-                voterCount: booth.totalVoters,
-                pollingStationId: (booth as any).pollingStationId || undefined,
-                villageId: village.id,
-              });
+      for (const village of mandal.villages) {
+        for (const booth of village.booths) {
+          const rawName = booth.pollingStation || `${village.name} Polling Station`;
+          const normKey = rawName.trim().toUpperCase();
+          const existing = aggregatedStations.get(normKey);
+          if (existing) {
+            existing.voterCount += booth.totalVoters || 0;
+            existing.boothCount += 1;
+            existing.boothIds.push(booth.id);
+            if (!existing.pollingStationId && (booth as any).pollingStationId) {
+              existing.pollingStationId = (booth as any).pollingStationId;
             }
+          } else {
+            aggregatedStations.set(normKey, {
+              name: rawName.trim(),
+              voterCount: booth.totalVoters || 0,
+              boothCount: 1,
+              boothIds: [booth.id],
+              villageId: village.id,
+              pollingStationId: (booth as any).pollingStationId || undefined,
+            });
           }
         }
       }
 
-      let psIdx = 0;
-      for (const [key, psData] of psMap) {
+      // If any PollingStation record exists that wasn't in booths, also include it
+      for (const ps of (mandal as any).pollingStations || []) {
+        const normKey = ps.name.trim().toUpperCase();
+        if (!aggregatedStations.has(normKey)) {
+          aggregatedStations.set(normKey, {
+            name: ps.name.trim(),
+            voterCount: ps.totalVoters || 0,
+            boothCount: ps.totalBooths || 0,
+            boothIds: [],
+            pollingStationId: ps.id,
+          });
+        }
+      }
+
+      // Sort stations alphabetically by name for consistent roster ordering
+      const sortedStationKeys = Array.from(aggregatedStations.keys()).sort();
+
+      for (const key of sortedStationKeys) {
         psIdx++;
-        const vAssigns = psData.pollingStationId
-          ? (psAssignMap.get(psData.pollingStationId) || [])
-          : psData.villageId
-            ? (villageAssignMap.get(psData.villageId) || [])
+        const stData = aggregatedStations.get(key)!;
+        const psRecord = psRecordsByName.get(key);
+        const resolvedPsId = psRecord?.id || stData.pollingStationId;
+        const totalVoters = stData.voterCount > 0 ? stData.voterCount : (psRecord?.totalVoters || 0);
+
+        const vAssigns = resolvedPsId
+          ? (psAssignMap.get(resolvedPsId) || [])
+          : stData.villageId
+            ? (villageAssignMap.get(stData.villageId) || [])
             : [];
+
         const vStatus: 'ASSIGNED' | 'MISSING' | 'CONFLICT' =
           vAssigns.length === 1 ? 'ASSIGNED' : vAssigns.length > 1 ? 'CONFLICT' : 'MISSING';
 
@@ -1316,25 +1403,27 @@ export class InchargeProvisioningService {
         else villageMissing++;
 
         const slotCode = `VIL-${String(psIdx).padStart(3, '0')}`;
-        const slug = psData.pollingStationName.replace(/\W/g, '').slice(0, 12);
+        const slug = stData.name.replace(/\W/g, '').slice(0, 12);
+        const unitKey = resolvedPsId ? `PS-${resolvedPsId}` : `PS-${mandal.id}-${slug}-${psIdx}`;
+
         psSlots.push({
-          unitKey: `PS-${psData.mandalId}-${slug}-${psIdx}`,
-          slotIdentifier: `PS-${psData.mandalId}-${slug}-${psIdx}`,
+          unitKey,
+          slotIdentifier: unitKey,
           slotCode,
           level: 'POLLING_STATION',
           role: RoleType.VILLAGE_INCHARGE,
           roleRequired: RoleType.VILLAGE_INCHARGE,
-          title: psData.pollingStationName,
-          subtitle: `${psData.mandalName} Mandal • Polling Station Unit`,
-          jurisdictionName: psData.pollingStationName,
+          title: stData.name,
+          subtitle: `${mandal.name} Mandal • Polling Station Unit`,
+          jurisdictionName: stData.name,
           constituencyId: constituency.id,
           constituencyName: constituency.name,
-          mandalId: psData.mandalId,
-          mandalName: psData.mandalName,
-          pollingStationName: psData.pollingStationName,
-          pollingStationId: psData.pollingStationId,
-          villageId: psData.villageId,
-          voterCount: psData.voterCount,
+          mandalId: mandal.id,
+          mandalName: mandal.name,
+          pollingStationName: stData.name,
+          pollingStationId: resolvedPsId,
+          villageId: stData.villageId,
+          voterCount: totalVoters,
           status: vStatus,
           assignedUser: vAssigns[0]?.user,
         });
@@ -1888,6 +1977,26 @@ export class InchargeProvisioningService {
             resolvedPollingStationId = newPs.id;
           }
           targetSlot.pollingStationId = resolvedPollingStationId;
+        }
+      }
+
+      // Ensure booths belonging to this polling station are explicitly linked by foreign key
+      if (targetSlot.level === 'POLLING_STATION' && (resolvedPollingStationId || targetSlot.pollingStationId) && targetSlot.mandalId) {
+        const effectivePsId = (resolvedPollingStationId || targetSlot.pollingStationId)!;
+        const psName = targetSlot.pollingStationName || targetSlot.title || targetSlot.jurisdictionName;
+        if (psName) {
+          await prisma.booth.updateMany({
+            where: {
+              village: { mandalId: targetSlot.mandalId },
+              OR: [
+                { pollingStation: { equals: psName, mode: 'insensitive' } },
+                { name: { contains: psName, mode: 'insensitive' } },
+                { village: { name: { equals: psName, mode: 'insensitive' } } },
+              ],
+              pollingStationId: null,
+            },
+            data: { pollingStationId: effectivePsId },
+          }).catch(() => {});
         }
       }
 

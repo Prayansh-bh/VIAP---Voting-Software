@@ -418,7 +418,33 @@ export async function computeUserHierarchyScope(
       });
 
       if (ps) {
-        ps.booths.forEach((b) => {
+        accessibleUnitIds.add(ps.id);
+        if (ps.mandalId) accessibleMandalIds.add(ps.mandalId);
+        accessibleConstituencyIds.add(ps.constituencyId);
+
+        let booths = ps.booths;
+        if (booths.length === 0) {
+          // Self-heal & resolve unlinked booths for this polling station
+          booths = await prisma.booth.findMany({
+            where: {
+              village: { mandalId: ps.mandalId },
+              OR: [
+                { pollingStation: { equals: ps.name, mode: 'insensitive' } },
+                { name: { contains: ps.name, mode: 'insensitive' } },
+                { village: { name: { equals: ps.name, mode: 'insensitive' } } },
+              ],
+            },
+            include: { voterGroups: true },
+          });
+          if (booths.length > 0) {
+            await prisma.booth.updateMany({
+              where: { id: { in: booths.map((b) => b.id) } },
+              data: { pollingStationId: ps.id },
+            }).catch(() => {});
+          }
+        }
+
+        booths.forEach((b) => {
           accessibleBoothIds.add(b.id);
           accessibleVillageIds.add(b.villageId);
           b.voterGroups.forEach((vg) => accessibleVoterGroupIds.add(vg.id));

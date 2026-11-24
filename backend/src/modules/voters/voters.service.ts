@@ -265,6 +265,36 @@ export class VotersService {
             });
             resolvedGeographicIds.push(...matchedBooths.map((b) => b.id));
           }
+        } else {
+          // Resolve PollingStation unit to booth IDs if unitId is a PollingStation
+          const ps = await prisma.pollingStation.findUnique({
+            where: { id: unitId },
+            include: { booths: { select: { id: true } } },
+          });
+          if (ps) {
+            let bIds = ps.booths.map((b) => b.id);
+            if (bIds.length === 0) {
+              const fallbackBooths = await prisma.booth.findMany({
+                where: {
+                  village: { mandalId: ps.mandalId },
+                  OR: [
+                    { pollingStation: { equals: ps.name, mode: 'insensitive' } },
+                    { name: { contains: ps.name, mode: 'insensitive' } },
+                    { village: { name: { equals: ps.name, mode: 'insensitive' } } },
+                  ],
+                },
+                select: { id: true },
+              });
+              bIds = fallbackBooths.map((b) => b.id);
+              if (bIds.length > 0) {
+                await prisma.booth.updateMany({
+                  where: { id: { in: bIds } },
+                  data: { pollingStationId: ps.id },
+                }).catch(() => {});
+              }
+            }
+            resolvedGeographicIds.push(...bIds);
+          }
         }
       } catch (e) {
         // Fallback safely to direct unit matching
