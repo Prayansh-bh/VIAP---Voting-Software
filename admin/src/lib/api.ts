@@ -11,11 +11,14 @@ export const getApiBase = () => {
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
     if (host !== 'localhost' && host !== '127.0.0.1') {
-      // Production VPS domains or direct IP addresses (reverse-proxied locally by Nginx at /api)
-      if (host.includes('livesurvey.tech') || /^\d+\.\d+\.\d+\.\d+$/.test(host)) {
-        return `${window.location.origin}/api`;
+      // Production VPS domains or direct IP addresses (Fastify API reverse-proxied at viap.livesurvey.tech/api)
+      if (host.includes('livesurvey.tech')) {
+        return 'https://viap.livesurvey.tech/api';
       }
-      return 'https://viap-backend.onrender.com/api';
+      if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+        return `${window.location.protocol}//${host}:4000/api`;
+      }
+      return 'https://viap.livesurvey.tech/api';
     }
   }
   return 'http://localhost:4000/api';
@@ -650,7 +653,7 @@ export async function uploadVoterCsvStream(
   onUploadProgress?: (percentage: number) => void
 ): Promise<any> {
   const token = getAdminToken();
-  const url = `${API_BASE}/applications/${appId}/data/import/upload`;
+  const url = `${getApiBase()}/applications/${appId}/data/import/upload`;
   const formData = new FormData();
   if (fields.targetConstituencyId) formData.append('targetConstituencyId', fields.targetConstituencyId);
   if (fields.importMode) formData.append('importMode', fields.importMode);
@@ -791,7 +794,7 @@ export async function provisionInchargesApi(
 
 export async function downloadInchargeRosterCsv(constituencyId: string): Promise<void> {
   const token = getAdminToken();
-  const url = `${API_BASE}/cadre/roster-export/${encodeURIComponent(constituencyId)}`;
+  const url = `${getApiBase()}/cadre/roster-export/${encodeURIComponent(constituencyId)}`;
   const resp = await fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });

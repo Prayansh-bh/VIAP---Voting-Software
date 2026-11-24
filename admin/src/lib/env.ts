@@ -32,11 +32,14 @@ export const getApiUrl = (): string => {
   }
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
-    if (host.includes('livesurvey.tech') || /^\d+\.\d+\.\d+\.\d+$/.test(host)) {
-      return `${window.location.origin}/api`;
+    if (host.includes('livesurvey.tech')) {
+      return 'https://viap.livesurvey.tech/api';
+    }
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+      return `${window.location.protocol}//${host}:4000/api`;
     }
     if (host !== 'localhost' && host !== '127.0.0.1') {
-      return 'https://admin.livesurvey.tech/api';
+      return 'https://viap.livesurvey.tech/api';
     }
   }
   return 'http://localhost:4000/api';
