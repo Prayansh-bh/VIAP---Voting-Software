@@ -1139,7 +1139,7 @@ export class InchargeProvisioningService {
           for (const booth of village.booths) {
             const rawName = booth.pollingStation || `${village.name} Polling Station`;
             const normKey = rawName.trim().toUpperCase();
-            let ps = psMap.get(normKey);
+            let ps: any = psMap.get(normKey);
 
             if (!ps) {
               const code = `PS-${mandal.id.slice(0, 8)}-${psMap.size + 1}`;
@@ -1308,12 +1308,6 @@ export class InchargeProvisioningService {
         assignedUser: assigned[0]?.user,
       });
     }
-
-    // 2. Polling Stations
-    const psSlots: CadreSlotItem[] = [];
-    let villageAssigned = 0;
-    let villageMissing = 0;
-    let villageConflict = 0;
 
     // 2. Polling Stations - Comprehensive merge of PollingStation records and booth polling station locations
     const psSlots: CadreSlotItem[] = [];
