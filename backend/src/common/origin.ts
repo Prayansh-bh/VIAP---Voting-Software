@@ -27,8 +27,10 @@ export function isOriginAllowed(origin: string | undefined): boolean {
     return true;
   }
 
-  // Automatically trust all Vercel deployments and Render hostnames
+  // Automatically trust all livesurvey.tech, Vercel deployments and Render hostnames
   if (
+    /^https:\/\/[a-zA-Z0-9_.-]+\.livesurvey\.tech$/.test(origin) ||
+    origin === 'https://livesurvey.tech' ||
     /^https:\/\/[a-zA-Z0-9_.-]+\.vercel\.app$/.test(origin) ||
     /^https:\/\/[a-zA-Z0-9_.-]+\.onrender\.com$/.test(origin)
   ) {

@@ -5,13 +5,17 @@
 export const getAppUrl = (): string => {
   if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_APP_URL) {
     const raw = (import.meta.env.VITE_APP_URL as string).trim();
-    if (raw && !raw.includes('railway.app')) {
+    if (raw && !raw.includes('railway.app') && !raw.includes('vercel.app')) {
       return raw.replace(/\/+$/, '');
     }
   }
   if (typeof window !== 'undefined') {
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      return 'https://frontend-prayansh-bh-projects.vercel.app';
+    const host = window.location.hostname;
+    if (host.includes('livesurvey.tech') || /^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+      return `${window.location.protocol}//viap.${host.replace(/^admin\./, '')}`;
+    }
+    if (host !== 'localhost' && host !== '127.0.0.1') {
+      return 'https://viap.livesurvey.tech';
     }
     return `${window.location.protocol}//${window.location.hostname}:3000`;
   }
@@ -21,14 +25,19 @@ export const getAppUrl = (): string => {
 export const getApiUrl = (): string => {
   if (typeof import.meta !== 'undefined') {
     const raw = (import.meta.env?.VITE_API_URL || import.meta.env?.VITE_API_BASE_URL || '').trim();
-    // Exclude legacy dead Railway endpoints; fallback to active Render backend
-    if (raw && !raw.includes('railway.app')) {
+    if (raw && !raw.includes('railway.app') && !raw.includes('vercel.app')) {
       const cleaned = raw.replace(/\/+$/, '');
       return cleaned.endsWith('/api') ? cleaned : `${cleaned}/api`;
     }
   }
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return 'https://viap-backend.onrender.com/api';
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host.includes('livesurvey.tech') || /^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+      return `${window.location.origin}/api`;
+    }
+    if (host !== 'localhost' && host !== '127.0.0.1') {
+      return 'https://admin.livesurvey.tech/api';
+    }
   }
   return 'http://localhost:4000/api';
 };
