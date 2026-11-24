@@ -16,13 +16,14 @@ export const getApiBase = (): string => {
   if (typeof import.meta !== 'undefined') {
     const envUrl = (import.meta.env?.VITE_API_BASE_URL || import.meta.env?.VITE_API_URL || '').trim();
     if (envUrl && !envUrl.includes('railway.app') && !envUrl.includes('ngrok')) {
-      return envUrl.replace(/\/+$/, '');
+      const cleaned = envUrl.replace(/\/+$/, '');
+      return cleaned.replace(/\/api\/?$/, '');
     }
   }
   // Mobile app (Capacitor) or Production Web (Vercel) -> Always use production Render backend
   if (typeof window !== 'undefined') {
     if (window.location.hostname.includes('livesurvey.tech') || /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname)) {
-      return `${window.location.origin}/api`;
+      return window.location.origin;
     }
     if (isMobileClient() || (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')) {
       return 'https://viap-backend.onrender.com';
@@ -36,9 +37,19 @@ export const getApiBase = (): string => {
 export async function apiFetch<T = any>(endpoint: string, init: RequestInit = {}): Promise<T> {
   const sanitizedEndpoint = endpoint.replace(/https?:\/\/[a-zA-Z0-9_.-]*railway\.app/g, 'https://viap-backend.onrender.com');
   const normalizedEndpoint = sanitizedEndpoint.startsWith('/') ? sanitizedEndpoint : `/${sanitizedEndpoint}`;
-  const apiBase = getApiBase();
-  const primaryUrl = sanitizedEndpoint.startsWith('http') ? sanitizedEndpoint : `${apiBase}${normalizedEndpoint}`;
-  const fallbackUrl = sanitizedEndpoint.startsWith('http') ? sanitizedEndpoint : normalizedEndpoint;
+
+  let primaryUrl: string;
+  let fallbackUrl: string;
+
+  if (sanitizedEndpoint.startsWith('http')) {
+    primaryUrl = sanitizedEndpoint;
+    fallbackUrl = sanitizedEndpoint;
+  } else {
+    const apiBase = getApiBase().replace(/\/api\/?$/, '');
+    const cleanPath = normalizedEndpoint.replace(/^\/?api\/?/, '/');
+    primaryUrl = apiBase ? `${apiBase}/api${cleanPath}` : `/api${cleanPath}`;
+    fallbackUrl = `/api${cleanPath}`;
+  }
 
   const headers = new Headers(init.headers);
   const token = getAuthToken();

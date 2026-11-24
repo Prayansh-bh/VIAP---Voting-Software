@@ -26,15 +26,16 @@ export const getApiUrl = (): string => {
   if (typeof import.meta !== 'undefined') {
     const raw = (import.meta.env?.VITE_API_BASE_URL || import.meta.env?.VITE_API_URL || '').trim();
     if (raw && !raw.includes('railway.app') && !raw.includes('vercel.app')) {
-      return raw.replace(/\/+$/, '');
+      const cleaned = raw.replace(/\/+$/, '');
+      return cleaned.replace(/\/api\/?$/, '');
     }
   }
   if (typeof window !== 'undefined') {
     if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
       if (window.location.hostname.includes('livesurvey.tech') || /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname)) {
-        return `${window.location.origin}/api`;
+        return window.location.origin;
       }
-      return 'https://viap.livesurvey.tech/api';
+      return 'https://viap.livesurvey.tech';
     }
     return '';
   }
