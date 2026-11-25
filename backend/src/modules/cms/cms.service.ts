@@ -1135,81 +1135,9 @@ export async function provisionApplication(
           : null;
 
         const primaryConstituency = createdConstituencies[0];
-        const cleanMandalName = `${primaryConstituency?.name || 'Constituency'} Central Mandal`;
-        let mandalCode = `MD-${org.code.slice(0, 4)}-01`;
-        const mCollision = await tx.mandal.findUnique({ where: { code: mandalCode } });
-        if (mCollision) mandalCode = `MD-${org.code.slice(0, 4)}-${Date.now().toString().slice(-4)}`;
-        const mandalRecord = await tx.mandal.create({
-          data: {
-            constituencyId: primaryConstituency.id,
-            name: cleanMandalName,
-            code: mandalCode,
-            totalVoters: 0,
-          },
-        });
-        const mandalUnitRecord = await tx.organizationUnit.upsert({
-          where: { code: mandalCode },
-          update: { name: cleanMandalName, level: OrgHierarchyLevel.MANDAL, parentId: constUnitRecord?.id },
-          create: { name: cleanMandalName, code: mandalCode, level: OrgHierarchyLevel.MANDAL, parentId: constUnitRecord?.id },
-        });
 
-        const cleanVillageName = `${cleanMandalName} Ward 1`;
-        let villageCode = `VL-${org.code.slice(0, 4)}-01`;
-        const vCollision = await tx.village.findUnique({ where: { code: villageCode } });
-        if (vCollision) villageCode = `VL-${org.code.slice(0, 4)}-${Date.now().toString().slice(-4)}`;
-        const villageRecord = await tx.village.create({
-          data: {
-            mandalId: mandalRecord.id,
-            name: cleanVillageName,
-            code: villageCode,
-            totalVoters: 0,
-          },
-        });
-        const villageUnitRecord = await tx.organizationUnit.upsert({
-          where: { code: villageCode },
-          update: { name: cleanVillageName, level: OrgHierarchyLevel.VILLAGE, parentId: mandalUnitRecord?.id },
-          create: { name: cleanVillageName, code: villageCode, level: OrgHierarchyLevel.VILLAGE, parentId: mandalUnitRecord?.id },
-        });
-
-        const cleanBoothName = `Polling Station 1`;
-        let boothCode = `BT-${org.code.slice(0, 4)}-01`;
-        const bCollision = await tx.booth.findUnique({ where: { code: boothCode } });
-        if (bCollision) boothCode = `BT-${org.code.slice(0, 4)}-${Date.now().toString().slice(-4)}`;
-        const boothRecord = await tx.booth.create({
-          data: {
-            villageId: villageRecord.id,
-            boothNumber: '1',
-            name: cleanBoothName,
-            code: boothCode,
-            totalVoters: 0,
-          },
-        });
-        const boothUnitRecord = await tx.organizationUnit.upsert({
-          where: { code: boothCode },
-          update: { name: cleanBoothName, level: OrgHierarchyLevel.BOOTH, parentId: villageUnitRecord?.id },
-          create: { name: cleanBoothName, code: boothCode, level: OrgHierarchyLevel.BOOTH, parentId: villageUnitRecord?.id },
-        });
-
-        const cleanVgName = `Cluster 1 (1-100)`;
-        let vgCode = `VG-${org.code.slice(0, 4)}-01`;
-        const vgCollision = await tx.voterGroup.findUnique({ where: { code: vgCode } });
-        if (vgCollision) vgCode = `VG-${org.code.slice(0, 4)}-${Date.now().toString().slice(-4)}`;
-        const vgRecord = await tx.voterGroup.create({
-          data: {
-            boothId: boothRecord.id,
-            name: cleanVgName,
-            code: vgCode,
-            rangeStart: 1,
-            rangeEnd: 100,
-            totalVoters: 100,
-          },
-        });
-        const vgUnitRecord = await tx.organizationUnit.upsert({
-          where: { code: vgCode },
-          update: { name: cleanVgName, level: OrgHierarchyLevel.VOTER_GROUP, parentId: boothUnitRecord?.id },
-          create: { name: cleanVgName, code: vgCode, level: OrgHierarchyLevel.VOTER_GROUP, parentId: boothUnitRecord?.id },
-        });
-
+        // Authoritative role & unit routing for provisioned leaders without creating fake micro-hierarchy entries:
+        // Micro-tiers (Mandal, Polling Station, Booth, 100-Voter Group) are created strictly from real electoral rolls.
         const tierDataMap: Record<string, { unit: any; role: RoleType; assignment: any }> = {
           PARTY_ADMIN: {
             unit: stateUnitRecord,
@@ -1242,24 +1170,24 @@ export async function provisionApplication(
             assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id },
           },
           MANDAL: {
-            unit: mandalUnitRecord,
+            unit: constUnitRecord,
             role: RoleType.MANDAL_INCHARGE,
-            assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id, mandalId: mandalRecord.id },
+            assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id },
           },
           VILLAGE: {
-            unit: villageUnitRecord,
+            unit: constUnitRecord,
             role: RoleType.VILLAGE_INCHARGE,
-            assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id, mandalId: mandalRecord.id, villageId: villageRecord.id },
+            assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id },
           },
           BOOTH: {
-            unit: boothUnitRecord,
+            unit: constUnitRecord,
             role: RoleType.BOOTH_PRESIDENT,
-            assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id, mandalId: mandalRecord.id, villageId: villageRecord.id, boothId: boothRecord.id },
+            assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id },
           },
           VOTER_GROUP: {
-            unit: vgUnitRecord,
+            unit: constUnitRecord,
             role: RoleType.VOTER_100_INCHARGE,
-            assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id, mandalId: mandalRecord.id, villageId: villageRecord.id, boothId: boothRecord.id, voterGroupId: vgRecord.id },
+            assignment: { stateId: state.id, zoneId: zone.id, parliamentId: parliament.id, constituencyId: primaryConstituency?.id },
           },
         };
 

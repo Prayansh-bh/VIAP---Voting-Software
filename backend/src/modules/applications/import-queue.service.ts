@@ -655,8 +655,34 @@ export class ImportQueueService {
       const resolvedZoneId = constituency.parliament?.zoneId || constituency.parliament?.zone?.id || null;
       const resolvedStateId = constituency.parliament?.zone?.stateId || constituency.parliament?.zone?.state?.id || null;
 
+      // Pre-import hygiene: purge any empty dummy seed booths/mandals from initial application creation
+      await prisma.$executeRaw`
+        DELETE FROM "Booth"
+        WHERE ("name" IN ('Polling Station 1', 'Booth 1') OR "name" LIKE '%Central Booth%')
+          AND "totalVoters" = 0
+          AND NOT EXISTS (SELECT 1 FROM "Voter" WHERE "boothId" = "Booth".id)
+          AND "villageId" IN (
+            SELECT v.id FROM "Village" v
+            JOIN "Mandal" m ON v."mandalId" = m.id
+            WHERE m."constituencyId" = ${constituency.id}::uuid
+          );
+      `.catch(() => {});
+
+      await prisma.$executeRaw`
+        DELETE FROM "Mandal"
+        WHERE "name" LIKE '%Central Mandal%'
+          AND "totalVoters" = 0
+          AND NOT EXISTS (SELECT 1 FROM "Voter" WHERE "mandalId" = "Mandal".id)
+          AND "constituencyId" = ${constituency.id}::uuid;
+      `.catch(() => {});
+
       // 4. Pre-load hierarchy caches scoped to target constituency
-      const existingMandals = await prisma.mandal.findMany({ where: { constituencyId: constituency.id } });
+      const existingMandals = await prisma.mandal.findMany({
+        where: {
+          constituencyId: constituency.id,
+          name: { not: { contains: 'Central Mandal' } },
+        },
+      });
       const mandalMap = new Map<string, string>(existingMandals.map((m) => [m.name.trim().toLowerCase(), m.id]));
 
       const existingVillages = await prisma.village.findMany({
@@ -877,12 +903,58 @@ export class ImportQueueService {
         WHERE vg.id = sub."voterGroupId"
       `.catch(() => {});
 
-      // Refresh 100-voter groups for all booths in background
+      // Post-import cleanup: purge any leftover dummy placeholder booths/mandals with 0 voters
+      await prisma.$executeRaw`
+        DELETE FROM "Booth"
+        WHERE ("name" IN ('Polling Station 1', 'Booth 1') OR "name" LIKE '%Central Booth%')
+          AND "totalVoters" = 0
+          AND NOT EXISTS (SELECT 1 FROM "Voter" WHERE "boothId" = "Booth".id)
+          AND "villageId" IN (
+            SELECT v.id FROM "Village" v
+            JOIN "Mandal" m ON v."mandalId" = m.id
+            WHERE m."constituencyId" = ${constituency.id}::uuid
+          );
+      `.catch(() => {});
+
+      await prisma.$executeRaw`
+        DELETE FROM "Mandal"
+        WHERE "name" LIKE '%Central Mandal%'
+          AND "totalVoters" = 0
+          AND NOT EXISTS (SELECT 1 FROM "Voter" WHERE "mandalId" = "Mandal".id)
+          AND "constituencyId" = ${constituency.id}::uuid;
+      `.catch(() => {});
+
+      // Auto-link all booths to their respective PollingStation entity
+      await prisma.$executeRaw`
+        UPDATE "Booth" b
+        SET "pollingStationId" = ps.id
+        FROM "PollingStation" ps
+        WHERE b."pollingStationId" IS NULL
+          AND ps."constituencyId" = ${constituency.id}::uuid
+          AND (
+            LOWER(TRIM(b.name)) = LOWER(TRIM(ps.name))
+            OR LOWER(REGEXP_REPLACE(b.name, '^Booth\\s*\\d+\\s*[-:]*\\s*', '', 'i')) = LOWER(TRIM(ps.name))
+          );
+      `.catch(() => {});
+
+      // Auto-link voters' pollingStationId from Booth
+      await prisma.$executeRaw`
+        UPDATE "Voter" v
+        SET "pollingStationId" = b."pollingStationId"
+        FROM "Booth" b
+        WHERE v."boothId" = b.id
+          AND v."pollingStationId" IS NULL
+          AND b."pollingStationId" IS NOT NULL
+          AND v."constituencyId" = ${constituency.id}::uuid;
+      `.catch(() => {});
+
+      // Synchronize all constituency polling stations and refresh 100-voter groups
       try {
         const { InchargeProvisioningService } = await import('../cadre/incharge-provisioning.service.js');
-        await InchargeProvisioningService.ensureConstituencyVoterGroups(constituency.id);
+        await InchargeProvisioningService.syncAllConstituencyPollingStations(constituency.id);
+        await InchargeProvisioningService.ensureConstituencyVoterGroups(constituency.id, true);
       } catch (err) {
-        console.warn('[ImportQueue] Voter groups sync note:', err);
+        console.warn('[ImportQueue] Hierarchy and voter groups sync note:', err);
       }
 
       // Record error entries in database if any
@@ -919,6 +991,13 @@ export class ImportQueueService {
           skippedRecords: totalSkipped,
           failedRecords: totalErrors,
           completedAt: new Date(),
+          metadata: {
+            ...meta,
+            uniqueElectors: totalImported,
+            revisionsUpdated: totalUpdated,
+            validationErrors: totalErrors,
+            totalRowsProcessed: totalRowsRead,
+          },
         },
       });
 

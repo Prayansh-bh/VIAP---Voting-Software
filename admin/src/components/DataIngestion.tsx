@@ -1014,18 +1014,18 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
           } else if (status === 'COMPLETED' || status === 'SUCCESS') {
             clearInterval(pollTimer);
             setUploadStatus('success');
-            const totalCommitted = imported + updated;
+            const totalRows = (imported + updated + failed);
             setStatusMessage(
-              `Import completed successfully: ${totalCommitted.toLocaleString('en-IN')} voter records committed into PostgreSQL database.`
+              `Electoral Roll Ingestion Completed: ${imported.toLocaleString('en-IN')} unique electors enrolled, ${updated > 0 ? `${updated.toLocaleString('en-IN')} roll revisions updated in-place, ` : ''}0 validation errors. Total processed rows: ${totalRows.toLocaleString('en-IN')}.`
             );
             setIsCommitting(false);
             await loadLiveData();
           } else if (status === 'PARTIAL_SUCCESS') {
             clearInterval(pollTimer);
             setUploadStatus('partial');
-            const totalCommitted = imported + updated;
+            const totalRows = (imported + updated + failed);
             setStatusMessage(
-              `Partial import completed: ${totalCommitted.toLocaleString('en-IN')} records committed successfully, ${failed.toLocaleString('en-IN')} record${failed === 1 ? '' : 's'} skipped (failed validation).`
+              `Electoral Roll Import Completed: ${imported.toLocaleString('en-IN')} unique electors enrolled, ${updated.toLocaleString('en-IN')} roll revisions updated in-place, ${failed.toLocaleString('en-IN')} record${failed === 1 ? '' : 's'} skipped (failed validation). Total processed rows: ${totalRows.toLocaleString('en-IN')}.`
             );
             if (Array.isArray(job.errors)) {
               setUploadErrors(job.errors);
@@ -1685,20 +1685,20 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
         <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800">
           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Mandals / Blocks</div>
           <div className="text-2xl font-black text-white mt-1">
-            {totalMandals} {totalMandals === 1 ? 'Mandal' : 'Mandals'}
+            {totalVoters > 0 ? totalMandals : 0} {(totalVoters > 0 ? totalMandals : 0) === 1 ? 'Mandal' : 'Mandals'}
           </div>
           <div className="text-[11px] text-slate-500">
-            {totalMandals > 0 ? 'Boundary Mapped in DB' : '0 Mandals in DB'}
+            {totalVoters > 0 && totalMandals > 0 ? 'Boundary Mapped in DB' : '0 Mandals in DB'}
           </div>
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800">
           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Polling Booths</div>
           <div className="text-2xl font-black text-white mt-1">
-            {totalBooths} {totalBooths === 1 ? 'Booth' : 'Booths'}
+            {totalVoters > 0 ? totalBooths : 0} {(totalVoters > 0 ? totalBooths : 0) === 1 ? 'Booth' : 'Booths'}
           </div>
           <div className="text-[11px] text-emerald-400 font-bold">
-            {totalBooths > 0 ? 'Geocoded & Synchronized' : '0 Booths in DB'}
+            {totalVoters > 0 && totalBooths > 0 ? 'Geocoded & Synchronized' : '0 Booths in DB'}
           </div>
         </div>
 
@@ -1708,8 +1708,13 @@ export default function DataIngestion({ currentApp, apps, onSelectApp }: DataIng
             {totalVoters.toLocaleString('en-IN')}
           </div>
           <div className="text-[11px] text-cyan-400 font-bold">
-            {totalVoters > 0 ? 'PostgreSQL Live Records' : '0 Enrolled Voters'}
+            {totalVoters > 0 ? 'PostgreSQL Live Electors' : '0 Enrolled Voters'}
           </div>
+          {summary?.importReconciliation?.revisionsUpdated ? (
+            <div className="text-[10px] text-slate-400 mt-1">
+              +{summary.importReconciliation.revisionsUpdated.toLocaleString('en-IN')} revisions applied ({summary.importReconciliation.totalRowsProcessed?.toLocaleString('en-IN')} rows)
+            </div>
+          ) : null}
         </div>
       </div>
 

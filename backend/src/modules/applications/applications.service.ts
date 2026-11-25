@@ -4670,19 +4670,33 @@ export class ApplicationsService {
       }
     }
 
+    // Clean filters to ignore dummy seed entities (e.g. 'Central Mandal', 'Polling Station 1' with 0 voters)
+    const cleanBoothFilter = {
+      ...(boothFilter || {}),
+      NOT: [
+        { name: { in: ['Polling Station 1', 'Booth 1', 'Central Booth'] }, totalVoters: 0 },
+      ],
+    };
+    const cleanMandalFilter = {
+      ...(mandalFilter || {}),
+      NOT: [
+        { name: { contains: 'Central Mandal' }, totalVoters: 0 },
+      ],
+    };
+
     // Consolidate voter counts into a single groupBy query to avoid double full-table scans
-    const [voterSurveyGroups, totalBooths, totalGroups, totalIncharges, totalTasks, totalMandals, totalConstituencies] =
+    const [voterSurveyGroups, totalBooths, totalGroups, totalIncharges, totalTasks, totalMandals, totalConstituencies, latestImport] =
       await Promise.all([
         prisma.voter.groupBy({
           by: ['surveyStatus'],
           where: scopeWhere,
           _count: { _all: true },
         }),
-        prisma.booth.count({ where: boothFilter }),
+        prisma.booth.count({ where: cleanBoothFilter }),
         prisma.voterGroup.count({ where: voterGroupFilter }),
         prisma.userHierarchyAssignment.count({ where: userFilter }),
         prisma.task.count({ where: taskFilter }),
-        prisma.mandal.count({ where: mandalFilter }),
+        prisma.mandal.count({ where: cleanMandalFilter }),
         tenantConstituencyIds.length > 0
           ? tenantConstituencyIds.length
           : effectiveScope === 'SINGLE_MLA'
@@ -4690,6 +4704,21 @@ export class ApplicationsService {
             : effectiveScope === 'PARLIAMENT_MP'
               ? 7
               : prisma.constituency.count({ where: constituencyFilter }),
+        prisma.dataImport.findFirst({
+          where: {
+            targetConstituencyId: activeCId || (tenantConstituencyIds.length > 0 ? { in: tenantConstituencyIds } : undefined),
+            status: { in: ['SUCCESS', 'PARTIAL_SUCCESS'] },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            totalRecords: true,
+            validRecords: true,
+            importedRecords: true,
+            updatedRecords: true,
+            skippedRecords: true,
+            failedRecords: true,
+          },
+        }),
       ]);
 
     let totalVoters = 0;
@@ -4702,6 +4731,11 @@ export class ApplicationsService {
       }
     }
 
+    // When 0 voters have been enrolled, ensure micro-hierarchy counts cleanly reflect 0 rather than any leftover placeholders
+    const effectiveBooths = totalVoters > 0 ? totalBooths : 0;
+    const effectiveMandals = totalVoters > 0 ? totalMandals : 0;
+    const effectiveGroups = totalVoters > 0 ? totalGroups : 0;
+
     return {
       applicationId: config.id,
       appName: config.organisationName,
@@ -4709,14 +4743,21 @@ export class ApplicationsService {
       totalVoters,
       verifiedCount: verifiedVoters,
       verificationRate: totalVoters > 0 ? Math.round((verifiedVoters / totalVoters) * 100) : 0,
-      totalBooths,
-      totalGroups,
+      totalBooths: effectiveBooths,
+      totalGroups: effectiveGroups,
       totalIncharges,
       totalTasks,
-      totalMandals,
+      totalMandals: effectiveMandals,
       totalConstituencies: allConstituencies.length > 0 ? allConstituencies.length : totalConstituencies,
       constituencyId: activeCId,
       constituencies: allConstituencies,
+      importReconciliation: latestImport ? {
+        totalRowsProcessed: latestImport.totalRecords,
+        uniqueElectorsEnrolled: latestImport.importedRecords,
+        revisionsUpdated: latestImport.updatedRecords,
+        validationErrors: latestImport.failedRecords,
+        validRecords: latestImport.validRecords,
+      } : null,
     };
   }
 

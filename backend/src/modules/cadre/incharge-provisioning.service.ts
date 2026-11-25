@@ -991,7 +991,7 @@ export class InchargeProvisioningService {
    * If a booth has voters but groups are missing, chunks them into 100-voter groups
    * (e.g. 173 voters -> Group 1 [1-100], Group 2 [101-173]).
    */
-  static async ensureConstituencyVoterGroups(constituencyId: string): Promise<void> {
+  static async ensureConstituencyVoterGroups(constituencyId: string, forceReindex = false): Promise<void> {
     const booths = await prisma.booth.findMany({
       where: {
         village: {
@@ -1000,6 +1000,9 @@ export class InchargeProvisioningService {
             name: { not: { contains: 'Central Mandal' } },
           },
         },
+        NOT: [
+          { name: { in: ['Polling Station 1', 'Booth 1', 'Central Booth'] }, totalVoters: 0 },
+        ],
       },
       include: {
         voterGroups: true,
@@ -1055,7 +1058,7 @@ export class InchargeProvisioningService {
 
       // Check if active canonical groups already match neededGroups
       const existingCanonical = booth.voterGroups.filter((g) => neededCodes.has(g.code));
-      if (existingCanonical.length === neededGroups) {
+      if (!forceReindex && existingCanonical.length === neededGroups) {
         // Already fully provisioned and synchronized
         continue;
       }
@@ -1119,12 +1122,20 @@ export class InchargeProvisioningService {
   static async syncAllConstituencyPollingStations(constituencyId: string): Promise<void> {
     try {
       const mandals = await prisma.mandal.findMany({
-        where: { constituencyId },
+        where: {
+          constituencyId,
+          name: { not: { contains: 'Central Mandal' } },
+        },
         include: {
           pollingStations: true,
           villages: {
             include: {
               booths: {
+                where: {
+                  NOT: [
+                    { name: { in: ['Polling Station 1', 'Booth 1', 'Central Booth'] }, totalVoters: 0 },
+                  ],
+                },
                 select: { id: true, name: true, pollingStation: true, totalVoters: true, pollingStationId: true },
               },
             },

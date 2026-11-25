@@ -121,4 +121,11 @@ export interface ApplicationSummary {
     code: string;
     constituencyNumber?: number | null;
   }>;
+  importReconciliation?: {
+    totalRowsProcessed: number;
+    uniqueElectorsEnrolled: number;
+    revisionsUpdated: number;
+    validationErrors: number;
+    validRecords: number;
+  } | null;
 }
